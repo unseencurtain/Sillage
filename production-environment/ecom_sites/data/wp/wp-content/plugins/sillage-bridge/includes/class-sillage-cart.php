@@ -1,10 +1,9 @@
 <?php
 /**
- * Single-vendor cart enforcement.
+ * Single-vendor cart + ship-to country restriction.
  *
- * BeautyFort and BTS cannot share a cart: each order is dispatched as one vendor shipment, and
- * mixed carts would either split awkwardly or block dispatch. We warn on add-to-cart and hard-block
- * checkout when more than one `_sillage_vendor` is present.
+ * BeautyFort and BTS cannot share a cart. Checkout only offers countries the cart's vendor
+ * can actually deliver to (from `_sillage_ship_countries` meta written by sillage-core).
  *
  * @package Sillage_Bridge
  */
@@ -22,6 +21,9 @@ final class Sillage_Cart {
 		add_action( 'woocommerce_check_cart_items', array( $this, 'validate_cart' ) );
 		add_action( 'woocommerce_checkout_process', array( $this, 'validate_cart' ) );
 		add_action( 'woocommerce_product_meta_end', array( $this, 'render_ean' ) );
+		add_filter( 'woocommerce_countries_allowed_countries', array( $this, 'filter_countries' ) );
+		add_filter( 'woocommerce_countries_shipping_countries', array( $this, 'filter_countries' ) );
+		add_filter( 'woocommerce_countries_selling_countries', array( $this, 'filter_countries' ) );
 	}
 
 	/**
@@ -42,6 +44,27 @@ final class Sillage_Cart {
 		echo '<span class="sku_wrapper sillage-ean-wrapper">'
 			. esc_html__( 'EAN:', 'sillage-bridge' )
 			. ' <span class="sillage-ean">' . esc_html( $ean ) . '</span></span>';
+	}
+
+	/**
+	 * When the cart has a vendor, shrink the country dropdowns to that vendor's list.
+	 *
+	 * @param array<string, string> $countries Country code => name.
+	 * @return array<string, string>
+	 */
+	public function filter_countries( array $countries ): array {
+		$allowed = $this->cart_ship_countries();
+		if ( empty( $allowed ) ) {
+			return $countries;
+		}
+		$filtered = array();
+		foreach ( $allowed as $code ) {
+			$code = strtoupper( $code );
+			if ( isset( $countries[ $code ] ) ) {
+				$filtered[ $code ] = $countries[ $code ];
+			}
+		}
+		return empty( $filtered ) ? $countries : $filtered;
 	}
 
 	/**
@@ -97,6 +120,32 @@ final class Sillage_Cart {
 				'error'
 			);
 		}
+	}
+
+	/** @return list<string> */
+	private function cart_ship_countries(): array {
+		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return array();
+		}
+		foreach ( WC()->cart->get_cart() as $item ) {
+			$pid = isset( $item['product_id'] ) ? (int) $item['product_id'] : 0;
+			$raw = get_post_meta( $pid, '_sillage_ship_countries', true );
+			if ( ! is_string( $raw ) || $raw === '' ) {
+				continue;
+			}
+			$decoded = json_decode( $raw, true );
+			if ( ! is_array( $decoded ) ) {
+				continue;
+			}
+			$out = array();
+			foreach ( $decoded as $code ) {
+				if ( is_string( $code ) && $code !== '' ) {
+					$out[] = strtoupper( $code );
+				}
+			}
+			return $out;
+		}
+		return array();
 	}
 
 	private function vendor_for_product( int $product_id ): string {

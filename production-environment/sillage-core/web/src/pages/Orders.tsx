@@ -69,12 +69,20 @@ export function Orders() {
       qc.invalidateQueries({ queryKey: ["order", id] });
       setConfirmLiveId(null);
       const label = live ? "Live dispatch" : "Dry-run dispatch";
-      if (res.status === "failed" || res.reason) toast(`${label}: ${res.reason ?? res.status}`, "error");
-      else toast(`${label} completed — ${res.status}`, "ok");
+      const vendorNo = res.vendorOrderNumber ? ` · vendor #${res.vendorOrderNumber}` : "";
+      if (res.status === "failed") {
+        toast(`${label} failed: ${res.reason ?? res.status}`, "error");
+        return;
+      }
+      if (res.reason && res.status !== "submitted" && res.status !== "confirmed") {
+        toast(`${label}: ${res.reason}${vendorNo}`, "error");
+        return;
+      }
+      // BeautyFort often lands in "Payment Hold" — still a real vendor order; pay in their portal.
+      toast(`${label} → ${res.status}${vendorNo}. Tracking appears here after the vendor ships.`, "ok");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
-
   const saveAddress = useMutation({
     mutationFn: () => api.updateOrderAddress(selected!, address),
     onSuccess: () => {

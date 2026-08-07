@@ -20,7 +20,12 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   { key: "full_sync_enabled", label: "Full sync enabled", hint: "Nightly full catalogue rebuild", type: "bool" },
   { key: "full_sync_hour", label: "Full sync hour (UTC)", type: "number" },
   { key: "sync_source", label: "Sync source", hint: "live | local", type: "text" },
-  { key: "global_price_multiplier", label: "Price multiplier", type: "number" },
+  {
+    key: "global_price_multiplier",
+    label: "Price multiplier",
+    hint: "Sell = cost × this. Example: 5 turns €1 cost into €5. Saving starts a sync to WooCommerce.",
+    type: "number",
+  },
   { key: "global_stock_threshold", label: "Stock threshold", type: "number" },
   { key: "orders_dry_run", label: "Orders dry-run", hint: "When on, never spend money", type: "bool" },
   { key: "orders_auto_dispatch", label: "Auto-dispatch", hint: "Off = human approval required", type: "bool" },
