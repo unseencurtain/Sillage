@@ -105,6 +105,16 @@ export function refreshVendorSecretsFromProcessEnv(): void {
   env.wholesalePerfumes.token = opt("WHOLESALE_PERFUMES_TOKEN");
 }
 
+/**
+ * Apply dashboard-editable public URLs into runtime `env`.
+ * Empty / whitespace values leave the current (env-bootstrap) value alone.
+ */
+export function applyRuntimeUrls(urls: { wpBaseUrl?: string; imageCdnBaseUrl?: string }): void {
+  const shop = (urls.wpBaseUrl ?? "").trim().replace(/\/$/, "");
+  if (shop) env.wordpress.baseUrl = shop;
+  // image CDN is consumed via loadSettings(); no process.env mutation required for sync.
+}
+
 /** Fully-qualified WordPress table name. Never rely on a pooled connection's default schema. */
 export function wp(table: string): string {
   return `\`${env.db.wordpress}\`.\`${env.db.wpPrefix}${table}\``;

@@ -95,10 +95,10 @@ Catalogue sync only — never places vendor orders. Order spend still requires O
 
 | Control | API | Effect |
 |---|---|---|
-| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary demo button; toast on start + finish; polls runs every 2s while active |
-| Run fast sync | same, `mode:"fast"` (all active retail vendors) | Clears abort; re-enables `sync_enabled` if off; price/stock-oriented sync |
-| Run full sync | same, `mode:"full"` | Full catalogue path (taxonomy, vanish, park WPF, etc.) |
-| Stop all sync | `POST /api/sync/stop` | Cooperative abort; **`sync_enabled=0`** until Sync enabled or Run |
+| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary CTA. While active shows spinner + **Syncing…** and disables other start buttons. Toast on start + finish; polls runs every 2s while active |
+| **Stop sync** | `POST /api/sync/stop` | **Enabled only while a run is active** (idle: grey + tooltip “No sync running”). Aborts between batches; sets **`sync_enabled=0`** until Sync enabled or Run |
+| Run fast sync (More sync modes) | same, `mode:"fast"` | Price/stock refresh for all active retail vendors. One-line help in UI |
+| Run full sync (More sync modes) | same, `mode:"full"` | Full catalogue path (taxonomy, vanish, park WPF, etc.). Heavier; usually overnight |
 | Live API cards (BF / BTS) | `GET /api/sync/live-status` | Read-only gate status for the two retail vendors |
 | Runs table + pagination | `GET /api/sync/runs` | History |
 
@@ -206,6 +206,17 @@ Save → `PUT /api/settings` (allow-listed keys only). Price/visibility keys mar
 start a **cache rewrite-only** sync; `description_mode` / `volume_filter_mode` mark products dirty
 and start a **full/cache** sync.
 
+UI sections (each control has one-line help): **Shop URLs** → **Pricing & catalogue** → **Cart
+minimum** → **Schedule** → **Order safety** → **Advanced** (live-feed gate, volume/description,
+company billing).
+
+### Shop URLs (post-login)
+
+| UI label | Key | Effect |
+|---|---|---|
+| Shop URL | `wp_base_url` | Public WooCommerce origin. Env `WP_BASE_URL` is bootstrap; Settings overrides runtime (admin links, tracking push). In-Docker finalize still uses `WORDPRESS_INTERNAL_URL` (`http://ecom`) |
+| Image CDN base URL | `image_cdn_base_url` | Public image origin for tooling / docs. Does **not** rewrite existing product URLs by itself |
+
 ### Schedule & sync source
 
 | UI label | Key | Effect |
@@ -215,7 +226,7 @@ and start a **full/cache** sync.
 | Full sync enabled | `full_sync_enabled` | Nightly full attempt |
 | Full sync hour (UTC) | `full_sync_hour` | Database hour (UTC on this stack) |
 | Sync source | `sync_source` | `live` \| `local` (fixtures) |
-| Min minutes between live downloads | `live_feed_min_minutes` | Hard gate for BF/BTS; cache until elapsed. Daily caps on Vendors |
+| Min minutes between live downloads | `live_feed_min_minutes` | Advanced: hard gate for BF/BTS; cache until elapsed. Daily caps on Vendors |
 
 ### Pricing & catalogue visibility
 
@@ -225,8 +236,8 @@ and start a **full/cache** sync.
 | Price tiers (section) | `price_tiers` JSON | Cost bands; last row unbounded (`maxCost: null`) |
 | Stock threshold | `global_stock_threshold` | Global floor when vendor min stock is null |
 | Hide products without image | `hide_products_without_image` | `exclude-from-catalog` when image missing/placeholder |
-| Volume filter | `volume_filter_mode` | `ranges` \| `exact` \| `off` |
-| Description mode | `description_mode` | `none` = title in `<p>`; `template` = brand/type/size blurb |
+| Volume filter | `volume_filter_mode` | Advanced: `ranges` \| `exact` \| `off` |
+| Description mode | `description_mode` | Advanced: `none` = title in `<p>`; `template` = brand/type/size blurb |
 
 ### Cart minimum (storefront fee)
 
@@ -273,7 +284,6 @@ Read by PHP bridge from `sil_settings` (fail-open). Independent of per-vendor MO
 
 | Key / control | Status |
 |---|---|
-| `image_cdn_base_url` | **Removed from UI.** Not read by sync; product URLs come from `image_overrides.json` / feeds. Tools use env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE`. DB key may still exist — harmless. |
 | `max_rrp_ratio` | **Unused** in pricing (`void` in `computePricing`). Not shown. |
 | WPF store-feed caps / live-status card | Parked with B2B — not on Sync or Settings |
 | `dedupe_by_ean`, `primary_offer_strategy`, `write_batch_size`, `max_statement_bytes` | Used in code; change via SQL if needed |
@@ -289,8 +299,9 @@ Read by PHP bridge from `sil_settings` (fail-open). Independent of per-vendor MO
 | `SILLAGE_SHARED_SECRET` | HMAC between Bun ↔ bridge |
 | `BEAUTYFORT_*` / `BTS_*` | Vendor API credentials — also editable via **Secrets** overlay |
 | `WHOLESALE_PERFUMES_*` | Parked B2B only — unused while WPF inactive |
-| `WP_BASE_URL` / `WORDPRESS_INTERNAL_URL` | Shop URLs |
-| `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` / `IMAGE_HOST_BASE_URL` | Image tooling defaults |
+| `WP_BASE_URL` | Bootstrap shop URL; Settings `wp_base_url` overrides at runtime |
+| `WORDPRESS_INTERNAL_URL` | In-Docker WordPress (`http://ecom`) for finalize — not public |
+| `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` / `IMAGE_HOST_BASE_URL` | Image tooling bootstrap; Settings Image CDN can document/override |
 | `DB_*` / `SILLAGE_DB_*` / `REDIS_URL` | Infrastructure |
 | `FIXTURES_DIR` | Local/fixture sync root |
 | `BEAUTYFORT_TEST_MODE` | BeautyFort SOAP test flag |
@@ -302,11 +313,12 @@ Internal runtime keys (not operator UI): `sync_abort`, `last_live_fetch_*`, `liv
 
 ## Quick operator recipes
 
-1. **Demo sync to a client** — Secrets → confirm BF/BTS show set → Sync → **Run sync now** → watch banner + runs table + success toast. Catalogue only; orders stay dry-run.
-2. **Set vendor API keys** — Secrets → paste → Set (hot-reload). Or put them in `~/sillage/.env` and recreate containers.
-3. **Pause catalogue sync** — Settings → Sync enabled off, or Sync → Stop all sync.
-4. **Resume** — Sync enabled on, or press Run sync now / Run fast/full (re-enables).
+1. **Demo sync to a client** — Secrets → confirm BF/BTS show set → Sync → **Run sync now** → watch **Syncing…** + runs table + success toast. Catalogue only; orders stay dry-run.
+2. **Set vendor API keys** — Secrets empty-state prompts on first login → paste → Set (hot-reload).
+3. **Pause catalogue sync** — Settings → Sync enabled off, or Sync → **Stop sync** (only while a run is active).
+4. **Resume** — Sync enabled on, or press Run sync now / fast/full (re-enables).
 5. **Change retail markup** — Settings tiers/multiplier and/or Vendors multiplier → wait for auto rewrite toast, or Sync → fast.
-6. **Safe order test** — keep dry-run on; Orders → Dry-run; inspect payload/events.
+6. **Safe order test** — keep dry-run on; Orders → Dry-run; inspect payload/events. Orders page shows a big warning if Settings dry-run is OFF.
 7. **First live order** — prefer auto **off**, then Live with confirm on one row. Never flip dry-run off while auto-dispatch is on unless you mean it.
-8. **CDN / image hostname** — set tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE`; regenerate `image_overrides.json`; sync `--rewrite-all`. There is no Settings CDN field.
+8. **Shop / CDN hosts** — Settings → Shop URL / Image CDN (env is bootstrap). Regenerating product image URLs still needs `image_overrides.json` + rewrite sync.
+9. **Fresh compose** — `cp .env.example .env`, `touch sillage-core/data/secrets.overlay.env`, create networks, `docker compose up -d`, then configure Secrets + Settings in the UI.

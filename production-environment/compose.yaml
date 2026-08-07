@@ -1,10 +1,13 @@
 # Single-project Sillage stack (ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron).
 # Local edge gateway is optional: COMPOSE_PROFILES=local
 #
-#   cp .env.example .env   # fill secrets
+# Fresh laptop / staging (minimal):
+#   cp .env.example .env          # change-me passwords; domains can stay localhost
+#   touch sillage-core/data/secrets.overlay.env
 #   docker network create ecom_network
 #   docker network create redis_network
 #   docker compose --env-file .env up -d
+#   # then open dashboard :4000 → Secrets → Settings URLs → Sync
 #   # local browser on :80:
 #   docker compose --env-file .env --profile local up -d
 #
@@ -27,9 +30,12 @@ x-sillage-common: &sillage-common
     DB_HOST: ecom-db
     DB_PORT: "3306"
     REDIS_URL: redis://valkey:6379
-    WP_BASE_URL: ${WP_BASE_URL:-http://ecom}
+    # Public shop URL (dashboard links); Settings → Shop URL can override at runtime.
+    WP_BASE_URL: ${WP_BASE_URL:-http://127.0.0.1:104}
+    # In-network WordPress for finalize / bridge REST (not the public hostname).
+    WORDPRESS_INTERNAL_URL: ${WORDPRESS_INTERNAL_URL:-http://ecom}
     FIXTURES_DIR: /app/.feedscratch
-    LPS_MEDIA_BASE_URL: ${LPS_MEDIA_BASE_URL:-}
+    LPS_MEDIA_BASE_URL: ${LPS_MEDIA_BASE_URL:-http://127.0.0.1:105}
     IMAGE_HOST_BASE_URL: ${IMAGE_HOST_BASE_URL:-}
     PUBLIC_URL_BASE: ${PUBLIC_URL_BASE:-}
     # Dashboard Secrets UI writes here; applied on boot + each sync (hot-reload).

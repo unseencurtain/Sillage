@@ -2,11 +2,12 @@
 # Deploy / update Sillage on a Ubuntu VPS from one compose + one .env.
 #
 # Usage (from repo root):
+#   ./production-environment/scripts/deploy-vps.sh --host ovhe
+#   # Domains optional — defaults from production-environment/.env, else staging:
+#   #   shop=cosmetic.slilverbelt.xyz dash=sillage.slilverbelt.xyz images=images.slilverbelt.xyz
 #   ./production-environment/scripts/deploy-vps.sh \
 #       --host ovhe \
-#       --shop cosmetic.slilverbelt.xyz \
-#       --dash sillage.slilverbelt.xyz \
-#       --images images.slilverbelt.xyz \
+#       [--shop …] [--dash …] [--images …] \
 #       [--dns] [--ip 139.99.61.71] \
 #       [--skip-build] [--fresh]
 #
@@ -57,8 +58,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 : "${HOST:?SSH host required}"
-: "${SHOP_DOMAIN:?shop domain required}"
-: "${DASH_DOMAIN:?dash domain required}"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PE="$ROOT/production-environment"
@@ -69,7 +68,7 @@ for f in "${LOCAL_ENV_CANDIDATES[@]}"; do
   if [[ -f "$f" ]]; then LOCAL_ENV="$f"; break; fi
 done
 if [[ -z "$LOCAL_ENV" ]]; then
-  echo "Missing $PE/.env (or sillage-core/.env) — copy .env.example and fill vendor credentials." >&2
+  echo "Missing $PE/.env (or sillage-core/.env) — copy .env.example and fill passwords." >&2
   exit 1
 fi
 
@@ -82,6 +81,11 @@ mkdir -p "$ROOT/.deploy"
 CREDS="$ROOT/.deploy/vps-dashboard-${HOST}.txt"
 START_EPOCH=$(date +%s)
 
+# Staging defaults when CLI + local .env omit domains (ovhe).
+DEFAULT_SHOP_DOMAIN=cosmetic.slilverbelt.xyz
+DEFAULT_DASH_DOMAIN=sillage.slilverbelt.xyz
+DEFAULT_IMAGES_DOMAIN=images.slilverbelt.xyz
+
 log_step() {
   local msg="$1" now elapsed
   now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -91,6 +95,44 @@ log_step() {
   fi
   printf '| %s | %dm%02ds | %s |\n' "$now" $((elapsed/60)) $((elapsed%60)) "$msg" | tee -a "$CHRONO"
 }
+
+# Domain precedence: CLI flags > remote ~/sillage/.env > local .env (non-localhost) > staging defaults.
+CLI_SHOP="$SHOP_DOMAIN"
+CLI_DASH="$DASH_DOMAIN"
+CLI_IMAGES="$IMAGES_DOMAIN"
+CLI_IP="$IP"
+
+# shellcheck disable=SC1090
+set -a; source "$LOCAL_ENV"; set +a
+LOCAL_SHOP="${SHOP_DOMAIN:-}"
+LOCAL_DASH="${DASH_DOMAIN:-}"
+LOCAL_IMAGES="${IMAGES_DOMAIN:-}"
+[[ -n "$CLI_IP" ]] && IP="$CLI_IP"
+
+is_placeholder_domain() {
+  case "${1:-}" in
+    ""|localhost|*.localhost|shop.example.com|ops.example.com|images.example.com) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+REMOTE_DOMAINS=$("${SSH[@]}" "$HOST" 'test -f ~/sillage/.env && set -a && source ~/sillage/.env && set +a && printf "%s\t%s\t%s" "${SHOP_DOMAIN:-}" "${DASH_DOMAIN:-}" "${IMAGES_DOMAIN:-}"' 2>/dev/null || true)
+_R_SHOP=""; _R_DASH=""; _R_IMAGES=""
+if [[ -n "$REMOTE_DOMAINS" ]]; then
+  IFS=$'\t' read -r _R_SHOP _R_DASH _R_IMAGES <<<"$REMOTE_DOMAINS"
+fi
+
+pick_domain() {
+  local cli="$1" remote="$2" localv="$3" fallback="$4"
+  if [[ -n "$cli" ]]; then echo "$cli"; return; fi
+  if [[ "$FRESH" -eq 0 ]] && ! is_placeholder_domain "$remote"; then echo "$remote"; return; fi
+  if ! is_placeholder_domain "$localv"; then echo "$localv"; return; fi
+  echo "$fallback"
+}
+
+SHOP_DOMAIN="$(pick_domain "$CLI_SHOP" "$_R_SHOP" "$LOCAL_SHOP" "$DEFAULT_SHOP_DOMAIN")"
+DASH_DOMAIN="$(pick_domain "$CLI_DASH" "$_R_DASH" "$LOCAL_DASH" "$DEFAULT_DASH_DOMAIN")"
+IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
 
 log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD}"
 
@@ -108,19 +150,6 @@ if [[ "$DO_DNS" -eq 1 ]]; then
   fi
   log_step "DNS A records updated"
 fi
-
-# Load vendor/dashboard keys from local env without clobbering CLI domains / flags.
-# shellcheck disable=SC1090
-__SHOP_DOMAIN="$SHOP_DOMAIN"
-__DASH_DOMAIN="$DASH_DOMAIN"
-__IMAGES_DOMAIN="$IMAGES_DOMAIN"
-__IP="$IP"
-set -a; source "$LOCAL_ENV"; set +a
-SHOP_DOMAIN="$__SHOP_DOMAIN"
-DASH_DOMAIN="$__DASH_DOMAIN"
-IMAGES_DOMAIN="$__IMAGES_DOMAIN"
-IP="$__IP"
-unset __SHOP_DOMAIN __DASH_DOMAIN __IMAGES_DOMAIN __IP
 
 TAG="$(git -C "$ROOT" rev-parse --short HEAD)"
 NAMESPACE="${DOCKERHUB_NAMESPACE:-}"

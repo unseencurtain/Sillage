@@ -1,4 +1,4 @@
-import { env, sil } from "../config/env.ts";
+import { applyRuntimeUrls, env, sil } from "../config/env.ts";
 import { loadSecretsOverlay } from "../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
@@ -182,6 +182,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   await clearSyncAbort();
 
   const settings = await loadSettings();
+  applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
   const allVendors = await loadVendors();
   // Empty vendors = --vendor=all → retail only (parked B2B excluded). Explicit slug list
   // may still name wholesale-perfumes for offline tests / a future B2B site.
