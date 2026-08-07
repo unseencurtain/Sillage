@@ -410,12 +410,12 @@ async function fastSyncVendor(
   summary: SyncSummary,
 ): Promise<number> {
   if (connector.fetchPriceStock && options.source === "live") {
-    // Ocean's store feed has its own hourly gate inside fetchPriceStock — do not apply the
+    // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock — do not apply the
     // catalog once-per-day gate here or fast syncs would stall after the first catalog pull.
-    const sharedGate = vendor.slug !== "ocean";
+    const sharedGate = vendor.slug !== "wholesale-perfumes";
     const gate = sharedGate
       ? await checkLiveGate(vendor.slug as CacheVendor)
-      : { allow: true, reason: "ocean store self-gated", retryInMinutes: 0 };
+      : { allow: true, reason: "wholesale-perfumes store self-gated", retryInMinutes: 0 };
     if (!gate.allow) {
       log.warn(`${vendor.slug}: skipping live delta — ${gate.reason}`);
     } else {

@@ -2,21 +2,21 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  composeOceanName,
-  formatOceanVolume,
+  composeWholesalePerfumesName,
+  formatWholesalePerfumesVolume,
   joinCatalogAndStore,
-  mapOceanGender,
-  OceanConnector,
-} from "../src/vendors/ocean/connector.ts";
-import { parseCatalogXml, parseStoreXml } from "../src/vendors/ocean/OceanClient.ts";
+  mapWholesalePerfumesGender,
+  WholesalePerfumesConnector,
+} from "../src/vendors/wholesale-perfumes/connector.ts";
+import { parseCatalogXml, parseStoreXml } from "../src/vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
 
 const fixtures = join(import.meta.dir, "fixtures");
 
-describe("Ocean XML parse + normalize", () => {
+describe("wholesale-perfumes XML parse + normalize", () => {
   test("multi-EAN fan-out preserves leading-zero EANs as strings", async () => {
-    const catalog = parseCatalogXml(await readFile(join(fixtures, "ocean_catalog.xml"), "utf8"));
-    const store = parseStoreXml(await readFile(join(fixtures, "ocean_store.xml"), "utf8"));
-    const connector = new OceanConnector();
+    const catalog = parseCatalogXml(await readFile(join(fixtures, "wholesale_perfumes_catalog.xml"), "utf8"));
+    const store = parseStoreXml(await readFile(join(fixtures, "wholesale_perfumes_store.xml"), "utf8"));
+    const connector = new WholesalePerfumesConnector();
     await connector.prepare("local");
 
     const joined = joinCatalogAndStore(catalog, store);
@@ -33,7 +33,7 @@ describe("Ocean XML parse + normalize", () => {
 
   test("composes name from brand, series, model and name_addon", () => {
     expect(
-      composeOceanName({
+      composeWholesalePerfumesName({
         brand: "Giorgio Armani",
         series: "Emporio RED White",
         model: "Intense",
@@ -41,35 +41,35 @@ describe("Ocean XML parse + normalize", () => {
       }),
     ).toBe("Giorgio Armani Emporio RED White Intense For Men");
     expect(
-      composeOceanName({ brand: "Dior", series: "Sauvage", model: null, nameAddon: null }),
+      composeWholesalePerfumesName({ brand: "Dior", series: "Sauvage", model: null, nameAddon: null }),
     ).toBe("Dior Sauvage");
   });
 
   test("parses volume with unit and maps gender / type attributes", async () => {
-    expect(formatOceanVolume("100", "ml")).toBe("100 ml");
-    expect(mapOceanGender("M")).toBe("Men");
-    expect(mapOceanGender("F")).toBe("Women");
-    expect(mapOceanGender("U")).toBe("Unisex");
-    expect(mapOceanGender("W")).toBe("Women");
+    expect(formatWholesalePerfumesVolume("100", "ml")).toBe("100 ml");
+    expect(mapWholesalePerfumesGender("M")).toBe("Men");
+    expect(mapWholesalePerfumesGender("F")).toBe("Women");
+    expect(mapWholesalePerfumesGender("U")).toBe("Unisex");
+    expect(mapWholesalePerfumesGender("W")).toBe("Women");
 
-    const catalog = parseCatalogXml(await readFile(join(fixtures, "ocean_catalog.xml"), "utf8"));
-    const store = parseStoreXml(await readFile(join(fixtures, "ocean_store.xml"), "utf8"));
-    const connector = new OceanConnector();
+    const catalog = parseCatalogXml(await readFile(join(fixtures, "wholesale_perfumes_catalog.xml"), "utf8"));
+    const store = parseStoreXml(await readFile(join(fixtures, "wholesale_perfumes_store.xml"), "utf8"));
+    const connector = new WholesalePerfumesConnector();
     await connector.prepare("local");
     const p = connector.normalize(joinCatalogAndStore(catalog, store)[0]!);
     expect(p!.attributes["volume"]).toBe("100 ml");
     expect(p!.attributes["gender"]).toBe("Men");
     expect(p!.attributes["type"]).toBe("Eau de Toilette");
-    expect(p!.sku).toBe("OC-1");
+    expect(p!.sku).toBe("WPF-1");
     expect(p!.vendorPrice).toBe(125.64);
     expect(p!.stock).toBe(10);
     expect(p!.imageUrl).toContain("HQlgckCAqXUZdlXzHgtlzQ");
   });
 
   test("product missing flask_front has null imageUrl", async () => {
-    const catalog = parseCatalogXml(await readFile(join(fixtures, "ocean_catalog.xml"), "utf8"));
-    const store = parseStoreXml(await readFile(join(fixtures, "ocean_store.xml"), "utf8"));
-    const connector = new OceanConnector();
+    const catalog = parseCatalogXml(await readFile(join(fixtures, "wholesale_perfumes_catalog.xml"), "utf8"));
+    const store = parseStoreXml(await readFile(join(fixtures, "wholesale_perfumes_store.xml"), "utf8"));
+    const connector = new WholesalePerfumesConnector();
     await connector.prepare("local");
     const joined = joinCatalogAndStore(catalog, store);
 
@@ -83,14 +83,14 @@ describe("Ocean XML parse + normalize", () => {
   });
 
   test("joins catalog to store on id and drops rows without a positive price", async () => {
-    const catalog = parseCatalogXml(await readFile(join(fixtures, "ocean_catalog.xml"), "utf8"));
-    const store = parseStoreXml(await readFile(join(fixtures, "ocean_store.xml"), "utf8"));
-    const connector = new OceanConnector();
+    const catalog = parseCatalogXml(await readFile(join(fixtures, "wholesale_perfumes_catalog.xml"), "utf8"));
+    const store = parseStoreXml(await readFile(join(fixtures, "wholesale_perfumes_store.xml"), "utf8"));
+    const connector = new WholesalePerfumesConnector();
     await connector.prepare("local");
     const normalized = joinCatalogAndStore(catalog, store)
       .map((r) => connector.normalize(r))
       .filter((p) => p !== null);
     expect(normalized.length).toBe(4);
-    expect(normalized.every((p) => p.sku.startsWith("OC-"))).toBe(true);
+    expect(normalized.every((p) => p.sku.startsWith("WPF-"))).toBe(true);
   });
 });

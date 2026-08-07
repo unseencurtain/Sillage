@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Download and parse wholesale-perfumes.eu (Ocean / SoleLuna) catalog XML.
+Download and parse wholesale-perfumes.eu (SoleLuna) catalog XML.
 
 Catalog is large and updates daily ~05:00 — download at most once per day.
 Stock/price feed is separate and not needed for image enrichment.
 
 Usage:
-  python3 fetch_ocean.py              # download + parse, print stats
-  python3 fetch_ocean.py --parse-only # use cached products/ocean_catalog.xml
+  python3 fetch_wholesale_perfumes.py              # download + parse, print stats
+  python3 fetch_wholesale_perfumes.py --parse-only # use cached products/wholesale_perfumes_catalog.xml
 
 Env (python-analysis/.env or process env):
-  OCEAN_USER, OCEAN_TOKEN
-  OCEAN_CATALOG_URL (default LovelyXml/en catalog)
+  WHOLESALE_PERFUMES_USER, WHOLESALE_PERFUMES_TOKEN
+  WHOLESALE_PERFUMES_CATALOG_URL (default LovelyXml/en catalog)
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PRODUCTS = ROOT / "products"
-CACHE_XML = PRODUCTS / "ocean_catalog.xml"
+CACHE_XML = PRODUCTS / "wholesale_perfumes_catalog.xml"
 DEFAULT_URL = "https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en"
 
 # Reuse enrich helpers when available
@@ -122,9 +122,9 @@ def collect_eans(product: ET.Element) -> list[str]:
     return eans
 
 
-def parse_ocean_catalog(xml_path: Path | str | os.PathLike) -> dict[str, str]:
+def parse_wholesale_perfumes_catalog(xml_path: Path | str | os.PathLike) -> dict[str, str]:
     """
-    Build EAN → image URL from Ocean catalog XML.
+    Build EAN → image URL from wholesale-perfumes catalog XML.
     Every EAN on a product (primary + all_eans) maps to the same picture URL.
     """
     path = Path(xml_path)
@@ -147,7 +147,7 @@ def parse_ocean_catalog(xml_path: Path | str | os.PathLike) -> dict[str, str]:
 def download_catalog(url: str, dest: Path, user: str, token: str) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, method="GET")
-    req.add_header("User-Agent", "SillageOceanFetch/1.0")
+    req.add_header("User-Agent", "SillageWholesalePerfumesFetch/1.0")
     if user and token:
         cred = b64encode(f"{user}:{token}".encode()).decode()
         req.add_header("Authorization", f"Basic {cred}")
@@ -158,9 +158,9 @@ def download_catalog(url: str, dest: Path, user: str, token: str) -> None:
             ctype = (resp.headers.get("Content-Type") or "").lower()
     except urllib.error.HTTPError as err:
         body = err.read()[:500].decode("utf-8", errors="replace")
-        raise SystemExit(f"Ocean catalog download failed HTTP {err.code}: {body}") from err
+        raise SystemExit(f"wholesale-perfumes catalog download failed HTTP {err.code}: {body}") from err
     except urllib.error.URLError as err:
-        raise SystemExit(f"Ocean catalog download failed: {err}") from err
+        raise SystemExit(f"wholesale-perfumes catalog download failed: {err}") from err
 
     if b"<product" not in data[:200_000] and "xml" not in ctype:
         preview = data[:300].decode("utf-8", errors="replace")
@@ -188,22 +188,25 @@ def fetch_and_index(
     load_dotenv(ROOT.parent / ".env")
     load_dotenv(ROOT / ".env")
 
-    catalog_url = url or os.environ.get("OCEAN_CATALOG_URL") or DEFAULT_URL
-    user = os.environ.get("OCEAN_USER", "").strip()
-    token = os.environ.get("OCEAN_TOKEN", "").strip()
+    catalog_url = url or os.environ.get("WHOLESALE_PERFUMES_CATALOG_URL") or DEFAULT_URL
+    user = os.environ.get("WHOLESALE_PERFUMES_USER", "").strip()
+    token = os.environ.get("WHOLESALE_PERFUMES_TOKEN", "").strip()
 
     if not parse_only:
         if force or not cache_is_fresh(CACHE_XML):
             if not user or not token:
                 if CACHE_XML.is_file():
-                    print("OCEAN_USER/OCEAN_TOKEN unset — using cached XML", file=sys.stderr)
+                    print(
+                        "WHOLESALE_PERFUMES_USER/WHOLESALE_PERFUMES_TOKEN unset — using cached XML",
+                        file=sys.stderr,
+                    )
                 else:
                     raise SystemExit(
-                        "Set OCEAN_USER and OCEAN_TOKEN in python-analysis/.env "
-                        "(API token from wholesale-perfumes user settings)."
+                        "Set WHOLESALE_PERFUMES_USER and WHOLESALE_PERFUMES_TOKEN in "
+                        "python-analysis/.env (API token from wholesale-perfumes user settings)."
                     )
             else:
-                print(f"Downloading Ocean catalog → {CACHE_XML}")
+                print(f"Downloading wholesale-perfumes catalog → {CACHE_XML}")
                 print(f"  url={catalog_url}")
                 download_catalog(catalog_url, CACHE_XML, user, token)
         else:
@@ -212,16 +215,18 @@ def fetch_and_index(
     if not CACHE_XML.is_file():
         raise SystemExit(f"Missing catalog XML: {CACHE_XML}")
 
-    index = parse_ocean_catalog(CACHE_XML)
-    print(f"Ocean catalog: {len(index)} EAN → image mappings")
+    index = parse_wholesale_perfumes_catalog(CACHE_XML)
+    print(f"wholesale-perfumes catalog: {len(index)} EAN → image mappings")
     return index
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Fetch/parse Ocean (wholesale-perfumes.eu) catalog")
+    parser = argparse.ArgumentParser(
+        description="Fetch/parse wholesale-perfumes.eu catalog",
+    )
     parser.add_argument("--parse-only", action="store_true", help="Do not download; parse cache only")
     parser.add_argument("--force", action="store_true", help="Download even if cache is fresh")
-    parser.add_argument("--url", default=None, help="Override OCEAN_CATALOG_URL")
+    parser.add_argument("--url", default=None, help="Override WHOLESALE_PERFUMES_CATALOG_URL")
     args = parser.parse_args(argv)
     fetch_and_index(parse_only=args.parse_only, force=args.force, url=args.url)
 

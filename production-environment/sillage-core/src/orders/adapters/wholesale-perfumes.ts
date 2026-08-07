@@ -1,5 +1,5 @@
 /**
- * Ocean (wholesale-perfumes.eu) order adapter — cart-based submit.
+ * wholesale-perfumes.eu order adapter — cart-based submit.
  *
  * Two hazards, both handled explicitly:
  * 1. The cart is account-global mutable state. Concurrent dispatches would merge into one wrong
@@ -12,7 +12,7 @@
 import { env } from "../../config/env.ts";
 import { query, type RowDataPacket } from "../../db/pool.ts";
 import { loadVendor } from "../../db/settings.ts";
-import { OceanClient } from "../../vendors/ocean/OceanClient.ts";
+import { WholesalePerfumesClient } from "../../vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
 import type {
   CancelResult,
   Destination,
@@ -25,26 +25,26 @@ import type {
   VendorOrderStatus,
 } from "../adapter.ts";
 
-const CART_LOCK = "sillage:ocean-cart";
+const CART_LOCK = "sillage:wholesale-perfumes-cart";
 const CART_LOCK_TIMEOUT_SEC = 120;
 
 /**
  * ASSUMPTION (unconfirmed — verify with a real dry-run against the portal before going live):
- * Ocean cart line `code` is the catalog product `id`, not the EAN. The PHP sample in the vendor
+ * wholesale-perfumes cart line `code` is the catalog product `id`, not the EAN. The PHP sample in the vendor
  * docs posts `{ code: 3, quantity: 4 }` and catalog records key on `<id>`. If the live API
  * actually wants EAN or another SKU, change only this function.
  */
-function oceanCartCode(item: OrderItem): string {
+function wholesalePerfumesCartCode(item: OrderItem): string {
   return item.vendorProductId;
 }
 
-function client(): OceanClient {
-  return new OceanClient({
-    user: env.ocean.user,
-    token: env.ocean.token,
-    catalogUrl: env.ocean.catalogUrl,
-    storeUrl: env.ocean.storeUrl,
-    apiBaseUrl: env.ocean.apiBaseUrl,
+function client(): WholesalePerfumesClient {
+  return new WholesalePerfumesClient({
+    user: env.wholesalePerfumes.user,
+    token: env.wholesalePerfumes.token,
+    catalogUrl: env.wholesalePerfumes.catalogUrl,
+    storeUrl: env.wholesalePerfumes.storeUrl,
+    apiBaseUrl: env.wholesalePerfumes.apiBaseUrl,
   });
 }
 
@@ -76,16 +76,16 @@ function extractOrderNumber(response: unknown): string | null {
   return null;
 }
 
-export class OceanOrderAdapter implements VendorOrderAdapter {
-  readonly slug = "ocean";
+export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
+  readonly slug = "wholesale-perfumes";
 
   async serviceableCountries(): Promise<string[]> {
-    const vendor = await loadVendor("ocean");
+    const vendor = await loadVendor("wholesale-perfumes");
     return vendor.serviceableCountries;
   }
 
   /**
-   * Ocean has no dedicated stock-check endpoint. Trust sil_offers quantities carried on the
+   * wholesale-perfumes has no dedicated stock-check endpoint. Trust sil_offers quantities carried on the
    * draft (kept fresh by the hourly store sync). Still enforce positive qty here.
    */
   async verifyStock(items: OrderItem[]): Promise<StockVerification> {
@@ -104,14 +104,14 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
   }
 
   /**
-   * Ocean does not expose a per-cart shipping quote in the documented cart API. Return a single
+   * wholesale-perfumes does not expose a per-cart shipping quote in the documented cart API. Return a single
    * placeholder so the dispatcher rails can still project a total; operator confirms rates later.
    */
   async quoteShipping(_dest: Destination, _items: OrderItem[]): Promise<ShippingQuote[]> {
     return [
       {
-        id: "ocean-default",
-        company: "Ocean (rate TBC)",
+        id: "wholesale-perfumes-default",
+        company: "wholesale-perfumes.eu (rate TBC)",
         cost: 0,
         deliveryDays: undefined,
       },
@@ -119,7 +119,7 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
   }
 
   async submit(order: VendorOrderDraft, dryRun: boolean): Promise<VendorOrderResult> {
-    const vendor = await loadVendor("ocean");
+    const vendor = await loadVendor("wholesale-perfumes");
     const minOrder = Number(vendor.orderConfig.min_order_value_eur ?? 0);
 
     const stock = await this.verifyStock(order.items);
@@ -151,12 +151,12 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
         totalCost: null,
         requestPayload: { itemsCost, minOrder },
         responsePayload: { error: "below_min_order_value" },
-        error: `Ocean min order value €${minOrder} not met (items €${itemsCost.toFixed(2)})`,
+        error: `wholesale-perfumes min order value €${minOrder} not met (items €${itemsCost.toFixed(2)})`,
       };
     }
 
     const cartLines = order.items.map((i) => ({
-      code: oceanCartCode(i),
+      code: wholesalePerfumesCartCode(i),
       quantity: i.quantity,
     }));
 
@@ -164,7 +164,7 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
     const requestPayload = {
       ourReference: order.ourReference,
       cartLines,
-      // Isolated assumption — see oceanCartCode().
+      // Isolated assumption — see wholesalePerfumesCartCode().
       codeFieldAssumption: "catalog id (vendorProductId)",
       delivery: {
         name: `${addr.firstName} ${addr.lastName}`.trim(),
@@ -214,8 +214,8 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
         shippingCompany: chosen.company,
         totalCost: null,
         requestPayload,
-        responsePayload: { error: "ocean_cart_lock_busy" },
-        error: "could not acquire Ocean cart advisory lock — another dispatch holds it",
+        responsePayload: { error: "wholesale_perfumes_cart_lock_busy" },
+        error: "could not acquire wholesale-perfumes cart advisory lock — another dispatch holds it",
       };
     }
 
@@ -239,7 +239,7 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
           requestPayload,
           responsePayload: { cart, submitResponse },
           ambiguous: true,
-          error: "Ocean submit returned no order_number",
+          error: "wholesale-perfumes submit returned no order_number",
         };
       }
 
@@ -306,7 +306,7 @@ export class OceanOrderAdapter implements VendorOrderAdapter {
     return {
       ok: false,
       fee: null,
-      message: "Ocean has no documented cancel API; cancel via the wholesale-perfumes.eu portal",
+      message: "wholesale-perfumes has no documented cancel API; cancel via the wholesale-perfumes.eu portal",
     };
   }
 }

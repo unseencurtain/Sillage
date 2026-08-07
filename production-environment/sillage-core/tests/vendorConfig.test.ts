@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_LIVE_MAX_PER_DAY,
   resolveLiveMaxPerDay,
-  resolveOceanStoreLimits,
+  resolveWholesalePerfumesStoreLimits,
 } from "../src/vendors/liveLimits.ts";
 import { parseVendorPatch } from "../src/vendors/validateVendorPatch.ts";
 
@@ -83,7 +83,7 @@ describe("parseVendorPatch", () => {
 describe("resolveLiveMaxPerDay", () => {
   test("prefers the vendor row over legacy settings", () => {
     expect(resolveLiveMaxPerDay("beautyfort", { liveMaxPerDay: 7 }, 20)).toBe(7);
-    expect(resolveLiveMaxPerDay("ocean", { liveMaxPerDay: 1 }, 99)).toBe(1);
+    expect(resolveLiveMaxPerDay("wholesale-perfumes", { liveMaxPerDay: 1 }, 99)).toBe(1);
   });
 
   test("falls back to legacy setting when row is null / unset", () => {
@@ -94,24 +94,24 @@ describe("resolveLiveMaxPerDay", () => {
   test("falls back to built-in defaults when both are missing", () => {
     expect(resolveLiveMaxPerDay("beautyfort", null, null)).toBe(20);
     expect(resolveLiveMaxPerDay("bts", { liveMaxPerDay: null }, null)).toBe(48);
-    expect(resolveLiveMaxPerDay("ocean", null, undefined)).toBe(1);
+    expect(resolveLiveMaxPerDay("wholesale-perfumes", null, undefined)).toBe(1);
     expect(DEFAULT_LIVE_MAX_PER_DAY.beautyfort).toBe(20);
   });
 });
 
-describe("resolveOceanStoreLimits", () => {
+describe("resolveWholesalePerfumesStoreLimits", () => {
   test("keeps catalog/store separation defaults (24/day, 60 min)", () => {
-    const r = resolveOceanStoreLimits(null, null, null);
+    const r = resolveWholesalePerfumesStoreLimits(null);
     expect(r.maxPerDay).toBe(24);
     expect(r.minMinutes).toBe(60);
   });
 
-  test("prefers vendor row, then legacy keys", () => {
+  test("prefers vendor row over defaults", () => {
     expect(
-      resolveOceanStoreLimits({ storeLiveMaxPerDay: 10, storeLiveMinMinutes: 30 }, 24, 60),
+      resolveWholesalePerfumesStoreLimits({ storeLiveMaxPerDay: 10, storeLiveMinMinutes: 30 }),
     ).toEqual({ maxPerDay: 10, minMinutes: 30 });
     expect(
-      resolveOceanStoreLimits({ storeLiveMaxPerDay: null, storeLiveMinMinutes: null }, 18, 45),
-    ).toEqual({ maxPerDay: 18, minMinutes: 45 });
+      resolveWholesalePerfumesStoreLimits({ storeLiveMaxPerDay: null, storeLiveMinMinutes: null }),
+    ).toEqual({ maxPerDay: 24, minMinutes: 60 });
   });
 });

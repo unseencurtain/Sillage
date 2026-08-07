@@ -1,5 +1,9 @@
--- Ocean (wholesale-perfumes.eu): vendor seed, VAT column, live-feed caps.
+-- wholesale-perfumes.eu (SoleLuna spol. s.r.o.): vendor seed + VAT column.
 -- Catalog ≤1 download/day; store (price/stock) may run hourly.
+-- Live-feed caps live on sil_vendors columns (migration 014), not sil_settings keys.
+
+-- Repair a stray pre-rename row if present (never DELETE).
+UPDATE sil_vendors SET slug = 'wholesale-perfumes', sku_prefix = 'WPF' WHERE slug = 'ocean';
 
 -- Ex-VAT prices need a vendor-level VAT uplift before markup tiers. Default 0 leaves
 -- BeautyFort and BTS numbers unchanged.
@@ -8,13 +12,6 @@ ALTER TABLE sil_vendors
     COMMENT 'Fraction added to vendor_price before markup: cost = price × fx × (1+vat_rate)'
     AFTER fx_rate;
 
-INSERT IGNORE INTO sil_settings (setting_key, setting_value) VALUES
-  -- Catalog XML regenerates ~05:00; hard cap one live download per day.
-  ('ocean_live_max_per_day', '1'),
-  -- Store XML is hourly; allow up to one live pull per hour through the day.
-  ('ocean_store_live_max_per_day', '24'),
-  ('ocean_store_live_min_minutes', '60');
-
 -- OPERATOR-CONFIRMABLE guesses below (min_order_value_eur, serviceable_countries, vat_rate).
 -- Seed inactive so nothing syncs until an operator turns the vendor on deliberately.
 INSERT IGNORE INTO sil_vendors
@@ -22,17 +19,22 @@ INSERT IGNORE INTO sil_vendors
    serviceable_countries, order_config, active)
 VALUES
   (
-    'ocean',
-    'Ocean (wholesale-perfumes.eu)',
+    'wholesale-perfumes',
+    'wholesale-perfumes.eu (SoleLuna)',
     'LPS03',
-    'OC',
+    'WPF',
     'EUR',
     1.0,
     -- GUESS: leave 0 until the operator confirms the correct VAT fraction for price_no_vat.
     0.0000,
-    -- GUESS: conservative central/western EU set. Confirm against Ocean account / shipping table.
-    '["AT","BE","CZ","DE","DK","ES","FI","FR","HU","IE","IT","LU","NL","PL","PT","SE","SK"]',
+    -- From https://www.wholesale-perfumes.eu/shipping-payment/ (pricelist from 2025-10-18).
+    '["AT","BE","BG","CZ","DE","DK","EE","ES","FI","FR","GB","GR","HR","HU","IT","LT","LV","NL","PL","PT","RO","SE","SI","SK"]',
     -- GUESS: min_order_value_eur=100 — client confirmed a MOQ exists but not the amount.
     '{"min_order_value_eur":100}',
     0
   );
+
+-- Keep serviceable countries aligned if the row already existed with an older guess.
+UPDATE sil_vendors
+SET serviceable_countries = '["AT","BE","BG","CZ","DE","DK","EE","ES","FI","FR","GB","GR","HR","HU","IT","LT","LV","NL","PL","PT","RO","SE","SI","SK"]'
+WHERE slug = 'wholesale-perfumes';

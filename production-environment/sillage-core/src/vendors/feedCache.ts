@@ -11,7 +11,7 @@ import { logger } from "../lib/log.ts";
 
 const log = logger("feed-cache");
 
-export type CacheVendor = "beautyfort" | "bts" | "ocean";
+export type CacheVendor = "beautyfort" | "bts" | "wholesale-perfumes";
 
 interface CacheMeta {
   vendor: CacheVendor;
@@ -31,7 +31,7 @@ function metaPath(vendor: CacheVendor): string {
   return join(cacheDir(vendor), "meta.json");
 }
 
-/** Optional envelope so BTS can persist categories and Ocean can persist the store feed. */
+/** Optional envelope so BTS can persist categories and wholesale-perfumes can persist the store feed. */
 export type FeedCachePayload =
   | unknown[]
   | { products: unknown[]; categories?: unknown[]; store?: unknown[] };
@@ -76,7 +76,7 @@ export function feedCacheCategories(payload: FeedCachePayload): unknown[] | null
   return Array.isArray(payload.categories) ? payload.categories : null;
 }
 
-/** Ocean hourly price/stock rows persisted beside the catalog. */
+/** wholesale-perfumes hourly price/stock rows persisted beside the catalog. */
 export function feedCacheStore(payload: FeedCachePayload): unknown[] | null {
   if (Array.isArray(payload)) return null;
   return Array.isArray(payload.store) ? payload.store : null;

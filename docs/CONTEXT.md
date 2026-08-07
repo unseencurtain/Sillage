@@ -239,6 +239,42 @@ attribute mapping, or the taxonomy a term lives in.
 
 ## 6. Vendors
 
+### Vendors versus image sources — read this before adding anything
+
+Getting this wrong has already cost a rename. Two different kinds of external system exist and they
+are **not** interchangeable.
+
+A **vendor** is a supplier we buy from. It has a row in `sil_vendors`, a `VendorConnector`, a SKU
+prefix, stock and prices, and an order path that spends real money. **There are exactly three, and
+adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
+
+| Vendor | Slug | SKU prefix | Storefront label | What it is |
+|---|---|---|---|---|
+| BTS Wholesaler | `bts` | `BTS` | LPS01 | REST + JWT |
+| BeautyFort | `beautyfort` | `BF` | LPS02 | SOAP v4 |
+| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | B2B wholesaler: catalog + stock XML, cart order API |
+
+An **image source** only ever produces `EAN → image URL` pairs. It has no vendor row, no connector,
+no stock, no prices and no order path. Images are matched to products by EAN alone, so any source
+can illustrate any vendor's product.
+
+| Image source | Where | Notes |
+|---|---|---|
+| oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
+| Brasty | `tools/brasty-images/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
+| Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export |
+| Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
+| wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |
+
+Naming rules, because these have been confused before:
+
+- **Never call wholesale-perfumes.eu "ocean".** "Ocean" means oceanfragrances, the image CSV.
+- Its credential is an **API token** from the portal user settings, used as the HTTP Basic password
+  with the account email. There is no separate Sillage password for it.
+- Its SKU prefix is `WPF`, not `WP` — `wp` means WordPress everywhere else in this codebase.
+
+### Vendor API details
+
 | | BeautyFort | BTS Wholesaler |
 |---|---|---|
 | Protocol | SOAP v4 over HTTPS | REST + JWT bearer |

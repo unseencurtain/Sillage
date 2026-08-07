@@ -38,7 +38,7 @@ export interface Vendor {
   skuPrefix: string;
   currency: string;
   fxRate: number;
-  /** Fraction uplift before markup. 0 for BF/BTS; Ocean may need a confirmed rate. */
+  /** Fraction uplift before markup. 0 for BF/BTS; wholesale-perfumes may need a confirmed rate. */
   vatRate: number;
   priceMultiplier: number | null;
   minVisibleStock: number | null;
@@ -47,7 +47,7 @@ export interface Vendor {
   active: boolean;
   /** Max live catalogue downloads per day; null = legacy setting / default. */
   liveMaxPerDay: number | null;
-  /** Secondary feed (Ocean store XML) daily cap. */
+  /** Secondary feed (wholesale-perfumes store XML) daily cap. */
   storeLiveMaxPerDay: number | null;
   /** Secondary feed min interval minutes. */
   storeLiveMinMinutes: number | null;

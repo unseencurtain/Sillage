@@ -6,11 +6,11 @@
 export const DEFAULT_LIVE_MAX_PER_DAY: Record<string, number> = {
   beautyfort: 20,
   bts: 48,
-  ocean: 1,
+  "wholesale-perfumes": 1,
 };
 
-export const DEFAULT_OCEAN_STORE_MAX_PER_DAY = 24;
-export const DEFAULT_OCEAN_STORE_MIN_MINUTES = 60;
+export const DEFAULT_WHOLESALE_PERFUMES_STORE_MAX_PER_DAY = 24;
+export const DEFAULT_WHOLESALE_PERFUMES_STORE_MIN_MINUTES = 60;
 
 export interface LiveLimitVendorFields {
   liveMaxPerDay: number | null;
@@ -43,25 +43,20 @@ export function resolveLiveMaxPerDay(
 }
 
 /**
- * Ocean store (price/stock) feed limits — separate from the catalog once-per-day cap.
+ * wholesale-perfumes store (price/stock) feed limits — separate from the catalog once-per-day cap.
+ * Caps live on sil_vendors columns only (no legacy sil_settings keys).
  */
-export function resolveOceanStoreLimits(
+export function resolveWholesalePerfumesStoreLimits(
   vendor: Pick<LiveLimitVendorFields, "storeLiveMaxPerDay" | "storeLiveMinMinutes"> | null | undefined,
-  legacyMaxPerDay: number | null | undefined,
-  legacyMinMinutes: number | null | undefined,
 ): { maxPerDay: number; minMinutes: number } {
   const max =
-    asNonNegInt(vendor?.storeLiveMaxPerDay ?? null) ??
-    asNonNegInt(legacyMaxPerDay ?? null) ??
-    DEFAULT_OCEAN_STORE_MAX_PER_DAY;
+    asNonNegInt(vendor?.storeLiveMaxPerDay ?? null) ?? DEFAULT_WHOLESALE_PERFUMES_STORE_MAX_PER_DAY;
   const min =
-    asNonNegInt(vendor?.storeLiveMinMinutes ?? null) ??
-    asNonNegInt(legacyMinMinutes ?? null) ??
-    DEFAULT_OCEAN_STORE_MIN_MINUTES;
+    asNonNegInt(vendor?.storeLiveMinMinutes ?? null) ?? DEFAULT_WHOLESALE_PERFUMES_STORE_MIN_MINUTES;
   return { maxPerDay: max, minMinutes: min };
 }
 
-/** Legacy setting key for a vendor's catalogue daily cap. */
+/** Legacy setting key for a vendor's catalogue daily cap (008 — beautyfort / bts only). */
 export function legacyLiveMaxSettingKey(vendorSlug: string): string {
   return `${vendorSlug}_live_max_per_day`;
 }

@@ -348,10 +348,10 @@ export async function dispatchVendorOrder(
     const result: VendorOrderResult = await adapter.submit(draft, dryRun);
     return await applySubmitResult(id, adapter, result, dryRun, settings);
   } catch (err) {
-    // Unexpected throw. For BTS/Ocean an ambiguous outcome must not be auto-retried (no idempotency key).
+    // Unexpected throw. For BTS/wholesale-perfumes an ambiguous outcome must not be auto-retried (no idempotency key).
     const message = String(err);
     const to: VendorOrderStatus =
-      vendor.slug === "bts" || vendor.slug === "ocean" ? "needs_attention" : "failed";
+      vendor.slug === "bts" || vendor.slug === "wholesale-perfumes" ? "needs_attention" : "failed";
     await transition(id, "submitting", to, message, { last_error: message });
     await recordEvent("error", "dispatch", `order ${id} submit threw: ${message}`);
     return { id, status: to, dryRun, vendorOrderNumber: null, reason: message };

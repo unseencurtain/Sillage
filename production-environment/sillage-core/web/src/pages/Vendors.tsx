@@ -91,7 +91,7 @@ function buildPatch(form: VendorForm, original: Vendor): VendorPatch {
   const liveMaxInt = liveMax === null ? null : Math.trunc(liveMax);
   if (liveMaxInt !== original.liveMaxPerDay) patch.liveMaxPerDay = liveMaxInt;
 
-  if (original.slug === "ocean") {
+  if (original.slug === "wholesale-perfumes") {
     const storeMax = emptyToNullNumber(form.storeLiveMaxPerDay);
     const storeMaxInt = storeMax === null ? null : Math.trunc(storeMax);
     if (storeMaxInt !== original.storeLiveMaxPerDay) patch.storeLiveMaxPerDay = storeMaxInt;
@@ -290,7 +290,8 @@ function VendorEditor({
             onChange={(e) => set("vatRate", e.target.value)}
           />
           <span className="mt-1 block text-xs text-muted">
-            Cost = vendor price × FX × (1 + VAT). Use 0.21 for 21%, not 21. Ocean publishes ex-VAT prices.
+            Cost = vendor price × FX × (1 + VAT). Use 0.21 for 21%, not 21. wholesale-perfumes publishes
+            ex-VAT prices.
           </span>
         </label>
 
@@ -336,7 +337,7 @@ function VendorEditor({
           <span className="mt-1 block text-xs text-muted">Catalogue feed daily cap (BeautyFort ~40 SOAP budget).</span>
         </label>
 
-        {vendor.slug === "ocean" ? (
+        {vendor.slug === "wholesale-perfumes" ? (
           <>
             <label className="block text-sm">
               <span className="font-medium text-ink">Store feed downloads / day</span>
@@ -349,7 +350,8 @@ function VendorEditor({
                 onChange={(e) => set("storeLiveMaxPerDay", e.target.value)}
               />
               <span className="mt-1 block text-xs text-muted">
-                Ocean price/stock XML — separate from the once-per-day catalog cap (default 24).
+                wholesale-perfumes price/stock XML — separate from the once-per-day catalog cap
+                (default 24).
               </span>
             </label>
             <label className="block text-sm">
@@ -362,7 +364,9 @@ function VendorEditor({
                 disabled={save.isPending}
                 onChange={(e) => set("storeLiveMinMinutes", e.target.value)}
               />
-              <span className="mt-1 block text-xs text-muted">Minimum interval between Ocean store downloads (default 60).</span>
+              <span className="mt-1 block text-xs text-muted">
+                Minimum interval between wholesale-perfumes store downloads (default 60).
+              </span>
             </label>
           </>
         ) : null}

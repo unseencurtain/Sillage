@@ -19,7 +19,7 @@ advance — use `git log origin/cursor/client-features-stage3 --oneline`):
 | `45a59bb` | Cost-band markup tiers, LPS01/LPS02 storefront labels, hide-products-without-image |
 | `90dc296` | `tools/brasty-images/` scraper scaffold behind an investigation gate |
 | `3372207` | Small-order cart fee in the PHP bridge |
-| `bcfc783` | wholesale-perfumes.eu ("ocean") as a third supplier, seeded inactive |
+| `bcfc783` | wholesale-perfumes.eu as a third supplier, seeded inactive |
 | `725667f` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
 | `ca23d88` | This handoff spec (`docs/specs/S3-remaining-work.md`) |
 | `465c980` | Headless Brasty login (`BRASTY_EMAIL` / `BRASTY_PASSWORD` → `storageState.json`) |
@@ -40,7 +40,7 @@ property — if a task below would silently alter live prices or visibility, sto
 | Markup tiers | Seeded `[]`, meaning the old single multiplier still applies | Entering bands, then `--rewrite-all` |
 | Hide products without image | **Default ON** — this one does bite on the next full sync | Already on; measure before deploying |
 | Small-order cart fee | `cart_min_enabled = 0` | Dashboard toggle |
-| Ocean supplier | Seeded **inactive**, with guessed values | Vendors page, after confirming the guesses |
+| wholesale-perfumes supplier | Seeded **inactive**, with guessed values | Vendors page, after confirming the guesses |
 | Brasty images | Extraction strategy refuses to run | Task 1 below |
 
 ---
@@ -83,8 +83,8 @@ by EAN alone, so an image scraped from Brasty can illustrate a BeautyFort or who
 product; the override map is vendor-agnostic by design.
 
 **Prerequisite the agent cannot satisfy.** `BRASTY_EMAIL` and `BRASTY_PASSWORD` must exist in the
-gitignored `tools/brasty-images/.env`. Email is often the same as the Ocean shop login; the password
-is the Brasty wholesale portal password (not the Ocean API token). If either is absent, stop and
+gitignored `tools/brasty-images/.env`. Email is often the same as the wholesale-perfumes shop login; the password
+is the Brasty wholesale portal password (not the wholesale-perfumes API token). If either is absent, stop and
 say so rather than proceeding.
 
 ### 1a. Run the investigation
@@ -131,7 +131,7 @@ Files land as `EAN.jpg`. Three steps turn them into storefront images:
    `http://localhost/lps-media` locally).
 3. The merge script writes an EAN → URL map into `production-environment/sillage-core/data/image_overrides.json`,
    merging rather than overwriting, because the Python enricher already owns thousands of keys there
-   for BeautyFort and Ocean. It backs the file up first.
+   for BeautyFort and wholesale-perfumes. It backs the file up first.
 
 Afterwards the shop needs a sync before anything changes on screen — see Task 2's note about
 `--rewrite-all`.
@@ -180,11 +180,11 @@ None of these are engineering decisions. Get the values from the operator; do no
 - **Small-order fee.** Currently disabled, with placeholder defaults of a €50 minimum and a €5 fee.
   The fee applies once per cart, never stacks, and is non-taxable. Per-vendor minimums live on the
   vendor row and are now editable on the Vendors page.
-- **Ocean go-live.** Four things must be confirmed before the vendor is activated, all of them
+- **wholesale-perfumes go-live.** Four things must be confirmed before the vendor is activated, all of them
   currently guesses flagged in migration `013`: the real minimum order value, the real shipping
   country list, the VAT rate (stored as a **fraction** — 21% is `0.21`, not `21`), and the meaning
-  of the cart `code` field. The last one is isolated in `oceanCartCode()` in
-  `src/orders/adapters/ocean.ts` and must be verified by a dry-run before any live order. The API
+  of the cart `code` field. The last one is isolated in `wholesalePerfumesCartCode()` in
+  `src/orders/adapters/wholesale-perfumes.ts` and must be verified by a dry-run before any live order. The API
   token that appeared in the client chat should be treated as compromised and rotated.
 
 ---
@@ -193,7 +193,7 @@ None of these are engineering decisions. Get the values from the operator; do no
 
 Read these before touching the related code; each one cost real time to establish.
 
-- **Ocean's cart is account-global mutable state.** Two concurrent dispatches would merge into one
+- **wholesale-perfumes cart is account-global mutable state.** Two concurrent dispatches would merge into one
   wrong order. The empty → insert → verify → submit sequence runs under a `GET_LOCK` advisory lock,
   and dry-run performs no remote mutation at all — not even emptying the cart. Preserve both
   properties.
