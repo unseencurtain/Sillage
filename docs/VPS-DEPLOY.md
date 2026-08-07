@@ -29,6 +29,28 @@ Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencu
 
 ---
 
+## Operator happy path — desired vs reality
+
+**Desired:** fill `.env` → `docker compose up` (Hub pull) → WordPress ready → install Sillage plugin → plugin opens dashboard URL from `.env` → log in → **Run sync now** → products, categories, brands appear.
+
+| Step | Via `deploy-vps.sh` (VPS) | Bare `docker compose up` (local or VPS) |
+|---|---|---|
+| Fill `.env` | Laptop `.env` seeds vendor keys; script writes remote `~/sillage/.env` with generated DB/dashboard secrets | Copy `.env.example` → `.env`; set `MYSQL_*`, `SILLAGE_*`, `DASHBOARD_*`, `SILLAGE_SHARED_SECRET` (and vendor keys or use Secrets UI later) |
+| Compose up | Pull + up on VPS; creates Docker networks if missing | **Pre-create** `ecom_network` + `redis_network`; **touch** `sillage-core/data/secrets.overlay.env` (bind mount must be a file) |
+| WordPress | **Automated on fresh install:** `wp_install`, EUR, Blocksy theme, WooCommerce + redis-cache downloaded and activated | Official image writes `wp-config.php`; **browser install wizard** unless you script it; **no** WooCommerce/Blocksy/redis-cache auto-install |
+| Sillage plugin | Rsynced into `wp-content/plugins/`; activated by deploy script; `vps-bootstrap.sh` patches `wp-config.php` (`SILLAGE_SHARED_SECRET`, `SILLAGE_DASHBOARD_URL`, `SILLAGE_CORE_URL`) | Plugin **files** are in the bind mount but **not activated**; wp-config constants **not** set from `.env` — run `scripts/vps-bootstrap.sh` (VPS) or legacy `ecom_sites/bootstrap-sillage.sh` (split-env local only) |
+| Open dashboard | Plugin “Open dashboard” uses `SILLAGE_DASHBOARD_URL` in wp-config (set by deploy), not `DASH_DOMAIN` in `.env` directly | Local: `http://127.0.0.1:4000`. VPS without Caddy: same loopback port; public HTTPS needs host Caddy (`DASH_DOMAIN`) |
+| Log in + Sync | Creds in `.deploy/vps-dashboard-<host>.txt`; vendor keys in `.env` or **Secrets** UI; press **Run sync now** | **`docker exec sillage-core bun run migrate`** first (not run on container start); DB user + grants before health is green; set BF/BTS in Secrets or `.env`; default `sync_source=live` — needs live keys or change to `local` + `.feedscratch` fixtures |
+| Products appear | Yes, after sync + finalize REST (bridge must be active, secrets must match) | Same, once bootstrap + migrate + WooCommerce + active bridge are done |
+
+**Already matches (when using the VPS deploy script):** Hub images, single compose + `.env`, unattended fresh WP + WooCommerce + plugin activation, migrate + MariaDB grants, Caddy TLS, dashboard login file, Sync → catalogue (finalize bumps WC/Blocksy caches).
+
+**Still manual / missing for “compose only”:** external networks, secrets overlay file, migrate, sillage DB user + cross-DB grants, wp-config bridge constants, WooCommerce install, plugin activation, HPOS enable (fresh deploy leaves HPOS **off** — catalogue sync works; order dispatch expects HPOS per `CONTEXT.md`), host bootstrap + DNS + Caddy on VPS.
+
+**To make the five-step story true on bare compose:** entrypoint or `depends_on` health hook that runs migrate + grants; one-shot `bootstrap-sillage.sh` updated for unified `.env`; optional compose `init` service for WP+WC+plugin+HPOS; wire `DASH_DOMAIN` → wp-config on first boot; document local `--profile local` gateway. Until then, use **`deploy-vps.sh`** on a VPS or the local checklist in [Local development](#local-development-same-compose) below.
+
+---
+
 ## Prerequisites (laptop)
 
 1. Git clone with vendor credentials:
@@ -157,12 +179,15 @@ Checklist:
 
 ## Local development (same compose)
 
+Bare compose does **not** match the five-step operator story — see [Operator happy path](#operator-happy-path--desired-vs-reality). Minimum after `up`:
+
 ```bash
 docker network create ecom_network
 docker network create redis_network
 
 cp production-environment/.env.example production-environment/.env
-# fill MYSQL_* / SILLAGE_* / vendor keys
+# fill MYSQL_* / SILLAGE_* / DASHBOARD_* / SILLAGE_SHARED_SECRET (+ vendor keys or Secrets UI later)
+touch production-environment/sillage-core/data/secrets.overlay.env
 
 # optional: build local tags instead of pulling Hub
 docker build -t unseencurtain/sillage-wordpress:latest production-environment/wordpress-image
@@ -170,8 +195,9 @@ docker build -t unseencurtain/sillage-core:latest production-environment/sillage
 
 cd production-environment
 docker compose --env-file .env --profile local up -d
-docker exec sillage-core bun run migrate
 ```
+
+Then manually: complete WP in the browser (`http://localhost` or `:104`), install + activate **WooCommerce**, activate **sillage-bridge**, patch `wp-config.php` with `SILLAGE_SHARED_SECRET` + `SILLAGE_DASHBOARD_URL=http://127.0.0.1:4000` (see `scripts/vps-bootstrap.sh`), create the `sillage` DB user + grants (`ecom_sites/config/sillage-grants.sql`), `docker exec sillage-core bun run migrate`, and lime `SELECT` grants on `sil_*` tables (see deploy script tail). Dashboard: `http://127.0.0.1:4000`.
 
 `shop-gateway` (profile `local`) serves `http://localhost` and `/lps-media/*`. VPS uses host Caddy instead — do not enable the local profile there.
 
