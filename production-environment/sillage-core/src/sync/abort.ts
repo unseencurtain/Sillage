@@ -14,7 +14,7 @@ export async function requestSyncAbort(): Promise<void> {
   await execute(
     `UPDATE ${sil("sil_sync_runs")}
         SET status = 'error', finished_at = NOW(),
-            error_summary = COALESCE(error_summary, 'aborted from dashboard')
+            error_message = COALESCE(error_message, 'aborted from dashboard')
       WHERE status = 'running' AND finished_at IS NULL`,
   );
 }
