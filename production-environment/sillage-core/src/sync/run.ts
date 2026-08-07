@@ -17,6 +17,7 @@ import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
   parkWholesalePerfumesFromMainStorefront,
+  purgeVendorProductAttributes,
   purgeVendorProductCatLanes,
   purgeWholesalePerfumesBrandProductCats,
   loadCategoryMapsFromDb,
@@ -317,16 +318,8 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
             bucket.add(value);
           }
         }
-        // Vendor facet is derived from the connector, not the feed attributes.
-        const vendorTax = ATTRIBUTE_TAXONOMIES.vendor;
-        if (vendorTax) {
-          let bucket = attributeValues.get(vendorTax);
-          if (!bucket) {
-            bucket = new Set();
-            attributeValues.set(vendorTax, bucket);
-          }
-          bucket.add(vendorStorefrontLabel(vendor));
-        }
+        // Do not sync pa_vendor — LPS storefront labels must not appear on product pages.
+        // Retail vendor identity stays on `_sillage_vendor` postmeta only.
       }
     }
 
@@ -343,9 +336,10 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
       const storefrontLabels: Record<string, string> = {};
       for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
-      // Vendor lanes belong on pa_vendor / _sillage_vendor — strip any LPS* product_cat leftovers.
+      // Vendor lanes: `_sillage_vendor` meta only — strip LPS* product_cat and pa_vendor leftovers.
       if (!options.dryRun) {
         await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+        await purgeVendorProductAttributes();
         await purgeWholesalePerfumesBrandProductCats();
         await parkWholesalePerfumesFromMainStorefront();
       }
@@ -496,6 +490,7 @@ async function buildRewriteWriteContext(
   const storefrontLabels: Record<string, string> = {};
   for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
   await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+  await purgeVendorProductAttributes();
   await purgeWholesalePerfumesBrandProductCats();
   await parkWholesalePerfumesFromMainStorefront();
   return buildWriteContext(settings, allVendors, categoryMaps, brandMap, attributeMaps);

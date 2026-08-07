@@ -27,6 +27,7 @@ describe("rewrite-only taxonomy safety", () => {
     expect(runSrc).toContain("loadCategoryMapsFromDb");
     expect(runSrc).toContain("loadFlatTermMapFromDb");
     expect(runSrc).toContain("purgeVendorProductCatLanes");
+    expect(runSrc).toContain("purgeVendorProductAttributes");
     expect(runSrc).toContain("parkWholesalePerfumesFromMainStorefront");
     expect(runSrc).not.toContain("ensureB2bShopPage");
   });
@@ -40,14 +41,17 @@ describe("rewrite-only taxonomy safety", () => {
     expect(rewriteBlock![0]).toContain("buildRewriteWriteContext");
   });
 
-  test("writer does not assign vendor lanes onto product_cat", () => {
+  test("writer does not assign vendor lanes onto product_cat or pa_vendor", () => {
     expect(writerSrc).not.toContain("vendorShopCategories");
-    expect(writerSrc).toContain('_sillage_vendor');
-    expect(writerSrc).toContain('attributes["vendor"]');
+    expect(writerSrc).toContain("_sillage_vendor");
+    expect(writerSrc).not.toContain('attributes["vendor"]');
+    expect(writerSrc).toContain("LEGACY_VENDOR_ATTRIBUTE_TAXONOMY");
   });
 
-  test("taxonomy purge removes vendor product_cat lanes", () => {
+  test("taxonomy purge removes vendor product_cat lanes and pa_vendor attributes", () => {
     expect(taxonomySrc).toContain("export async function purgeVendorProductCatLanes");
+    expect(taxonomySrc).toContain("export async function purgeVendorProductAttributes");
+    expect(taxonomySrc).not.toContain('vendor: "pa_vendor"');
     expect(taxonomySrc).not.toContain("export async function ensureVendorShopCategories");
   });
 });

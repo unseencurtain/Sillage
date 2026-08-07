@@ -233,8 +233,9 @@ This is a closed list. If a task seems to require adding write logic here, it be
    `get_terms()` outside a product loop), and replace Blocksy's logo-mode brand filter
    (`showLabel:false`, often mis-set to unregistered `product_brands`) with
    `[sillage_shop_brands]` (names + counts, scrollable). Optional image-safety CSS. Vendor
-   lanes are never `product_cat` — use `_sillage_vendor` + `pa_vendor`. No dual-catalog / B2B
-   UI here — B2B is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+   lanes are never `product_cat` and never a visible `pa_vendor` attribute — use `_sillage_vendor`
+   postmeta only. No dual-catalog / B2B UI here — B2B is
+   [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
    WPF on this install is parked via `product_visibility` from sillage-core.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
