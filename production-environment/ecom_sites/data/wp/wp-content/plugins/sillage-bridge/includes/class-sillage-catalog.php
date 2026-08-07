@@ -30,6 +30,9 @@ final class Sillage_Catalog {
 	/** @var string[] Legacy product_cat slugs that must never appear in browse UI. */
 	private const LEGACY_VENDOR_CAT_SLUGS = array( 'lps01', 'lps02', 'lps03' );
 
+	/** @var string[] Starter-site demo product_cat slugs (tiny leftover counts). */
+	private const DEMO_CAT_SLUGS = array( 'body', 'face', 'hands', 'legs', 'uncategorized' );
+
 	public function register(): void {
 		add_action( 'pre_get_posts', array( $this, 'ensure_main_catalog_visibility' ), 20 );
 		add_action( 'woocommerce_product_query', array( $this, 'ensure_wc_catalog_visibility' ), 20 );
@@ -40,6 +43,7 @@ final class Sillage_Catalog {
 		add_filter( 'woocommerce_product_categories_widget_args', array( $this, 'filter_category_widget_args' ), 20 );
 		add_filter( 'woocommerce_product_categories_widget_dropdown_args', array( $this, 'filter_category_widget_args' ), 20 );
 		add_filter( 'wp_get_nav_menu_items', array( $this, 'hide_legacy_vendor_cats_from_nav' ), 20, 3 );
+		add_shortcode( 'sillage_shop_categories', array( $this, 'shortcode_shop_categories' ) );
 	}
 
 	/**
@@ -54,10 +58,66 @@ final class Sillage_Catalog {
 			. '.woocommerce div.product div.images img,'
 			. '.woocommerce-page ul.products li.product img{'
 			. 'max-width:100%;height:auto;object-fit:contain;'
-			. '}';
+			. '}'
+			. '.sillage-shop-cats{list-style:none;margin:0;padding:0;}'
+			. '.sillage-shop-cats li{margin:0 0 .4rem;}'
+			. '.sillage-shop-cats a{text-decoration:none;}'
+			. '.sillage-shop-cats .count{opacity:.7;margin-left:.25rem;}';
 		wp_register_style( 'sillage-bridge-images', false, array(), SILLAGE_BRIDGE_VERSION );
 		wp_enqueue_style( 'sillage-bridge-images' );
 		wp_add_inline_style( 'sillage-bridge-images', $css );
+	}
+
+	/**
+	 * Top-level feed browse categories for the retail shop sidebar (BF/BTS counts).
+	 *
+	 * Blocksy's Ajax category filter dumps a flat A–Z of nested brand leaves even with
+	 * hierarchical=true; this shortcode is the theme-agnostic browse list.
+	 *
+	 * @param array|string $atts Shortcode attributes (unused).
+	 */
+	public function shortcode_shop_categories( $atts = array() ): string {
+		unset( $atts );
+		$terms = get_terms(
+			array(
+				'taxonomy'   => 'product_cat',
+				'parent'     => 0,
+				'hide_empty' => true,
+				'orderby'    => 'name',
+				'order'      => 'ASC',
+			)
+		);
+		if ( is_wp_error( $terms ) || ! is_array( $terms ) || array() === $terms ) {
+			return '';
+		}
+
+		$legacy = self::LEGACY_VENDOR_CAT_SLUGS;
+		$demo   = self::DEMO_CAT_SLUGS;
+		$html   = '<ul class="sillage-shop-cats">';
+		foreach ( $terms as $term ) {
+			if ( ! ( $term instanceof WP_Term ) ) {
+				continue;
+			}
+			$slug = (string) $term->slug;
+			if ( in_array( $slug, $legacy, true ) || in_array( $slug, $demo, true ) ) {
+				continue;
+			}
+			if ( preg_match( '/^lps0[123]$/i', (string) $term->name ) ) {
+				continue;
+			}
+			// Starter-site leftovers often sit at parent=0 with tiny counts.
+			if ( (int) $term->count < 20 ) {
+				continue;
+			}
+			$url   = get_term_link( $term );
+			$url   = is_wp_error( $url ) ? '' : (string) $url;
+			$label = $term->name;
+			$count = (int) $term->count;
+			$html .= '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label )
+				. '<span class="count">(' . esc_html( (string) $count ) . ')</span></a></li>';
+		}
+		$html .= '</ul>';
+		return $html;
 	}
 
 	/**
