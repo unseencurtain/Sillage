@@ -43,34 +43,44 @@ Docs: https://www.wholesale-perfumes.eu/api/docs/ · https://www.wholesale-perfu
 Env placeholders: `OCEAN_USER`, `OCEAN_TOKEN`, `OCEAN_CATALOG_URL`, `OCEAN_STOCK_URL`,
 `OCEAN_API_BASE_URL` in `sillage-core/.env.example`.
 
-## Brasty (wholesale.brasty.com)
+## Brasty (wholesale.brasty.com) — image source only
+
+Brasty is **not** a Sillage vendor. No catalogue sync, order API, or shipping rules.
+It exists purely to obtain product photographs. Matching is by **EAN alone** (the
+`image_overrides.json` map is vendor-agnostic), so a Brasty photo can illustrate a
+BeautyFort or Ocean product and vice versa.
 
 | Feed | Notes |
 |---|---|
-| Product CSV | Full range; **no image URLs** |
-| Availability CSV | Stock deltas |
+| Product CSV | Full range; **no image URLs** — used as the scrape input list |
+| Availability CSV | Not used (no vendor connector) |
 
-Images are watermarked on the site. Client may later want LPS logo overlay. Image acquisition needs
-a **Playwright** scrape (search by EAN on the product list — no PDP pages). Spec:
-`beastly-image.md` (operator notes, not in repo).
+Images are watermarked on the site; optional LPS logo overlay via the tool below.
+Acquisition is a **Playwright** scrape (search by EAN on the product list — no PDP
+pages). Spec: `beastly-image.md` (operator notes, not in repo).
 
 ### Brasty image tool (`tools/brasty-images/`)
 
-Standalone Node/Playwright package (not a sillage-core dependency). Operator flow:
+Standalone Node/Playwright package (not a sillage-core dependency). Runs headless
+on a VPS (no X server). Operator flow:
 
-1. `npm run login` — headed session → gitignored `storageState.json`
-2. `npm run investigate` — evidence gate for how the large preview loads (DOM / data-* /
+1. Set `BRASTY_EMAIL` / `BRASTY_PASSWORD` in the tool `.env` (never commit)
+2. `npm run login` — headless credential login → gitignored `storageState.json`
+   (`ensureSession` re-logins automatically if the session expires)
+3. `npm run investigate` — evidence gate for how the large preview loads (DOM / data-* /
    hover inject / CSS bg / network / API / thumb→full URL). Writes `findings/`.
-3. Operator pastes a concrete extraction strategy into `src/imageExtractor.ts` from findings
-4. `npm run download` → `output/EAN.jpg` (resume via JSONL manifest; low concurrency)
-5. Optional `npm run watermark` — LPS logo via sharp into `watermarked/`
-6. `npm run build-overrides` — merge EAN→`PUBLIC_URL_BASE` URLs into
+4. Operator pastes a concrete extraction strategy into `src/imageExtractor.ts` from findings
+5. `npm run download` → `output/EAN.jpg` (resume via JSONL manifest; `CONCURRENCY=1` default)
+6. Optional `npm run watermark` — LPS logo via sharp into `watermarked/`
+7. `npm run build-overrides` — merge EAN→`PUBLIC_URL_BASE` URLs into
    `sillage-core/data/image_overrides.json` (never clobber existing keys)
-7. Host files under `ecom_sites/data/media/` bind-mounted RO into `ecom` at `/lps-media/`
+8. Host files under `ecom_sites/data/media/` bind-mounted RO into `ecom` at `/lps-media/`
    (compose change described in the tool README; keep media out of `data/wp/`)
-8. Fast/rewrite sync so the storefront picks up the new override URLs
+9. Fast/rewrite sync so the storefront picks up the new override URLs
 
-### Shipping (Brasty)
+### Shipping rates (reference only — not used)
+
+Kept for operator reference; **not wired into Sillage** (no Brasty order path).
 
 - Pack weight: **one box per 26 kg** (42 kg → 2 boxes, 53 kg → 3 boxes).
 - Orders **over 120 kg** → pallet, individual price.
@@ -80,6 +90,7 @@ Standalone Node/Playwright package (not a sillage-core dependency). Operator flo
 
 1. Done: Ocean XML → BeautyFort `image_overrides.json`.
 2. Done (this slice): Ocean catalogue connector + cart order adapter (inactive until operator enable).
-3. Brasty Playwright scaffold lives in `tools/brasty-images/` — operator must run
+3. Brasty Playwright image tool lives in `tools/brasty-images/` — operator must run
    investigate on the live site, then register the extraction strategy before bulk download.
-4. Later: Brasty catalogue/order adapters; confirm Ocean MOQ / countries / VAT / cart `code`.
+4. Confirm Ocean MOQ / countries / VAT / cart `code` before enabling the Ocean connector.
+   (Brasty catalogue/order adapters: **dropped** — image source only.)
