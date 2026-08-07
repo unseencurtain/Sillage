@@ -70,6 +70,12 @@ final class Sillage_Images {
 
 		// Structured data and social meta read the attachment image, which does not exist.
 		add_filter( 'woocommerce_structured_data_product', array( $this, 'structured_data' ), 10, 2 );
+
+		// Blocksy live search builds ct_featured_media via WP_REST_Attachments_Controller, which
+		// calls wp_get_attachment_url(). Modern WP returns false before that filter when the ID
+		// is not post_type=attachment — our product stand-in IDs never reach attachment_url().
+		// Guarded theme shim: no-ops unless Blocksy fires the live-search fields action.
+		add_action( 'blocksy:rest_api:live_search:fields', array( $this, 'register_live_search_media_field' ) );
 	}
 
 	/**
@@ -251,5 +257,64 @@ final class Sillage_Images {
 			$markup['image'] = esc_url_raw( $url );
 		}
 		return $markup;
+	}
+
+	/**
+	 * Override Blocksy's ct_featured_media so live-search thumbnails use _external_thumbnail_url.
+	 *
+	 * Registered on blocksy:rest_api:live_search:fields so it replaces the theme's callback
+	 * (same field name, later registration wins). Shape matches what search-implementation.js
+	 * reads: media_details.sizes.thumbnail.source_url.
+	 */
+	public function register_live_search_media_field(): void {
+		register_rest_field(
+			'search-result',
+			'ct_featured_media',
+			array(
+				'get_callback' => array( $this, 'live_search_featured_media' ),
+			)
+		);
+	}
+
+	/**
+	 * @param array $post Search-result payload from WP_REST_Search_Controller.
+	 * @return array|null
+	 */
+	public function live_search_featured_media( $post ) {
+		if ( ! is_array( $post ) || empty( $post['id'] ) ) {
+			return null;
+		}
+		$product_id = (int) $post['id'];
+		$url        = self::thumbnail_url( $product_id );
+
+		if ( '' === $url ) {
+			$thumb_id = (int) get_post_meta( $product_id, '_thumbnail_id', true );
+			if ( $thumb_id > 0 ) {
+				$src = wp_get_attachment_image_src( $thumb_id, 'thumbnail' );
+				if ( is_array( $src ) && ! empty( $src[0] ) && is_string( $src[0] ) ) {
+					$url = $src[0];
+				}
+			}
+		}
+
+		if ( '' === $url ) {
+			return null;
+		}
+
+		$safe = esc_url_raw( $url );
+		return array(
+			'id'            => $product_id,
+			'source_url'    => $safe,
+			'alt_text'      => get_the_title( $product_id ),
+			'media_details' => array(
+				'sizes' => array(
+					'thumbnail' => array(
+						'source_url' => $safe,
+						'width'      => 150,
+						'height'     => 150,
+					),
+				),
+			),
+		);
 	}
 }

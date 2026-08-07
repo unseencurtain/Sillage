@@ -210,7 +210,10 @@ Because we bypass WooCommerce's CRUD layer, nothing updates these for us:
 This is a closed list. If a task seems to require adding write logic here, it belongs in Bun.
 
 1. Resolve external product images from `_external_thumbnail_url` through the attachment filters
-   (`post_thumbnail_id`, `woocommerce_product_get_image_id`, `image_downsize`)
+   (`post_thumbnail_id`, `woocommerce_product_get_image_id`, `image_downsize`). Also override
+   Blocksy live-search `ct_featured_media` — modern WP's `wp_get_attachment_url()` returns false
+   before filters when the ID is not `post_type=attachment`, so product stand-in IDs never reach
+   our URL filter in `/wp/v2/search?ct_live_search=true`
 2. Short-circuit EAN-shaped searches to `sillage.sil_ean_index`
 3. `POST /wp-json/sillage/v1/finalize` — WooCommerce cache-version bump, theme lookup regen
 4. `POST /wp-json/sillage/v1/order-update` — write vendor tracking/status back through the
@@ -220,10 +223,11 @@ This is a closed list. If a task seems to require adding write logic here, it be
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
 9. Exclude the B2B wholesaler (`wholesale-perfumes` / LPS03) `product_cat` from the main shop,
-   search, and other product queries; allow it only on that category archive and the dedicated
-   B2B page (`_sillage_b2b_shop` postmeta). When that term has zero products, also hide it from
-   category widgets, `get_terms` lists, and nav menus (auto-shows once count > 0). Optional
-   safety CSS so external thumbs cannot stretch product cards.
+   search (including Blocksy REST live search via `rest_post_search_query`), and other product
+   queries; allow it only on that category archive and the dedicated B2B page
+   (`_sillage_b2b_shop` postmeta). When that term has zero products, also hide it from category
+   widgets, `get_terms` lists, and nav menus (auto-shows once count > 0). Optional safety CSS so
+   external thumbs cannot stretch product cards.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
