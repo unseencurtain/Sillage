@@ -35,3 +35,6 @@ google.txt
 reddit_comment.txt
 wp-plugin-directory.txt
 vendor-sync-plan-claude.md
+
+# VPS deploy scratch (credentials, one-off notes)
+.deploy/
