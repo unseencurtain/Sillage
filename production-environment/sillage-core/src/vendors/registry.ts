@@ -4,7 +4,8 @@ import { WholesalePerfumesConnector } from "./wholesale-perfumes/connector.ts";
 import type { VendorConnector } from "./VendorConnector.ts";
 
 /**
- * Vendors parked for a separate B2B website (see repo `b2b-wholesale/`).
+ * Vendors parked for a separate B2B website
+ * (https://github.com/unseencurtain/sillage-b2b; thin pointer in `b2b-wholesale/`).
  * Still registered for explicit `--vendor=<slug>` / tests, but never selected by `--vendor=all`
  * on this retail storefront — even if someone flips `sil_vendors.active` by mistake.
  */
