@@ -73,8 +73,8 @@ final class Sillage_Settings {
 	/**
 	 * Whether the sillage schema is readable.
 	 *
-	 * WordPress connects as a user granted SELECT on exactly one sillage table, so a missing grant
-	 * is a realistic misconfiguration worth surfacing rather than a fatal error.
+	 * WordPress connects as a user granted SELECT on a small set of sillage tables, so a missing
+	 * grant is a realistic misconfiguration worth surfacing rather than a fatal error.
 	 */
 	public static function ean_index_available(): bool {
 		$cached = wp_cache_get( 'ean_index_available', 'sillage' );

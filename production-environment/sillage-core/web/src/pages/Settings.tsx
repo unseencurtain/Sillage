@@ -10,6 +10,8 @@ const NUMERIC_KEYS = new Set([
   "full_sync_hour",
   "global_price_multiplier",
   "global_stock_threshold",
+  "cart_min_subtotal_eur",
+  "cart_min_fee_eur",
   "orders_max_value_eur",
   "orders_daily_cap_eur",
   "orders_poll_minutes",
@@ -36,6 +38,30 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
     label: "Hide products without image",
     hint: "Exclude from catalog/search when the resolved image is still missing or a placeholder",
     type: "bool",
+  },
+  {
+    key: "cart_min_enabled",
+    label: "Small-order fee",
+    hint: "Foodpanda-style fee when cart (or a vendor portion) is under the minimum. Off by default.",
+    type: "bool",
+  },
+  {
+    key: "cart_min_subtotal_eur",
+    label: "Cart minimum (EUR)",
+    hint: "Global subtotal floor. Per-vendor floors live in each vendor's order_config.min_order_value_eur.",
+    type: "number",
+  },
+  {
+    key: "cart_min_fee_eur",
+    label: "Small-order fee (EUR)",
+    hint: "Charged once when any floor is unmet — never stacked.",
+    type: "number",
+  },
+  {
+    key: "cart_min_message",
+    label: "Small-order fee message",
+    hint: "Shown on cart and checkout. Must include {remaining} (WooCommerce formats the amount).",
+    type: "text",
   },
   { key: "orders_dry_run", label: "Orders dry-run", hint: "When on, never spend money", type: "bool" },
   { key: "orders_auto_dispatch", label: "Auto-dispatch", hint: "Off = human approval required", type: "bool" },
@@ -232,7 +258,7 @@ export function Settings() {
               <span className="font-medium text-ink">{f.label}</span>
               <input
                 type={NUMERIC_KEYS.has(f.key) ? "number" : "text"}
-                step={f.key.includes("multiplier") ? "0.01" : "1"}
+                step={f.key.includes("multiplier") || f.key.includes("_eur") ? "0.01" : "1"}
                 className="mt-1.5 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
                 value={form[f.key] ?? ""}
                 disabled={save.isPending}

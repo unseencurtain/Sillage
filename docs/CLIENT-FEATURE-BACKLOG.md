@@ -11,7 +11,7 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | P1 | Brasty **Playwright image scrape** | CSV has no images; see operator `beastly-image.md`. |
 | P2 | Vendor **wholesale.brasty.com** (full catalogue + orders) | Watermarked photos; MOQ; shipping 26 kg/box. |
 | P2 | Tiered retail markup | **Done (stage 3):** `sil_settings.price_tiers` JSON; dashboard editor; empty `[]` keeps single multiplier. |
-| P2 | Cart minimum / small-order surcharge | Foodpanda-style fee under threshold. |
+| P2 | Cart minimum / small-order surcharge | **Done (stage 3):** Foodpanda-style fee under global / per-vendor minimum; dashboard knobs default off; bridge adds fee + “add X more” notice. |
 | P3 | B2B / higher-MOQ lane | Separate section or mode; UX TBD. |
 
 ## Image pipeline (operator)

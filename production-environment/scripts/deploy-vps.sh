@@ -470,7 +470,7 @@ docker compose build sillage-core
 docker compose up -d sillage-core sillage-cron ecom
 docker exec sillage-core bun run migrate
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
-  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; FLUSH PRIVILEGES;"
+  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;"
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
 
 curl -sS http://127.0.0.1:4000/health || true
