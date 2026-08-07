@@ -16,6 +16,11 @@ export function Overview() {
   if (error || !data) return <p className="text-danger">Failed to load overview</p>;
 
   const orderTotal = Object.values(data.ordersByStatus).reduce((a, b) => a + b, 0);
+  const catalogVisible = data.catalogVisible ?? data.published;
+  const hiddenFromCatalog = data.hiddenFromCatalog ?? Math.max(0, data.published - catalogVisible);
+  const hiddenNoImage = data.hiddenNoImage ?? 0;
+  const hiddenStock = data.hiddenStock ?? 0;
+  const outOfStock = data.outOfStock ?? 0;
 
   return (
     <div className="space-y-6">
@@ -25,9 +30,22 @@ export function Overview() {
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Published products" value={data.published.toLocaleString()} accent />
+        <KpiCard
+          label="Visible in shop"
+          value={catalogVisible.toLocaleString()}
+          hint="catalog loop (not excluded)"
+          accent
+        />
+        <KpiCard
+          label="Published in WP"
+          value={data.published.toLocaleString()}
+          hint={
+            hiddenFromCatalog > 0
+              ? `${hiddenFromCatalog.toLocaleString()} hidden from catalog`
+              : "all catalog-visible"
+          }
+        />
         <KpiCard label="Sillage products" value={data.products.toLocaleString()} />
-        <KpiCard label="Active offers" value={data.offers.toLocaleString()} />
         <KpiCard
           label="Sync"
           value={data.settings.syncEnabled ? "on" : "off"}
@@ -35,6 +53,42 @@ export function Overview() {
           accent={!data.settings.dryRun}
         />
       </div>
+
+      <section className="rounded-xl border border-line bg-panel p-5 shadow-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Catalogue visibility</h2>
+          <span className="font-mono text-xs tabular-nums text-muted">
+            {data.offers.toLocaleString()} active offers
+          </span>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <VisibilityStat label="Visible in shop" value={catalogVisible} />
+          <VisibilityStat label="Published (WP)" value={data.published} />
+          <VisibilityStat
+            label="Hidden from catalog"
+            value={hiddenFromCatalog}
+            hint={
+              hiddenFromCatalog > 0
+                ? [
+                    hiddenNoImage > 0 ? `${hiddenNoImage.toLocaleString()} no/weak image` : null,
+                    hiddenStock > 0 ? `${hiddenStock.toLocaleString()} stock threshold` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "exclude-from-catalog"
+                : undefined
+            }
+          />
+          <VisibilityStat
+            label="Out of stock"
+            value={outOfStock}
+            hint={
+              data.settings.hideProductsWithoutImage
+                ? `hide without image on · threshold ${data.settings.stockThreshold ?? 0}`
+                : `threshold ${data.settings.stockThreshold ?? 0}`
+            }
+          />
+        </div>
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-xl border border-line bg-panel p-5 shadow-sm">
@@ -120,6 +174,26 @@ export function Overview() {
           </ResponsiveContainer>
         </div>
       </section>
+    </div>
+  );
+}
+
+function VisibilityStat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-canvas/40 px-3 py-2.5">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">
+        {value.toLocaleString()}
+      </div>
+      {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
     </div>
   );
 }

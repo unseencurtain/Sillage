@@ -33,11 +33,51 @@ api.use("*", requireSession);
 
 api.get("/overview", async (c) => {
   const settings = await loadSettings();
-  const [offerRows, productRows, publishedRows, lastSync, orderRows] = await Promise.all([
+  // Shop loop ≈ publish AND NOT exclude-from-catalog (same rule as recountTerms).
+  // "Published" alone overstates what customers see when hide-without-image / stock
+  // threshold attach those visibility terms.
+  const [offerRows, productRows, catalogRows, lastSync, orderRows] = await Promise.all([
     query<RowDataPacket & { offers: number }>(`SELECT COUNT(*) AS offers FROM ${sil("sil_offers")} WHERE vanished_at IS NULL`),
     query<RowDataPacket & { products: number }>(`SELECT COUNT(*) AS products FROM ${sil("sil_products")}`),
-    query<RowDataPacket & { published: number }>(
-      `SELECT COUNT(*) AS published FROM ${wp("posts")} WHERE post_type='product' AND post_status='publish'`,
+    query<
+      RowDataPacket & {
+        published: number;
+        catalog_visible: number;
+        hidden_from_catalog: number;
+        out_of_stock: number;
+        hidden_no_image: number;
+        hidden_stock: number;
+      }
+    >(
+      `SELECT
+         COUNT(*) AS published,
+         SUM(CASE WHEN cat.object_id IS NULL THEN 1 ELSE 0 END) AS catalog_visible,
+         SUM(CASE WHEN cat.object_id IS NOT NULL THEN 1 ELSE 0 END) AS hidden_from_catalog,
+         SUM(CASE WHEN oos.object_id IS NOT NULL THEN 1 ELSE 0 END) AS out_of_stock,
+         SUM(CASE
+               WHEN cat.object_id IS NOT NULL AND oos.object_id IS NULL THEN 1
+               ELSE 0
+             END) AS hidden_no_image,
+         SUM(CASE
+               WHEN cat.object_id IS NOT NULL AND oos.object_id IS NOT NULL THEN 1
+               ELSE 0
+             END) AS hidden_stock
+       FROM ${wp("posts")} p
+       LEFT JOIN (
+         SELECT tr.object_id
+           FROM ${wp("term_relationships")} tr
+           JOIN ${wp("term_taxonomy")} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+           JOIN ${wp("terms")} t ON t.term_id = tt.term_id
+          WHERE tt.taxonomy = 'product_visibility' AND t.slug = 'exclude-from-catalog'
+       ) cat ON cat.object_id = p.ID
+       LEFT JOIN (
+         SELECT tr.object_id
+           FROM ${wp("term_relationships")} tr
+           JOIN ${wp("term_taxonomy")} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+           JOIN ${wp("terms")} t ON t.term_id = tt.term_id
+          WHERE tt.taxonomy = 'product_visibility' AND t.slug = 'outofstock'
+       ) oos ON oos.object_id = p.ID
+      WHERE p.post_type = 'product' AND p.post_status = 'publish'`,
     ),
     query<RowDataPacket>(
       `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
@@ -59,10 +99,23 @@ api.get("/overview", async (c) => {
   const ordersByStatus: Record<string, number> = {};
   for (const r of orderRows) ordersByStatus[r.status] = Number(r.n);
 
+  const cat = catalogRows[0];
+  const published = Number(cat?.published ?? 0);
+  const catalogVisible = Number(cat?.catalog_visible ?? 0);
+  const hiddenFromCatalog = Number(cat?.hidden_from_catalog ?? 0);
+
   return c.json({
     offers: Number(offerRows[0]?.offers ?? 0),
     products: Number(productRows[0]?.products ?? 0),
-    published: Number(publishedRows[0]?.published ?? 0),
+    /** @deprecated Prefer catalogVisible — publish status alone includes catalog-excluded posts. */
+    published,
+    catalogVisible,
+    hiddenFromCatalog,
+    outOfStock: Number(cat?.out_of_stock ?? 0),
+    /** Catalog-hidden without outofstock term — typically hide_products_without_image. */
+    hiddenNoImage: Number(cat?.hidden_no_image ?? 0),
+    /** Catalog-hidden with outofstock — stock threshold (and often OOS). */
+    hiddenStock: Number(cat?.hidden_stock ?? 0),
     lastSync: lastSync[0] ?? null,
     ordersByStatus,
     syncsLast7Days: syncs.map((s) => ({ day: String(s.day), n: Number(s.n) })),
@@ -70,6 +123,8 @@ api.get("/overview", async (c) => {
       dryRun: settings.ordersDryRun,
       autoDispatch: settings.ordersAutoDispatch,
       syncEnabled: settings.syncEnabled,
+      hideProductsWithoutImage: settings.hideProductsWithoutImage,
+      stockThreshold: settings.stockThreshold,
     },
   });
 });

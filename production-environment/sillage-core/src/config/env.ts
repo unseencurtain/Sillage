@@ -50,6 +50,8 @@ export const env = {
 
   wordpress: {
     baseUrl: str("WP_BASE_URL", "http://localhost").replace(/\/$/, ""),
+    /** In-Docker URL for finalize / REST (e.g. http://ecom). Falls back to baseUrl. */
+    internalUrl: (opt("WORDPRESS_INTERNAL_URL") || opt("WP_INTERNAL_URL") || "").replace(/\/$/, ""),
     sharedSecret: str("SILLAGE_SHARED_SECRET"),
   },
 
