@@ -413,6 +413,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     throw err;
   } finally {
     await releaseLock("sync");
+    // Settings/vendor pricing saves may have marked dirty while we held the lock — pick them up.
+    const { drainPendingRewrites } = await import("./pendingRewrite.ts");
+    await drainPendingRewrites();
   }
 }
 

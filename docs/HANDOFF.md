@@ -71,6 +71,12 @@ Full recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md). Dashboard login file: `.deploy/vp
 Dashboard **Overview** or **Sync** → **Run sync now** (`POST /api/sync/run`, BF+BTS fast sync).
 CLI offline: `cd production-environment/sillage-core && bun run sync -- --source=local --vendor=all`.
 
+**Pricing Save:** Settings (global multiplier/tiers) or Vendors (per-vendor multiplier/FX/VAT/min
+stock) → automatic **rewrite-only** price write from `sil_offers` (no live API). If a sync is
+already running, a follow-up is queued — do not mash Run fast sync. Retail is stored in Woo
+`_price` / `_regular_price` on purpose (cart/sort/filters); cost stays in offers. See
+[`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) “Why shop prices are stored”.
+
 ### Secrets overlay (vendor API keys)
 
 | Where | Path |

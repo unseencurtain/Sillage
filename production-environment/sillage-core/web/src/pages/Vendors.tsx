@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Vendor, type VendorPatch } from "@/lib/api";
 import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
+import { watchSyncUntilIdle } from "@/lib/watchSync";
 
 /** Parked B2B supplier — not editable on this retail shop. */
 const PARKED_B2B_SLUG = "wholesale-perfumes";
@@ -119,7 +121,12 @@ export function Vendors() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted">
-          BeautyFort + BTS only — multipliers, stock floors, VAT, shipping coverage, and live-feed caps
+          BeautyFort + BTS only. Saving multiplier / FX / VAT / min stock recalculates shop prices
+          from stored offers (same rewrite-only path as Settings — no live vendor download). Credentials:{" "}
+          <Link to="/secrets" className="font-medium text-accent hover:underline">
+            Secrets
+          </Link>
+          .
         </p>
       </header>
 
@@ -184,6 +191,7 @@ function VendorEditor({
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const cancelWatch = useRef<(() => void) | null>(null);
   const [form, setForm] = useState<VendorForm>(() => toForm(vendor));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingPatch, setPendingPatch] = useState<VendorPatch | null>(null);
@@ -194,12 +202,25 @@ function VendorEditor({
     setPendingPatch(null);
   }, [vendor]);
 
+  useEffect(() => () => cancelWatch.current?.(), []);
+
   const save = useMutation({
     mutationFn: (patch: VendorPatch) => api.saveVendor(vendor.slug, patch),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["vendors"] });
+      qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
       toast("Vendor saved", "ok");
-      if (res.syncStarted) toast("Price rewrite started (cache / rewrite-only)", "info");
+      if (res.syncStarted || res.syncQueued) {
+        toast(
+          res.syncQueued
+            ? "Sync already running — your new prices will apply when it finishes"
+            : "Recalculating prices…",
+          "info",
+        );
+        cancelWatch.current?.();
+        cancelWatch.current = watchSyncUntilIdle(qc, toast, { expectFollowUp: !!res.syncQueued });
+      }
       setConfirmOpen(false);
       setPendingPatch(null);
     },

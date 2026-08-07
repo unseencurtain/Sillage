@@ -91,16 +91,32 @@ Catalogue sync only — never places vendor orders. Order spend still requires O
 
 ---
 
+## Why shop prices are stored (not display-only)
+
+WooCommerce cart, sorting, filters, and HPOS need `_regular_price` / `_price` on the product.
+Sync **writes** retail = `f(cost, fx, vat, tiers, multiplier)` into those metas. Wholesale **cost**
+stays in `sil_offers` (and vendor meta). Changing a multiplier does nothing until a **price rewrite**
+runs — Save on Settings/Vendors starts that automatically (rewrite-only from DB offers; no live
+vendor download). Fully dynamic display-only pricing would be a larger redesign; storing retail is
+intentional.
+
+---
+
 ## Sync / Runs
 
 | Control | API | Effect |
 |---|---|---|
-| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary CTA. While active shows spinner + **Syncing…** and disables other start buttons. Toast on start + finish; polls runs every 2s while active |
+| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary CTA. While active shows spinner + **Syncing…** and disables other start buttons. Toast on start + finish; polls runs every 2s while active. If a run is already active, API returns `started:false` / `alreadyRunning:true` (honest status — not a fake “queued”) |
 | **Stop sync** | `POST /api/sync/stop` | **Enabled only while a run is active** (idle: grey + tooltip “No sync running”). Aborts between batches; sets **`sync_enabled=0`** until Sync enabled or Run |
 | Run fast sync (More sync modes) | same, `mode:"fast"` | Price/stock refresh for all active retail vendors. One-line help in UI |
 | Run full sync (More sync modes) | same, `mode:"full"` | Full catalogue path (taxonomy, vanish, park WPF, etc.). Heavier; usually overnight |
 | Live API cards (BF / BTS) | `GET /api/sync/live-status` | Read-only gate status for the two retail vendors |
 | Runs table + pagination | `GET /api/sync/runs` | History |
+
+**Pricing Save vs Run sync:** multiplier / tiers / vendor FX·VAT changes use
+`rewriteOnly` + `source=cache` (from `sil_offers`). They do **not** wait on live feed rate limits.
+If a catalogue sync is already running, Save sets `pending_price_rewrite` and a rewrite-only
+follow-up starts when the lock frees.
 
 **Schedule (not a button):** cron every 5 minutes → only opens catalogue sync in the **:00 / :30**
 windows, then applies `sync_enabled`, `full_sync_*`, `fast_sync_minutes`, `sync_source`. Order
@@ -150,17 +166,19 @@ still dry-run). Live submitted addresses are locked.
 
 ## Vendors (BeautyFort + BTS)
 
-Editable cards for `beautyfort` and `bts` only. Save → `PUT /api/vendors/:slug` → optional
-rewrite-only sync when multiplier/VAT changes. Confirmation required when changing **Active** or
-**Serviceable countries**.
+Editable cards for `beautyfort` and `bts` only. Save → `PUT /api/vendors/:slug`. Changing
+**price multiplier, FX, VAT, or min visible stock** marks all products dirty and kicks the same
+**rewrite-only** price recalc as Settings (active retail catalogue; no live vendor API). Toast:
+“Recalculating prices…” or “Sync already running — …will apply when it finishes”. Confirmation
+required when changing **Active** or **Serviceable countries**.
 
 | UI label | Storage | Effect |
 |---|---|---|
 | Storefront label | `storefront_label` | Customer-facing lane (e.g. LPS01 / LPS02) |
-| Price multiplier | `price_multiplier` (null = empty) | Per-vendor override **disables** global price tiers for that vendor |
-| Min visible stock | `min_visible_stock` | Stock ≤ threshold → hidden + outofstock |
-| FX rate | `fx_rate` | Cost = vendor × FX × (1+VAT) |
-| VAT rate (fraction) | `vat_rate` | Use `0.21` for 21% |
+| Price multiplier | `price_multiplier` (null = empty) | Per-vendor override **disables** global price tiers for that vendor. **Save → price rewrite** |
+| Min visible stock | `min_visible_stock` | Stock ≤ threshold → hidden + outofstock. **Save → price rewrite** |
+| FX rate | `fx_rate` | Cost = vendor × FX × (1+VAT). **Save → price rewrite** |
+| VAT rate (fraction) | `vat_rate` | Use `0.21` for 21%. **Save → price rewrite** |
 | Min order value (EUR) | `order_config.min_order_value_eur` | Bridge hard-blocks checkout under MOQ |
 | Serviceable countries | `serviceable_countries` JSON | ISO list; blocks approve/dispatch outside list |
 | Live downloads / day | `live_max_per_day` | Catalogue live-fetch daily cap |
@@ -202,9 +220,13 @@ empty overlay file before first `compose up` so Docker mounts a file, not a dire
 
 ## Settings
 
-Save → `PUT /api/settings` (allow-listed keys only). Price/visibility keys mark offers dirty and
-start a **cache rewrite-only** sync; `description_mode` / `volume_filter_mode` mark products dirty
-and start a **full/cache** sync.
+Save → `PUT /api/settings` (allow-listed keys only). Price/visibility keys
+(`global_price_multiplier`, `price_tiers`, `global_stock_threshold`, `hide_products_without_image`)
+mark products dirty and start a **rewrite-only** sync from `sil_offers` (no live download). UI
+toasts **Recalculating prices…** and polls Sync until done. If a sync is already running, Save
+**queues** a follow-up (`pending_price_rewrite`) — toast explains the wait; no need to mash Run
+fast sync. `description_mode` / `volume_filter_mode` mark products dirty and start a **full/cache**
+sync (same queue behaviour).
 
 UI sections (each control has one-line help): **Shop URLs** → **Pricing & catalogue** → **Cart
 minimum** → **Schedule** → **Order safety** → **Advanced** (live-feed gate, volume/description,
