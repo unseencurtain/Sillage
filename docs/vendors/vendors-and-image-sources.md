@@ -97,8 +97,8 @@ on a VPS (no X server). Operator flow:
 6. Optional `npm run watermark` — LPS logo via sharp into `watermarked/`
 7. `npm run build-overrides` — merge EAN→`PUBLIC_URL_BASE` URLs into
    `sillage-core/data/image_overrides.json` (never clobber existing keys)
-8. Host files under `ecom_sites/data/media/` bind-mounted RO into `ecom` at `/lps-media/`
-   (compose change described in the tool README; keep media out of `data/wp/`)
+8. Host files under `ecom_sites/data/media/` (host bind-mount into `lps-media` nginx;
+   public path `/lps-media/` via edge proxy — keep media out of `data/wp/`)
 9. Fast/rewrite sync so the storefront picks up the new override URLs
 
 ### Shipping rates (reference only — not used)

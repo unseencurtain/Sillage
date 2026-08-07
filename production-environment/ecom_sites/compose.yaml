@@ -25,6 +25,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # Static product images only. Host bind-mount (not a named volume) so operators and
+  # host_override_images / Brasty can drop files under ./data/media and see them served.
+  lps-media:
+    container_name: lps-media
+    hostname: lps-media
+    image: nginx:alpine
+    networks:
+      - ecom_network
+    restart: always
+    volumes:
+      - ./data/media:/usr/share/nginx/html:ro
+      - ./config/nginx-lps-media.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Local edge so http://localhost/lps-media/... works without Apache on ecom.
+  # VPS uses host Caddy instead (see deploy-vps.sh); this service is compose-local.
+  shop-gateway:
+    container_name: shop-gateway
+    hostname: shop-gateway
+    image: caddy:2-alpine
+    networks:
+      - ecom_network
+    ports:
+      - "80:80"
+    restart: always
+    depends_on:
+      - ecom
+      - lps-media
+    volumes:
+      - ./config/Caddyfile.compose:/etc/caddy/Caddyfile:ro
+
   ecom:
     container_name: ecom
     hostname: ecom
@@ -32,8 +62,9 @@ services:
     networks:
       - ecom_network
       - redis_network
-    ports:
-      - "80:80"
+    # Host :80 is owned by shop-gateway (routes /lps-media → lps-media, else → ecom).
+    expose:
+      - "80"
     restart: always
     depends_on:
       ecom-db:
@@ -41,9 +72,6 @@ services:
     volumes:
       - ./data/wp:/var/www/html
       - ./config/php.ini:/usr/local/etc/php/conf.d/conf.ini:ro
-      # Product images scraped/watermarked by tools/images/brasty (never under data/wp/).
-      - ./data/media:/var/www/lps-media:ro
-      - ./config/apache-lps-media.conf:/etc/apache2/conf-enabled/lps-media.conf:ro
     environment:
       WORDPRESS_DB_HOST: ecom-db
       WORDPRESS_DB_USER: ${MYSQL_USER}
