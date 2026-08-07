@@ -13,9 +13,14 @@ import { join } from "node:path";
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
-import { isPlaceholderImage, isWeakVendorThumb } from "./imageRules.ts";
+import { isPlaceholderImage, isUnusableImage } from "./imageRules.ts";
 
-export { isPlaceholderImage, isWeakVendorThumb, shouldHideForMissingImage } from "./imageRules.ts";
+export {
+  isPlaceholderImage,
+  isUnusableImage,
+  isWeakVendorThumb,
+  shouldHideForMissingImage,
+} from "./imageRules.ts";
 
 const log = logger("images");
 
@@ -36,7 +41,7 @@ export function loadImageOverrides(root = process.cwd()): Map<string, string> {
     const map = new Map<string, string>();
     for (const [k, v] of Object.entries(raw)) {
       const ean = normalizeEan(k);
-      if (!ean || isPlaceholderImage(v)) continue;
+      if (!ean || isUnusableImage(v)) continue;
       map.set(ean, v);
     }
     overridesCache = map;
@@ -60,7 +65,8 @@ export async function loadOfferImageIndex(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   for (const row of rows) {
     const ean = normalizeEan(row.primary_ean);
-    if (!ean || isPlaceholderImage(row.image_url)) continue;
+    // Never index weak BeautyFort /pic/ thumbs — they must not "fill" another vendor's gap.
+    if (!ean || isUnusableImage(row.image_url)) continue;
     if (!map.has(ean)) map.set(ean, row.image_url!);
   }
   return map;
@@ -80,13 +86,15 @@ export async function buildImageLookup(root = process.cwd()): Promise<ImageLooku
         const ean = normalizeEan(raw);
         if (!ean) continue;
         const override = overrides.get(ean);
-        if (override && override !== current) return override;
+        if (override && !isUnusableImage(override) && override !== current) return override;
         const hit = fromOffers.get(ean);
-        if (hit && hit !== current && (isWeakVendorThumb(current) || isPlaceholderImage(current))) {
+        if (hit && hit !== current && isUnusableImage(current)) {
           return hit;
         }
       }
-      return current;
+      // Still empty / placeholder / weak BF thumb with no better source — clear so
+      // hide_products_without_image can exclude the product instead of serving a tiny /pic/ URL.
+      return isUnusableImage(current) ? null : current;
     },
   };
 }
