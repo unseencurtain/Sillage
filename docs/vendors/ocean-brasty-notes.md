@@ -4,6 +4,12 @@ No credentials in this file. Put secrets in `python-analysis/.env` or `sillage-c
 
 ## wholesale-perfumes.eu (Ocean / SoleLuna)
 
+This is the **wholesaler**, not a consumer shop. Auth is HTTP Basic
+`OCEAN_USER` (e-shop email) + `OCEAN_TOKEN` (API token from their portal user
+settings). There is no separate “Ocean shop password” for Sillage — the token
+is the credential. Legacy `oceanfragrances.csv` is an offline image index only;
+prefer the catalog XML for pictures.
+
 | Feed | URL pattern | Cadence |
 |---|---|---|
 | Catalog (pictures) | `/xml/catalog/LovelyXml/en` | Daily ~05:00 — download ≤1×/day |
