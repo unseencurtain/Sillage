@@ -66,6 +66,20 @@ export const env = {
     language: opt("BTS_LANGUAGE", "en-US"),
   },
 
+  wholesalePerfumes: {
+    user: opt("WHOLESALE_PERFUMES_USER"),
+    token: opt("WHOLESALE_PERFUMES_TOKEN"),
+    catalogUrl: opt(
+      "WHOLESALE_PERFUMES_CATALOG_URL",
+      "https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en",
+    ),
+    storeUrl: opt(
+      "WHOLESALE_PERFUMES_STOCK_URL",
+      "https://www.wholesale-perfumes.eu/xml/store/LovelyXml/EUR",
+    ),
+    apiBaseUrl: opt("WHOLESALE_PERFUMES_API_BASE_URL", "https://www.wholesale-perfumes.eu/api/v1"),
+  },
+
   dashboard: {
     user: opt("DASHBOARD_USER", "admin"),
     password: opt("DASHBOARD_PASSWORD"),

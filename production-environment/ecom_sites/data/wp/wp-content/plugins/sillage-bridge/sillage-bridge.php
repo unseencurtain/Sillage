@@ -35,7 +35,7 @@ define( 'SILLAGE_BRIDGE_FILE', __FILE__ );
 define( 'SILLAGE_BRIDGE_PATH', plugin_dir_path( __FILE__ ) );
 define( 'SILLAGE_BRIDGE_URL', plugin_dir_url( __FILE__ ) );
 
-/** The sillage-core database. Only sil_ean_index is ever read from it. */
+/** The sillage-core database. Plugin reads sil_ean_index, sil_settings, and sil_vendors. */
 if ( ! defined( 'SILLAGE_DB' ) ) {
 	define( 'SILLAGE_DB', 'sillage' );
 }
@@ -46,6 +46,7 @@ require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-search.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-rest.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-orders.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-cart.php';
+require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-cart-fee.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-tracking.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-admin.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-activator.php';
@@ -90,6 +91,7 @@ add_action(
 		( new Sillage_Rest() )->register();
 		( new Sillage_Orders() )->register();
 		( new Sillage_Cart() )->register();
+		( new Sillage_Cart_Fee() )->register();
 		( new Sillage_Tracking() )->register();
 
 		if ( is_admin() ) {

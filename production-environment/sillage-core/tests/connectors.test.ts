@@ -3,7 +3,14 @@ import { BeautyfortConnector } from "../src/vendors/beautyfort/connector.ts";
 import { BtsConnector } from "../src/vendors/bts/connector.ts";
 import { offerChecksum } from "../src/lib/checksum.ts";
 import { foldKey, productSlug, slugify, uniqueTermSlug } from "../src/lib/slugify.ts";
-import { computePricing, DEFAULT_RULES } from "../src/sync/pricing.ts";
+import { shouldHideForMissingImage } from "../src/sync/imageRules.ts";
+import {
+  computePricing,
+  DEFAULT_RULES,
+  parsePriceTiers,
+  resolveRules,
+  resolveTierMultiplier,
+} from "../src/sync/pricing.ts";
 
 // These run against the real downloaded feeds in .feedscratch, so they assert the actual data
 // shape rather than a hand-written fixture that could drift from reality.
@@ -234,7 +241,117 @@ describe("pricing", () => {
       { vendorPrice: 0.07, vendorRecommendedPrice: null, stock: 1 },
       { ...DEFAULT_RULES, multiplier: 0.01 },
     );
-    expect(r.effectivePrice).toBeGreaterThan(0);
+    expect(r.effectivePrice).toBe(0.01);
+  });
+
+  test("tier boundary: cost exactly 80 uses the ≤80 band", () => {
+    const tiers = parsePriceTiers([
+      { maxCost: 80, multiplier: 1.7 },
+      { maxCost: null, multiplier: 1.5 },
+    ]).tiers;
+    const rules = { ...DEFAULT_RULES, multiplier: 1.0, priceTiers: tiers };
+    expect(resolveTierMultiplier(80, rules)).toBe(1.7);
+    expect(computePricing({ vendorPrice: 80, vendorRecommendedPrice: null, stock: 1 }, rules).effectivePrice).toBe(
+      136,
+    );
+  });
+
+  test("tier boundary: just below and just above 80", () => {
+    const tiers = parsePriceTiers([
+      { maxCost: 80, multiplier: 1.7 },
+      { maxCost: null, multiplier: 1.5 },
+    ]).tiers;
+    const rules = { ...DEFAULT_RULES, multiplier: 1.0, priceTiers: tiers };
+    expect(resolveTierMultiplier(79.99, rules)).toBe(1.7);
+    expect(resolveTierMultiplier(80.01, rules)).toBe(1.5);
+  });
+
+  test("empty tier list falls back to the global multiplier", () => {
+    const rules = { ...DEFAULT_RULES, multiplier: 2.0, priceTiers: [] };
+    expect(resolveTierMultiplier(50, rules)).toBe(2.0);
+    expect(computePricing({ vendorPrice: 10, vendorRecommendedPrice: null, stock: 1 }, rules).effectivePrice).toBe(
+      20,
+    );
+  });
+
+  test("single unbounded tier applies to every cost", () => {
+    const tiers = parsePriceTiers([{ maxCost: null, multiplier: 1.7 }]).tiers;
+    const rules = { ...DEFAULT_RULES, multiplier: 1.0, priceTiers: tiers };
+    expect(resolveTierMultiplier(1, rules)).toBe(1.7);
+    expect(resolveTierMultiplier(9999, rules)).toBe(1.7);
+  });
+
+  test("malformed price_tiers input does not throw and yields empty tiers", () => {
+    expect(parsePriceTiers("not-json").tiers).toEqual([]);
+    expect(parsePriceTiers("not-json").warnings.length).toBeGreaterThan(0);
+    expect(parsePriceTiers([{ maxCost: "x", multiplier: -1 }, { maxCost: 10, multiplier: 1.2 }]).tiers).toEqual([
+      { maxCost: 10, multiplier: 1.2 },
+    ]);
+    // Unsorted input is sorted ascending with null last.
+    const sorted = parsePriceTiers([
+      { maxCost: null, multiplier: 1.5 },
+      { maxCost: 80, multiplier: 1.7 },
+    ]).tiers;
+    expect(sorted.map((t) => t.maxCost)).toEqual([80, null]);
+  });
+
+  test("per-vendor multiplier override wins over tiers", () => {
+    const rules = resolveRules(
+      {
+        multiplier: 1.0,
+        stockThreshold: 0,
+        maxRrpRatio: 10,
+        priceTiers: [
+          { maxCost: 80, multiplier: 1.7 },
+          { maxCost: null, multiplier: 1.5 },
+        ],
+      },
+      { priceMultiplier: 3, minVisibleStock: null, fxRate: 1 },
+    );
+    expect(rules.priceTiers).toEqual([]);
+    expect(rules.multiplier).toBe(3);
+    expect(computePricing({ vendorPrice: 50, vendorRecommendedPrice: null, stock: 1 }, rules).effectivePrice).toBe(
+      150,
+    );
+  });
+
+  test("vat_rate 0 reproduces pre-VAT numbers exactly", () => {
+    const input = { vendorPrice: 30.1, vendorRecommendedPrice: null, stock: 44 };
+    const without = computePricing(input, { ...DEFAULT_RULES, multiplier: 1.2, vatRate: 0 });
+    const withExplicitZero = computePricing(input, { ...DEFAULT_RULES, multiplier: 1.2 });
+    expect(without.effectivePrice).toBe(36.12);
+    expect(withExplicitZero.effectivePrice).toBe(36.12);
+    expect(resolveRules(
+      { multiplier: 1.2, stockThreshold: 0, maxRrpRatio: 10, priceTiers: [] },
+      { priceMultiplier: null, minVisibleStock: null, fxRate: 1, vatRate: 0 },
+    ).vatRate).toBe(0);
+  });
+
+  test("vat_rate uplifts cost before the markup tier is chosen", () => {
+    const tiers = parsePriceTiers([
+      { maxCost: 80, multiplier: 1.7 },
+      { maxCost: null, multiplier: 1.5 },
+    ]).tiers;
+    // vendor 70 × (1+0.2) = 84 → above the ≤80 band → 1.5×
+    const rules = { ...DEFAULT_RULES, multiplier: 1.0, priceTiers: tiers, vatRate: 0.2 };
+    expect(computePricing({ vendorPrice: 70, vendorRecommendedPrice: null, stock: 1 }, rules).effectivePrice).toBe(
+      126,
+    );
+    // Same vendor price with vat 0 stays in the ≤80 band.
+    const zeroVat = { ...rules, vatRate: 0 };
+    expect(computePricing({ vendorPrice: 70, vendorRecommendedPrice: null, stock: 1 }, zeroVat).effectivePrice).toBe(
+      119,
+    );
+  });
+});
+
+describe("shouldHideForMissingImage", () => {
+  test("hides only when enabled and the image is unusable", () => {
+    expect(shouldHideForMissingImage(null, true)).toBe(true);
+    expect(shouldHideForMissingImage("", true)).toBe(true);
+    expect(shouldHideForMissingImage("https://cdn.example/no_image.jpg", true)).toBe(true);
+    expect(shouldHideForMissingImage("https://cdn.example/real.jpg", true)).toBe(false);
+    expect(shouldHideForMissingImage(null, false)).toBe(false);
   });
 });
 
