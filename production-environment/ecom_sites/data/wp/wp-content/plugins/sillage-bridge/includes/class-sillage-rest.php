@@ -206,9 +206,6 @@ final class Sillage_Rest {
 			$did = true;
 		}
 
-		delete_transient( 'sillage_b2b_cats_v1' );
-		delete_transient( 'sillage_b2b_cats_v2' );
-
 		return $did;
 	}
 
@@ -264,7 +261,9 @@ final class Sillage_Rest {
 	/**
 	 * Idempotently set hierarchical+expandable on Blocksy product_cat filter widgets.
 	 *
-	 * Leaves attribute filters (volume, etc.) untouched. No-op when Blocksy widgets are absent.
+	 * Leaves attribute filters (volume, etc.) and brand logo filters untouched.
+	 * Parses JSON with nested objects (`"lock":{"remove":true}`) — a naive `[^{}]*`
+	 * regex misses those and silently no-ops.
 	 */
 	private function ensure_shop_category_filters_hierarchical(): bool {
 		$widgets = get_option( 'widget_block', null );
@@ -282,35 +281,8 @@ final class Sillage_Rest {
 				continue;
 			}
 
-			$new = preg_replace_callback(
-				'/<!-- wp:blocksy\/woocommerce-filters \{([^}]*)\} -->/',
-				static function ( array $m ): string {
-					$attrs = $m[1];
-					// Attribute filters (volume, skin-condition, …) stay flat.
-					if ( false !== strpos( $attrs, '"type":"attributes"' ) || false !== strpos( $attrs, '"attribute"' ) ) {
-						return $m[0];
-					}
-					if ( false !== strpos( $attrs, '"hierarchical":true' ) ) {
-						if ( false === strpos( $attrs, '"expandable"' ) ) {
-							$attrs .= ',"expandable":true';
-							return '<!-- wp:blocksy/woocommerce-filters {' . $attrs . '} -->';
-						}
-						return $m[0];
-					}
-					if ( false !== strpos( $attrs, '"hierarchical":false' ) ) {
-						$attrs = str_replace( '"hierarchical":false', '"hierarchical":true', $attrs );
-					} else {
-						$attrs = ( '' !== trim( $attrs ) ? $attrs . ',' : '' ) . '"hierarchical":true';
-					}
-					if ( false === strpos( $attrs, '"expandable"' ) ) {
-						$attrs .= ',"expandable":true';
-					}
-					return '<!-- wp:blocksy/woocommerce-filters {' . $attrs . '} -->';
-				},
-				$content
-			);
-
-			if ( is_string( $new ) && $new !== $content ) {
+			$new = $this->patch_blocksy_category_filter_content( $content );
+			if ( $new !== $content ) {
 				$widgets[ $key ]['content'] = $new;
 				$changed                    = true;
 			}
@@ -322,6 +294,88 @@ final class Sillage_Rest {
 
 		update_option( 'widget_block', $widgets, false );
 		return true;
+	}
+
+	/**
+	 * @param string $content Widget block HTML comment content.
+	 */
+	private function patch_blocksy_category_filter_content( string $content ): string {
+		$needle = '<!-- wp:blocksy/woocommerce-filters ';
+		$offset = 0;
+		$out    = '';
+		$len    = strlen( $content );
+
+		while ( false !== ( $pos = strpos( $content, $needle, $offset ) ) ) {
+			$out       .= substr( $content, $offset, $pos - $offset );
+			$json_start = $pos + strlen( $needle );
+			if ( $json_start >= $len || '{' !== $content[ $json_start ] ) {
+				$out   .= $needle;
+				$offset = $json_start;
+				continue;
+			}
+
+			$depth = 0;
+			$i     = $json_start;
+			for ( ; $i < $len; $i++ ) {
+				$ch = $content[ $i ];
+				if ( '{' === $ch ) {
+					++$depth;
+				} elseif ( '}' === $ch ) {
+					--$depth;
+					if ( 0 === $depth ) {
+						++$i;
+						break;
+					}
+				}
+			}
+
+			$json = substr( $content, $json_start, $i - $json_start );
+			$end  = $i;
+			if ( $end + 3 < $len && ' -->' === substr( $content, $end, 4 ) ) {
+				$end += 4;
+			}
+
+			$attrs = json_decode( $json, true );
+			if ( ! is_array( $attrs ) ) {
+				$out   .= substr( $content, $pos, $end - $pos );
+				$offset = $end;
+				continue;
+			}
+
+			// Attribute filters and brand logo strips stay as-is.
+			$type     = isset( $attrs['type'] ) ? (string) $attrs['type'] : '';
+			$taxonomy = isset( $attrs['taxonomy'] ) ? (string) $attrs['taxonomy'] : '';
+			if (
+				'attributes' === $type
+				|| isset( $attrs['attribute'] )
+				|| in_array( $taxonomy, array( 'product_brand', 'product_brands' ), true )
+			) {
+				$out   .= substr( $content, $pos, $end - $pos );
+				$offset = $end;
+				continue;
+			}
+
+			$already = ! empty( $attrs['hierarchical'] ) && ! empty( $attrs['expandable'] );
+			if ( $already ) {
+				$out   .= substr( $content, $pos, $end - $pos );
+				$offset = $end;
+				continue;
+			}
+
+			$attrs['hierarchical'] = true;
+			$attrs['expandable']   = true;
+			$encoded               = wp_json_encode( $attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+			if ( ! is_string( $encoded ) ) {
+				$out   .= substr( $content, $pos, $end - $pos );
+				$offset = $end;
+				continue;
+			}
+
+			$out   .= $needle . $encoded . ' -->';
+			$offset = $end;
+		}
+
+		return $out . substr( $content, $offset );
 	}
 
 	/** Health and configuration snapshot, used by the dashboard's Overview page. */
