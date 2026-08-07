@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { env, sil, wp } from "../../config/env.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
-import { loadSettings, loadVendors, setSetting } from "../../db/settings.ts";
+import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
 import {
   loadCompanyBilling,
@@ -18,10 +18,12 @@ import { destinationAddress, readWooOrder } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
 import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
+import { parsePriceTiers } from "../../sync/pricing.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
 import type { OrderAddress } from "../../orders/types.ts";
 import { feedCacheAgeMinutes } from "../../vendors/feedCache.ts";
-import { checkLiveGate } from "../../vendors/liveGate.ts";
+import { checkLiveGate, resolveVendorLiveMaxPerDay } from "../../vendors/liveGate.ts";
+import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
@@ -113,22 +115,24 @@ api.post("/sync/stop", async (c) => {
 
 api.get("/sync/live-status", async (c) => {
   const settings = await loadSettings();
-  const [bfGate, btsGate, bfAge, btsAge] = await Promise.all([
+  const [bfGate, btsGate, bfAge, btsAge, bfMax, btsMax] = await Promise.all([
     checkLiveGate("beautyfort"),
     checkLiveGate("bts"),
     feedCacheAgeMinutes("beautyfort"),
     feedCacheAgeMinutes("bts"),
+    resolveVendorLiveMaxPerDay("beautyfort"),
+    resolveVendorLiveMaxPerDay("bts"),
   ]);
   return c.json({
     liveFeedMinMinutes: settings.liveFeedMinMinutes,
     beautyfort: {
       ...bfGate,
-      maxPerDay: settings.beautyfortLiveMaxPerDay,
+      maxPerDay: bfMax,
       cacheAgeMinutes: bfAge,
     },
     bts: {
       ...btsGate,
-      maxPerDay: settings.btsLiveMaxPerDay,
+      maxPerDay: btsMax,
       cacheAgeMinutes: btsAge,
     },
   });
@@ -155,7 +159,7 @@ api.get("/products", async (c) => {
     ),
     query<RowDataPacket>(
       `SELECT p.id, p.sku, p.wp_post_id, p.slug, o.name, o.stock, o.vendor_price, o.primary_ean,
-              v.slug AS vendor, o.image_url
+              COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          JOIN ${sil("sil_vendors")} v ON v.id = o.vendor_id
@@ -172,19 +176,109 @@ api.get("/vendors", async (c) => {
   const vendors = await loadVendors();
   const settings = await loadSettings();
   return c.json({
-    vendors: vendors.map((v) => ({
-      id: v.id,
-      slug: v.slug,
-      name: v.name,
-      skuPrefix: v.skuPrefix,
-      currency: v.currency,
-      fxRate: v.fxRate,
-      priceMultiplier: v.priceMultiplier ?? settings.priceMultiplier,
-      minVisibleStock: v.minVisibleStock ?? settings.stockThreshold,
-      serviceableCountries: v.serviceableCountries,
-      active: v.active,
-      orderConfig: v.orderConfig,
-    })),
+    globalPriceMultiplier: settings.priceMultiplier,
+    globalStockThreshold: settings.stockThreshold,
+    vendors: vendors.map((v) => {
+      const minOrder = v.orderConfig.min_order_value_eur;
+      const minOrderValueEur =
+        typeof minOrder === "number" && Number.isFinite(minOrder)
+          ? minOrder
+          : typeof minOrder === "string" && Number.isFinite(Number(minOrder))
+            ? Number(minOrder)
+            : null;
+      return {
+        id: v.id,
+        slug: v.slug,
+        name: v.name,
+        storefrontLabel: v.storefrontLabel,
+        skuPrefix: v.skuPrefix,
+        currency: v.currency,
+        fxRate: v.fxRate,
+        vatRate: v.vatRate,
+        // Raw nulls so the editor can show "fall back to global" — do not coalesce.
+        priceMultiplier: v.priceMultiplier,
+        minVisibleStock: v.minVisibleStock,
+        minOrderValueEur,
+        serviceableCountries: v.serviceableCountries,
+        active: v.active,
+        liveMaxPerDay: v.liveMaxPerDay,
+        storeLiveMaxPerDay: v.storeLiveMaxPerDay,
+        storeLiveMinMinutes: v.storeLiveMinMinutes,
+        orderConfig: v.orderConfig,
+      };
+    }),
+  });
+});
+
+api.put("/vendors/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    await recordEvent("warn", "vendors", `reject patch for ${slug}: unparseable JSON`);
+    return c.json({ error: "Request body must be valid JSON" }, 400);
+  }
+
+  const parsed = parseVendorPatch(body);
+  if (!parsed.ok) {
+    await recordEvent("warn", "vendors", `reject patch for ${slug}: ${parsed.error}`);
+    return c.json({ error: parsed.error }, 400);
+  }
+
+  let existing: Awaited<ReturnType<typeof loadVendor>>;
+  try {
+    existing = await loadVendor(slug);
+  } catch {
+    return c.json({ error: `Unknown vendor "${slug}"` }, 404);
+  }
+
+  const patch = parsed.patch;
+  const orderConfig = { ...existing.orderConfig };
+  if (patch.minOrderValueEur !== undefined) {
+    if (patch.minOrderValueEur === null) {
+      delete orderConfig.min_order_value_eur;
+    } else {
+      orderConfig.min_order_value_eur = patch.minOrderValueEur;
+    }
+  }
+
+  await updateVendor(slug, {
+    storefrontLabel: patch.storefrontLabel,
+    priceMultiplier: patch.priceMultiplier,
+    minVisibleStock: patch.minVisibleStock,
+    fxRate: patch.fxRate,
+    vatRate: patch.vatRate,
+    active: patch.active,
+    serviceableCountries: patch.serviceableCountries,
+    liveMaxPerDay: patch.liveMaxPerDay,
+    storeLiveMaxPerDay: patch.storeLiveMaxPerDay,
+    storeLiveMinMinutes: patch.storeLiveMinMinutes,
+    orderConfig: patch.minOrderValueEur !== undefined ? orderConfig : undefined,
+  });
+
+  // Multiplier and VAT change storefront prices; hashes cover vendor feed data only.
+  const touchPrice = patch.priceMultiplier !== undefined || patch.vatRate !== undefined;
+  let marked = 0;
+  if (touchPrice) {
+    marked = await markAllPricesDirty();
+    if (marked > 0) {
+      void runSync({ mode: "fast", source: "cache", rewriteOnly: true }).catch((err) =>
+        log.error("vendor-settings sync failed", String(err)),
+      );
+    }
+  }
+
+  await recordEvent("info", "vendors", `updated ${slug}`, {
+    fields: Object.keys(patch),
+    marked,
+  });
+
+  return c.json({
+    ok: true,
+    marked,
+    syncStarted: marked > 0,
+    syncKind: marked > 0 ? "fast/rewrite-only" : null,
   });
 });
 
@@ -445,7 +539,14 @@ api.get("/settings", async (c) => {
     full_sync_hour: String(s.fullSyncHour),
     sync_source: s.syncSource,
     global_price_multiplier: String(s.priceMultiplier),
+    price_tiers: JSON.stringify(s.priceTiers),
     global_stock_threshold: String(s.stockThreshold),
+    hide_products_without_image: s.hideProductsWithoutImage ? "1" : "0",
+    cart_min_enabled: s.cartMinEnabled ? "1" : "0",
+    cart_min_subtotal_eur: String(s.cartMinSubtotalEur),
+    cart_min_fee_eur: String(s.cartMinFeeEur),
+    cart_min_fee_label: s.cartMinFeeLabel,
+    cart_min_message: s.cartMinMessage,
     orders_dry_run: s.ordersDryRun ? "1" : "0",
     orders_auto_dispatch: s.ordersAutoDispatch ? "1" : "0",
     orders_max_value_eur: String(s.ordersMaxValueEur),
@@ -455,8 +556,6 @@ api.get("/settings", async (c) => {
     description_mode: s.descriptionMode,
     volume_filter_mode: s.volumeFilterMode,
     live_feed_min_minutes: String(s.liveFeedMinMinutes),
-    beautyfort_live_max_per_day: String(s.beautyfortLiveMaxPerDay),
-    bts_live_max_per_day: String(s.btsLiveMaxPerDay),
     company_billing_beautyfort: JSON.stringify(bfBilling),
     company_billing_bts: JSON.stringify(btsBilling),
   });
@@ -471,7 +570,14 @@ api.put("/settings", async (c) => {
     "full_sync_hour",
     "sync_source",
     "global_price_multiplier",
+    "price_tiers",
     "global_stock_threshold",
+    "hide_products_without_image",
+    "cart_min_enabled",
+    "cart_min_subtotal_eur",
+    "cart_min_fee_eur",
+    "cart_min_fee_label",
+    "cart_min_message",
     "orders_dry_run",
     "orders_auto_dispatch",
     "orders_max_value_eur",
@@ -481,14 +587,17 @@ api.put("/settings", async (c) => {
     "description_mode",
     "volume_filter_mode",
     "live_feed_min_minutes",
-    "beautyfort_live_max_per_day",
-    "bts_live_max_per_day",
     "company_billing_beautyfort",
     "company_billing_bts",
   ]);
   // Settings that change what we write to WooCommerce. Hashes only see vendor feed data, so a
   // multiplier edit would otherwise look like "nothing changed" forever.
-  const priceKeys = new Set(["global_price_multiplier", "global_stock_threshold"]);
+  const priceKeys = new Set([
+    "global_price_multiplier",
+    "price_tiers",
+    "global_stock_threshold",
+    "hide_products_without_image",
+  ]);
   const contentKeys = new Set(["description_mode", "volume_filter_mode"]);
 
   let n = 0;
@@ -507,7 +616,13 @@ api.put("/settings", async (c) => {
       n++;
       continue;
     }
-    await setSetting(key, value);
+    if (key === "price_tiers") {
+      // Persist the canonical sorted/validated form so the dashboard round-trips cleanly.
+      const parsed = parsePriceTiers(value);
+      await setSetting(key, JSON.stringify(parsed.tiers));
+    } else {
+      await setSetting(key, value);
+    }
     n++;
     if (priceKeys.has(key)) touchPrice = true;
     if (contentKeys.has(key)) touchContent = true;

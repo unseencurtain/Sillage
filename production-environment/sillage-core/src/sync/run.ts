@@ -23,8 +23,9 @@ import {
   type TermRef,
 } from "./taxonomy.ts";
 import { clearSyncAbort, SyncAbortedError, throwIfSyncAborted } from "./abort.ts";
-import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
+import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
+import type { CacheVendor } from "../vendors/feedCache.ts";
 import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
 
 const log = logger("sync");
@@ -106,6 +107,8 @@ export interface SyncSummary {
   pricesUpdated: number;
   termsCreated: number;
   errors: number;
+  /** Products hidden because the resolved image was still missing/placeholder. */
+  hiddenNoImage: number;
 }
 
 async function startRun(mode: WriteMode, source: FeedSource, vendorId: number | null): Promise<number> {
@@ -195,6 +198,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     pricesUpdated: 0,
     termsCreated: 0,
     errors: 0,
+    hiddenNoImage: 0,
   };
 
   try {
@@ -219,6 +223,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.postsUpdated = written.postsUpdated;
         summary.pricesUpdated = written.pricesUpdated;
         summary.errors += written.errors;
+        summary.hiddenNoImage = written.hiddenNoImage;
       }
       summary.durationMs = Date.now() - startedAt;
       await finishRun(runId, startedAt, summary);
@@ -297,7 +302,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
             bucket = new Set();
             attributeValues.set(vendorTax, bucket);
           }
-          bucket.add(VENDOR_LABELS[vendor.slug] ?? vendor.name);
+          bucket.add(vendorStorefrontLabel(vendor));
         }
       }
     }
@@ -313,7 +318,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.termsCreated += result.created;
       }
 
-      const vendorShop = await ensureVendorShopCategories(allVendors, VENDOR_LABELS);
+      const storefrontLabels: Record<string, string> = {};
+      for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
+      const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
       summary.termsCreated += vendorShop.created;
 
       await resolveProductIdentities(settings);
@@ -340,6 +347,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.postsUpdated = written.postsUpdated;
         summary.pricesUpdated = written.pricesUpdated;
         summary.errors += written.errors;
+        summary.hiddenNoImage = written.hiddenNoImage;
 
         // Once per run, never per batch.
         await recountTerms(["product_cat", BRAND_TAXONOMY, ...Object.values(ATTRIBUTE_TAXONOMIES)]);
@@ -354,6 +362,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       log.progressEnd();
       summary.pricesUpdated = written.pricesUpdated;
       summary.errors += written.errors;
+      summary.hiddenNoImage = written.hiddenNoImage;
 
       // Stock changes move products in and out of the catalogue, so counts shift.
       await recountTerms(["product_cat", BRAND_TAXONOMY]);
@@ -366,7 +375,8 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     log.info(
       `run ${runId} finished in ${formatDuration(summary.durationMs)} — ` +
         `${summary.postsCreated} created, ${summary.postsUpdated} updated, ` +
-        `${summary.pricesUpdated} repriced, ${summary.vanished} vanished, ${summary.errors} errors`,
+        `${summary.pricesUpdated} repriced, ${summary.vanished} vanished, ` +
+        `${summary.hiddenNoImage} hidden (no image), ${summary.errors} errors`,
     );
     return summary;
   } catch (err) {
@@ -400,7 +410,12 @@ async function fastSyncVendor(
   summary: SyncSummary,
 ): Promise<number> {
   if (connector.fetchPriceStock && options.source === "live") {
-    const gate = await checkLiveGate(vendor.slug as "beautyfort" | "bts");
+    // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock — do not apply the
+    // catalog once-per-day gate here or fast syncs would stall after the first catalog pull.
+    const sharedGate = vendor.slug !== "wholesale-perfumes";
+    const gate = sharedGate
+      ? await checkLiveGate(vendor.slug as CacheVendor)
+      : { allow: true, reason: "wholesale-perfumes store self-gated", retryInMinutes: 0 };
     if (!gate.allow) {
       log.warn(`${vendor.slug}: skipping live delta — ${gate.reason}`);
     } else {
@@ -409,7 +424,7 @@ async function fastSyncVendor(
         const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
         log.progressEnd();
         if (updates) {
-          await recordLiveFetch(vendor.slug as "beautyfort" | "bts");
+          if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
           summary.fetched += updates.length;
           const changed = await applyPriceStockDelta(vendor.id, updates);
           summary.updated += changed;
