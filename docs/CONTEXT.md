@@ -22,12 +22,15 @@ Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
 `redis_network` (ecom ↔ valkey ↔ sillage-core).
 
-**Product images (`/lps-media/`).** Host directory `production-environment/ecom_sites/data/media/`
+**Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
 is bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
-Docker volume — operators and download scripts drop files on the host path). Public URLs stay
-`https://<shop>/lps-media/<file>`. Locally `shop-gateway` strips the prefix; on VPS host Caddy
-`handle_path /lps-media/*` reverse-proxies to `lps-media`. WordPress/`ecom` does not serve these
-files. Sync still stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`).
+Docker volume — operators and download scripts drop files on the host path). Preferred public URLs
+are `https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
+`https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
+`shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
+Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). Base URL is
+configurable via `sil_settings.image_cdn_base_url` (dashboard) and tool env
+`LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default `https://images.slilverbelt.xyz`).
 
 ```bash
 docker network create ecom_network
@@ -89,8 +92,17 @@ plus `SELECT` on `wp_options`, `wp_wc_orders`, `wp_wc_order_addresses`,
 
 Nothing on `wp_users`, `wp_usermeta`, or writes to `wp_options`.
 
-`lime` (WordPress) gets `SELECT` on `sillage.sil_ean_index` only — that is the single table the
-plugin reads directly.
+`lime` (WordPress) gets `SELECT` on exactly the sillage tables the plugin reads:
+
+```
+sillage.sil_ean_index
+sillage.sil_settings
+sillage.sil_vendors
+```
+
+Granted by `ecom_sites/bootstrap-sillage.sh` and `scripts/deploy-vps.sh` after migrate (table-level
+`GRANT` requires the tables to exist). `config/sillage-grants.sql` documents the sillage-core user
+only; the lime grants stay in those post-migrate scripts.
 
 ### MariaDB tuning
 
@@ -200,6 +212,7 @@ This is a closed list. If a task seems to require adding write logic here, it be
 5. Fire an HMAC-signed webhook to sillage-core when an order reaches a dispatchable status
 6. On activation: register `pa_gender` / `pa_item-type` / `pa_volume` via `wc_create_attribute()`
 7. A read-only wp-admin status page linking to the dashboard
+8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
@@ -238,6 +251,42 @@ attribute mapping, or the taxonomy a term lives in.
 ---
 
 ## 6. Vendors
+
+### Vendors versus image sources — read this before adding anything
+
+Getting this wrong has already cost a rename. Two different kinds of external system exist and they
+are **not** interchangeable.
+
+A **vendor** is a supplier we buy from. It has a row in `sil_vendors`, a `VendorConnector`, a SKU
+prefix, stock and prices, and an order path that spends real money. **There are exactly three, and
+adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
+
+| Vendor | Slug | SKU prefix | Storefront label | What it is |
+|---|---|---|---|---|
+| BTS Wholesaler | `bts` | `BTS` | LPS01 | REST + JWT |
+| BeautyFort | `beautyfort` | `BF` | LPS02 | SOAP v4 |
+| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | B2B wholesaler: catalog + stock XML, cart order API |
+
+An **image source** only ever produces `EAN → image URL` pairs. It has no vendor row, no connector,
+no stock, no prices and no order path. Images are matched to products by EAN alone, so any source
+can illustrate any vendor's product.
+
+| Image source | Where | Notes |
+|---|---|---|
+| oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
+| Brasty | `tools/images/brasty/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
+| Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export |
+| Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
+| wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |
+
+Naming rules, because these have been confused before:
+
+- **Never call wholesale-perfumes.eu "ocean".** "Ocean" means oceanfragrances, the image CSV.
+- Its credential is an **API token** from the portal user settings, used as the HTTP Basic password
+  with the account email. There is no separate Sillage password for it.
+- Its SKU prefix is `WPF`, not `WP` — `wp` means WordPress everywhere else in this codebase.
+
+### Vendor API details
 
 | | BeautyFort | BTS Wholesaler |
 |---|---|---|

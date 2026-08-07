@@ -16,6 +16,7 @@ const settings = (patch: Partial<GlobalSettings> = {}): GlobalSettings => ({
   fullSyncEnabled: true,
   fullSyncHour: 3,
   syncSource: "live",
+  imageCdnBaseUrl: "https://images.slilverbelt.xyz",
   ordersDryRun: true,
   ordersAutoDispatch: false,
   ordersMaxValueEur: 500,

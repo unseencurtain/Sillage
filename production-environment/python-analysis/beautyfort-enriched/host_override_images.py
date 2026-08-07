@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
 Download remote image URLs from image_overrides.json into ecom_sites/data/media/
-and rewrite those keys to PUBLIC_URL_BASE/<EAN>.<ext> (/lps-media hosting).
+and rewrite those keys to PUBLIC_URL_BASE/<EAN>.<ext> (images CDN / lps-media).
 
 Default scope: wholesale-perfumes flask_front CDN (images.elsvc.net). Never clobber
-override keys that already point at /lps-media. Resume-friendly (skips existing files).
+override keys that already point at the public base (or legacy /lps-media paths).
+Resume-friendly (skips existing files).
 
 Usage:
   python3 host_override_images.py --dry-run
   python3 host_override_images.py --host images.elsvc.net
   python3 host_override_images.py --host www.oceanfragrances.com --limit 50
 
-Env:
-  PUBLIC_URL_BASE  default https://cosmetic.slilverbelt.xyz/lps-media
+Env (first match wins):
+  LPS_MEDIA_BASE_URL / IMAGE_HOST_BASE_URL / PUBLIC_URL_BASE
+  default https://images.slilverbelt.xyz
 """
 from __future__ import annotations
 
@@ -20,7 +22,6 @@ import argparse
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,7 +32,15 @@ ROOT = Path(__file__).resolve().parent
 ANALYSIS = ROOT.parent
 REPO_ECOM_MEDIA = ANALYSIS.parent / "ecom_sites" / "data" / "media"
 CORE_OVERRIDES = ANALYSIS.parent / "sillage-core" / "data" / "image_overrides.json"
-DEFAULT_PUBLIC = "https://cosmetic.slilverbelt.xyz/lps-media"
+DEFAULT_PUBLIC = "https://images.slilverbelt.xyz"
+
+
+def resolve_public_base() -> str:
+    for key in ("LPS_MEDIA_BASE_URL", "IMAGE_HOST_BASE_URL", "PUBLIC_URL_BASE"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return raw.rstrip("/")
+    return DEFAULT_PUBLIC
 
 
 def load_dotenv(path: Path) -> None:
@@ -93,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         "--media-dir",
         type=Path,
         default=REPO_ECOM_MEDIA,
-        help="Host directory bind-mounted into lps-media nginx (served at /lps-media/)",
+        help="Host directory bind-mounted into lps-media nginx (document root)",
     )
     parser.add_argument(
         "--host",
@@ -102,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--public-base",
-        default=os.environ.get("PUBLIC_URL_BASE", DEFAULT_PUBLIC).rstrip("/"),
-        help="Public URL prefix for rewritten overrides",
+        default=resolve_public_base(),
+        help="Public URL prefix for rewritten overrides (no trailing slash)",
     )
     parser.add_argument("--concurrency", type=int, default=6)
     parser.add_argument("--limit", type=int, default=0, help="Max EANs to process (0=all)")
@@ -127,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     for ean, url in overrides.items():
         if not isinstance(url, str) or not url.startswith("http"):
             continue
-        if "/lps-media" in url:
+        if url.startswith(f"{args.public_base}/") or "/lps-media/" in url:
             continue
         host = urlparse(url).hostname or ""
         if host != args.host:

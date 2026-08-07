@@ -6,6 +6,7 @@
 #       --host ovh \
 #       --shop cosmetic.silverblade.xyz \
 #       --dash sillage.silverblade.xyz \
+#       [--images images.silverblade.xyz] \
 #       [--dns] \
 #       [--clone-from ovhe] \
 #       [--ip 51.79.255.226]
@@ -23,12 +24,13 @@ set -euo pipefail
 HOST=""
 SHOP_DOMAIN=""
 DASH_DOMAIN=""
+IMAGES_DOMAIN=""
 DO_DNS=0
 CLONE_FROM=""
 IP=""
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -37,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     --host) HOST="${2:?}"; shift 2 ;;
     --shop) SHOP_DOMAIN="${2:?}"; shift 2 ;;
     --dash) DASH_DOMAIN="${2:?}"; shift 2 ;;
+    --images) IMAGES_DOMAIN="${2:?}"; shift 2 ;;
     --dns) DO_DNS=1; shift ;;
     --clone-from) CLONE_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
@@ -88,7 +91,7 @@ if [[ ! -f "$CHRONO" ]]; then
 EOF
 fi
 
-log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} dns=${DO_DNS} clone_from=${CLONE_FROM:-none}"
+log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} dns=${DO_DNS} clone_from=${CLONE_FROM:-none}"
 
 if [[ -z "$IP" ]]; then
   IP=$("${SSH[@]}" "$HOST" 'curl -4 -sS --max-time 5 ifconfig.me || curl -4 -sS --max-time 5 icanhazip.com' | tr -d '[:space:]')
@@ -97,8 +100,13 @@ fi
 log_step "Public IP ${IP}"
 
 if [[ "$DO_DNS" -eq 1 ]]; then
-  bash "$ROOT/production-environment/scripts/porkbun-dns.sh" "$SHOP_DOMAIN" "$DASH_DOMAIN" "$IP"
-  log_step "Porkbun A records set for shop+dash → ${IP}"
+  if [[ -n "$IMAGES_DOMAIN" ]]; then
+    bash "$ROOT/production-environment/scripts/porkbun-dns.sh" "$SHOP_DOMAIN" "$DASH_DOMAIN" "$IP" "$IMAGES_DOMAIN"
+    log_step "Porkbun A records set for shop+dash+images → ${IP}"
+  else
+    bash "$ROOT/production-environment/scripts/porkbun-dns.sh" "$SHOP_DOMAIN" "$DASH_DOMAIN" "$IP"
+    log_step "Porkbun A records set for shop+dash → ${IP}"
+  fi
 fi
 
 echo "==> rsync code → $HOST"
@@ -212,7 +220,7 @@ echo "Dashboard password saved to $CREDS"
 log_step "Wrote dashboard creds to ${CREDS}"
 
 echo "==> remote compose / caddy / bring-up"
-"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' SILLAGE_DASHBOARD_URL='https://${DASH_DOMAIN}' CLONE_MODE='${CLONE_FROM:+1}' WP_ADMIN_PASS='${WP_ADMIN_PASS}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' SILLAGE_DASHBOARD_URL='https://${DASH_DOMAIN}' CLONE_MODE='${CLONE_FROM:+1}' WP_ADMIN_PASS='${WP_ADMIN_PASS}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 cat > ~/ecom_sites/config/mariadb.cnf <<'CNF'
@@ -322,9 +330,17 @@ EOF
 sudo mkdir -p /home/ubuntu/ecom_sites/data/media
 # Remove legacy Apache alias mount if a prior deploy left the conf behind.
 rm -f /home/ubuntu/ecom_sites/config/apache-lps-media.conf
+IMAGES_SITE_BLOCK=""
+if [[ -n "${IMAGES_DOMAIN}" ]]; then
+  # Dedicated media host: document root at / (no /lps-media prefix). Shop path remains a fallback.
+  IMAGES_SITE_BLOCK="${IMAGES_DOMAIN} {
+	reverse_proxy localhost:${MEDIA_PORT}
+}"
+fi
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
-	# Product images: host dir → lps-media container (not WordPress/Apache).
+	# Product images fallback: host dir → lps-media container (not WordPress/Apache).
+	# Prefer the images.* CDN host when configured (see image_cdn_base_url / LPS_MEDIA_BASE_URL).
 	handle_path /lps-media/* {
 		reverse_proxy localhost:${MEDIA_PORT}
 	}
@@ -333,6 +349,7 @@ ${SHOP_DOMAIN} {
 ${DASH_DOMAIN} {
 	reverse_proxy localhost:4000
 }
+${IMAGES_SITE_BLOCK}
 EOF
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
@@ -489,7 +506,7 @@ docker compose build sillage-core
 docker compose up -d lps-media ecom sillage-core sillage-cron
 docker exec sillage-core bun run migrate
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
-  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; FLUSH PRIVILEGES;"
+  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;"
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
 
 curl -sS http://127.0.0.1:4000/health || true

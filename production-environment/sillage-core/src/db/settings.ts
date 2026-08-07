@@ -55,6 +55,12 @@ export interface GlobalSettings {
   /** Hour of day, 0-23, in the database server's time zone. */
   fullSyncHour: number;
   syncSource: "live" | "local";
+  /**
+   * Public origin for self-hosted product images (no trailing slash).
+   * Tools that write image_overrides.json should emit `{base}/{file}`; product rows
+   * still store absolute URLs. Changing this alone does not rewrite WooCommerce.
+   */
+  imageCdnBaseUrl: string;
   ordersDryRun: boolean;
   ordersAutoDispatch: boolean;
   ordersMaxValueEur: number;
@@ -109,6 +115,19 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fullSyncEnabled: flag("full_sync_enabled", true),
     fullSyncHour: num("full_sync_hour", 3),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
+    imageCdnBaseUrl: (() => {
+      const fromDb = (map.get("image_cdn_base_url") ?? "").trim().replace(/\/$/, "");
+      if (fromDb) return fromDb;
+      const fromEnv = (
+        process.env.LPS_MEDIA_BASE_URL ??
+        process.env.IMAGE_HOST_BASE_URL ??
+        process.env.PUBLIC_URL_BASE ??
+        ""
+      )
+        .trim()
+        .replace(/\/$/, "");
+      return fromEnv || "https://images.slilverbelt.xyz";
+    })(),
     ordersDryRun: flag("orders_dry_run", true),
     ordersAutoDispatch: flag("orders_auto_dispatch", false),
     ordersMaxValueEur: num("orders_max_value_eur", 500),
