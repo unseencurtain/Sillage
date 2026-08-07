@@ -15,7 +15,7 @@ You run everything from your **laptop** in a clone of this repo. The VPS never n
 | Dashboard (Sillage) | `https://ops.example.com` |
 | Passwords file (laptop only) | `.deploy/vps-dashboard-<ssh-host>.txt` |
 
-Stack: Caddy (TLS) → WordPress `:104` + sillage-core `:4000`, MariaDB, Valkey, sillage-cron.
+Stack: Caddy (TLS) → WordPress `:104` + `lps-media` `:105` (`/lps-media/*`) + sillage-core `:4000`, MariaDB, Valkey, sillage-cron. Host bind-mount `ecom_sites/data/media/` into `lps-media`.
 
 ---
 
