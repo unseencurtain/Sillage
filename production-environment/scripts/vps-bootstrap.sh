@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Run on the VPS as ubuntu. Creates sillage DB user, patches wp-config, restarts stack.
+# Run on the VPS as ubuntu. Creates sillage DB user, patches wp-config.
+# Expects unified env at ~/sillage/.env (falls back to legacy split envs).
 set -euo pipefail
 
 set -a
 # shellcheck disable=SC1090
-source "$HOME/ecom_sites/.env"
-# shellcheck disable=SC1090
-source "$HOME/sillage-core/.env"
+if [[ -f "$HOME/sillage/.env" ]]; then
+  source "$HOME/sillage/.env"
+elif [[ -f "$HOME/ecom_sites/.env" && -f "$HOME/sillage-core/.env" ]]; then
+  source "$HOME/ecom_sites/.env"
+  source "$HOME/sillage-core/.env"
+else
+  echo "Missing ~/sillage/.env" >&2
+  exit 1
+fi
 set +a
 
 WP_DB="${WORDPRESS_DB:-earth}"
+DATA_DIR="${DATA_DIR:-$HOME/ecom_sites/data}"
 
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot <<SQL
 CREATE DATABASE IF NOT EXISTS \`${SILLAGE_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -36,8 +44,8 @@ FLUSH PRIVILEGES;
 SQL
 echo "DB_USER_OK"
 
-WPCONFIG="$HOME/ecom_sites/data/wp/wp-config.php"
-DASH_URL="${SILLAGE_DASHBOARD_URL:-https://sillage.slilverbelt.xyz}"
+WPCONFIG="$DATA_DIR/wp/wp-config.php"
+DASH_URL="${SILLAGE_DASHBOARD_URL:-https://${DASH_DOMAIN:-sillage.slilverbelt.xyz}}"
 if [[ ! -f "$WPCONFIG" ]]; then
   echo "WP_CONFIG_MISSING — start ecom first so WordPress can create wp-config.php" >&2
   exit 1
@@ -72,8 +80,6 @@ else:
         f"define( 'SILLAGE_DASHBOARD_URL', '{dash}' );",
         text,
     )
-    # Keep HMAC secret in lockstep with sillage-core/.env — a redeploy that rotates
-    # the env secret must rewrite wp-config or order webhooks get 401 forever.
     new2 = re.sub(
         r"define\(\s*'SILLAGE_SHARED_SECRET'\s*,\s*'[^']*'\s*\)\s*;",
         f"define( 'SILLAGE_SHARED_SECRET', '{secret}' );",
@@ -89,5 +95,5 @@ else:
     print("WP_CONFIG_ALREADY")
 PY
 
-mkdir -p "$HOME/sillage-core/logs"
+mkdir -p "${SILLAGE_LOGS_DIR:-$HOME/sillage/sillage-core/logs}"
 echo "BOOTSTRAP_DONE"

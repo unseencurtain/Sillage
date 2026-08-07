@@ -7,25 +7,26 @@ how WordPress and WooCommerce normally behave; several things in this install ar
 
 ## 1. Running infrastructure
 
-Two independent Docker Compose projects.
+One Docker Compose project: `production-environment/compose.yaml` + one `.env`.
 
 | Container | Image | Role | Ports |
 |---|---|---|---|
-| `shop-gateway` | `caddy:2-alpine` | Local edge only (`/lps-media` → media, else → ecom). VPS uses host Caddy instead. | `80:80` (local) |
-| `ecom` | `lime/wordpress:latest` (WordPress 7.0.3, PHP 8.3.33, Apache) | Storefront (no product-image serving) | internal `80` locally; VPS `127.0.0.1:104→80` |
-| `lps-media` | `nginx:alpine` | Static product images only | internal locally; VPS `127.0.0.1:105→80` |
+| `shop-gateway` | `caddy:2-alpine` | Local edge only (`--profile local`). VPS uses host Caddy. | `80:80` (local) |
+| `ecom` | `unseencurtain/sillage-wordpress:<tag>` | Storefront (no product-image serving) | `127.0.0.1:104→80` |
+| `lps-media` | `nginx:alpine` | Static product images only | `127.0.0.1:105→80` |
 | `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | Database | `127.0.0.1:3307:3306` |
 | `valkey` | `valkey/valkey:8-alpine` | Object cache (ephemeral) | internal only |
-| `sillage-core` | built from `sillage-core/Dockerfile` (Bun) | Sync scheduler (supercronic) | internal only |
+| `sillage-core` | `unseencurtain/sillage-core:<tag>` | API + dashboard | `127.0.0.1:4000→4000` |
+| `sillage-cron` | same image as sillage-core | Sync scheduler (supercronic) | internal only |
 
 Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
 `redis_network` (ecom ↔ valkey ↔ sillage-core).
 
 **Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
-is bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
-Docker volume — operators and download scripts drop files on the host path). Preferred public URLs
-are `https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
+(on VPS: `~/ecom_sites/data/media`) is bind-mounted read-only into `lps-media` at
+`/usr/share/nginx/html` (never a named/anonymous Docker volume). Preferred public URLs are
+`https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
 `https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
 `shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
 Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). Base URL is
@@ -35,13 +36,17 @@ configurable via `sil_settings.image_cdn_base_url` (dashboard) and tool env
 ```bash
 docker network create ecom_network
 docker network create redis_network
+cp production-environment/.env.example production-environment/.env
+cd production-environment && docker compose --env-file .env up -d
 ```
 
-Compose files: `production-environment/ecom_sites/compose.yaml`, `production-environment/redis/compose.yaml`.
+Compose: `production-environment/compose.yaml`. Env template: `production-environment/.env.example`.
+Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
-**Production target (later):** OVH VPS, 4 GB RAM, SSH host alias `ovhe` (`ubuntu@139.99.61.71`).
-On that box the MariaDB buffer pool must drop from the localhost `2G` to roughly `1G` —
-WordPress, Valkey, Bun and MariaDB share the same 4 GB.
+**Staging VPS:** SSH host alias `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`).  
+App dir `~/sillage/`; data stays at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
+WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. Do not treat `ovh` (production) as the
+default deploy target until staging is proven.
 
 One image, one role per container. `sillage-core` runs supercronic; the dashboard service overrides
 `command` to run the API instead. A full sync must never be able to stall the dashboard, and either
@@ -73,8 +78,8 @@ Two databases on **one** MariaDB server, so a single connection can transact acr
 | `sillage` | sillage-core (user `sillage`) | Our own state. Prefix `sil_` |
 
 Credentials are **not** in this file. They live in:
-- `production-environment/ecom_sites/.env` — `MYSQL_ROOT_PWD`, `MYSQL_DB`, `MYSQL_USER`, `MYSQL_PWD`
-- `production-environment/sillage-core/.env` — everything sillage-core needs (gitignored)
+- `production-environment/.env` — single file for MariaDB, WordPress, sillage-core, vendors, image tags (gitignored)
+- VPS: `~/sillage/.env` (same shape). Legacy split files under `ecom_sites/.env` / `sillage-core/.env` may still exist locally for host-side `bun` runs.
 
 Always fully qualify cross-database table names (`earth.wp_posts`, `sillage.sil_offers`). Never
 rely on a pooled connection's default schema, because `USE` state leaks between reused connections.
@@ -100,9 +105,9 @@ sillage.sil_settings
 sillage.sil_vendors
 ```
 
-Granted by `ecom_sites/bootstrap-sillage.sh` and `scripts/deploy-vps.sh` after migrate (table-level
-`GRANT` requires the tables to exist). `config/sillage-grants.sql` documents the sillage-core user
-only; the lime grants stay in those post-migrate scripts.
+Granted by `ecom_sites/bootstrap-sillage.sh` and `scripts/deploy-vps.sh` / `vps-bootstrap.sh`
+after migrate (table-level `GRANT` requires the tables to exist). `config/sillage-grants.sql`
+documents the sillage-core user only; the lime grants stay in those post-migrate scripts.
 
 ### MariaDB tuning
 
