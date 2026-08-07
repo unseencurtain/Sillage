@@ -226,13 +226,13 @@ This is a closed list. If a task seems to require adding write logic here, it be
    shortfall message). Same cart/checkout path for BF/BTS plus per-vendor MOQ.
 9. Catalog helpers for the **LPS retail** shop (BF/BTS): enforce WooCommerce catalog visibility
    (`exclude-from-catalog`), strip legacy LPS* cats from widgets/`get_terms`/nav, hide empty
-   feed cats, rebuild Blocksy's taxonomy lookup via SQL on finalize, and keep Blocksy category
-   filters hierarchical so the shop sidebar shows feed browse roots (Makeup, Hair, …) not a flat
-   brand A–Z or starter-site demos. Optional image-safety CSS. Vendor lanes are never
-   `product_cat` — use `_sillage_vendor` + `pa_vendor`. There is **no** dual-catalog /
-   `/b2b-wholesale/` UI in this plugin — B2B is parked for a separate site (`b2b-wholesale/`).
-   WPF products on this install are hidden via `product_visibility` from sillage-core, not via
-   vendor-meta query hacks.
+   feed cats, rebuild Blocksy's taxonomy lookup via SQL on finalize (BF/BTS only), and replace
+   Blocksy's flat product_cat Ajax filter with `[sillage_shop_categories]` (top-level feed
+   browse roots; counts from `wp_term_taxonomy` — WooCommerce's `wc_change_term_counts` zeroes
+   `get_terms()` outside a product loop). Optional image-safety CSS. Vendor lanes are never
+   `product_cat` — use `_sillage_vendor` + `pa_vendor`. No dual-catalog / `/b2b-wholesale/` UI
+   here — B2B is a separate site (`b2b-wholesale/`). WPF on this install is parked via
+   `product_visibility` from sillage-core.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
