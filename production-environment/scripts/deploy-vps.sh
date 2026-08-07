@@ -56,7 +56,7 @@ done
 : "${SHOP_DOMAIN:?shop domain required}"
 : "${DASH_DOMAIN:?dash domain required}"
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOCAL_ENV="$ROOT/production-environment/sillage-core/.env"
 CHRONO="$ROOT/.deploy/deploy-CHRONOLOGY.md"
 SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
@@ -122,13 +122,16 @@ log_step "Code + plugin + redis compose uploaded"
 if [[ -n "$CLONE_FROM" ]]; then
   echo "==> clone WordPress+DB from ${CLONE_FROM} → ${HOST} (live, no downtime on source)"
   "${SSH[@]}" "$HOST" 'mkdir -p ~/ecom_sites/data/wp ~/ecom_sites/data/wp-db'
-  "${RSYNC[@]}" --delete \
-    --exclude 'wp-content/cache' \
-    "$CLONE_FROM:~/ecom_sites/data/wp/" "$HOST:~/ecom_sites/data/wp/"
-  # Logical dump avoids freezing source InnoDB files
+  # Stream remote→remote via local stdin (rsync cannot do hostA: → hostB:)
+  "${SSH[@]}" "$CLONE_FROM" 'tar -C ~/ecom_sites/data/wp --exclude=wp-content/cache -cf - .' \
+    | "${SSH[@]}" "$HOST" 'tar -C ~/ecom_sites/data/wp -xf -'
   "${SSH[@]}" "$CLONE_FROM" 'set -a; source ~/ecom_sites/.env; set +a; docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb-dump -uroot --single-transaction --routines --triggers --all-databases' \
     | "${SSH[@]}" "$HOST" 'cat > /tmp/sillage-clone.sql'
   "${SSH[@]}" "$CLONE_FROM" 'cat ~/ecom_sites/.env' | "${SSH[@]}" "$HOST" 'cat > ~/ecom_sites/.env && chmod 600 ~/ecom_sites/.env'
+  # Re-apply current plugin over the cloned tree
+  "${RSYNC[@]}" --delete \
+    "$ROOT/production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
+    "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
   log_step "Cloned wp files + SQL dump from ${CLONE_FROM}"
 fi
 
@@ -138,6 +141,7 @@ set -a; source "$LOCAL_ENV"; set +a
 SECRET=$(openssl rand -hex 32)
 SESSION=$(openssl rand -hex 32)
 PASS=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
+WP_ADMIN_PASS=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
 DBPASS=$(openssl rand -hex 16)
 MYSQL_ROOT=$(openssl rand -hex 16)
 MYSQL_PWD=$(openssl rand -hex 16)
@@ -190,6 +194,8 @@ url=https://${DASH_DOMAIN}
 user=admin
 password=${PASS}
 shop=https://${SHOP_DOMAIN}
+wp_admin_user=admin
+wp_admin_password=${WP_ADMIN_PASS}
 ip=${IP}
 created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
@@ -198,7 +204,7 @@ echo "Dashboard password saved to $CREDS"
 log_step "Wrote dashboard creds to ${CREDS}"
 
 echo "==> remote compose / caddy / bring-up"
-"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' SILLAGE_DASHBOARD_URL='https://${DASH_DOMAIN}' CLONE_MODE='${CLONE_FROM:+1}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' SILLAGE_DASHBOARD_URL='https://${DASH_DOMAIN}' CLONE_MODE='${CLONE_FROM:+1}' WP_ADMIN_PASS='${WP_ADMIN_PASS}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 cat > ~/ecom_sites/config/mariadb.cnf <<'CNF'
@@ -347,6 +353,44 @@ if [[ ! -f "$HOME/ecom_sites/data/wp/wp-config.php" ]]; then
   exit 1
 fi
 
+# Fresh WordPress install (empty site — not a clone of production catalog)
+if [[ -z "${CLONE_MODE:-}" ]]; then
+  echo "Running fresh wp_install..."
+  docker exec -e SHOP_DOMAIN="$SHOP_DOMAIN" -e WP_ADMIN_PASS="$WP_ADMIN_PASS" ecom php -r '
+    $_SERVER["HTTP_HOST"] = getenv("SHOP_DOMAIN");
+    $_SERVER["REQUEST_URI"] = "/";
+    require "/var/www/html/wp-load.php";
+    require_once ABSPATH . "wp-admin/includes/upgrade.php";
+    $url = "https://" . getenv("SHOP_DOMAIN");
+    if (!is_blog_installed()) {
+      $pass = getenv("WP_ADMIN_PASS") ?: wp_generate_password(20, false);
+      $r = wp_install("Cosmetic", "admin", "admin@" . getenv("SHOP_DOMAIN"), true, "", $pass, "en_US");
+      echo "installed user_id=" . ($r["user_id"] ?? "?") . "\n";
+    } else {
+      echo "already_installed\n";
+    }
+    update_option("siteurl", $url);
+    update_option("home", $url);
+    update_option("woocommerce_currency", "EUR");
+    update_option("woocommerce_currency_pos", "left");
+    update_option("woocommerce_price_num_decimals", "2");
+    require_once ABSPATH . "wp-admin/includes/plugin.php";
+    foreach (["woocommerce/woocommerce.php","redis-cache/redis-cache.php","sillage-bridge/sillage-bridge.php"] as $p) {
+      if (file_exists(WP_PLUGIN_DIR . "/" . dirname($p) . "/" . basename($p)) || file_exists(WP_PLUGIN_DIR . "/" . $p)) {
+        $res = activate_plugin($p);
+        echo $p . (is_wp_error($res) ? (" FAIL ".$res->get_error_message()) : " ok") . "\n";
+      } else {
+        echo $p . " missing\n";
+      }
+    }
+    $theme = "blocksy";
+    if (wp_get_theme($theme)->exists()) {
+      switch_theme($theme);
+      echo "theme=$theme\n";
+    }
+  '
+fi
+
 export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
 bash ~/vps-bootstrap.sh
 
@@ -375,7 +419,7 @@ PY
 docker compose build sillage-core
 docker compose up -d sillage-core sillage-cron ecom
 docker exec sillage-core bun run migrate
-docker exec ecom php -r 'require "/var/www/html/wp-load.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
+docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
 
 set -a; source ~/ecom_sites/.env; source ~/sillage-core/.env; set +a
 docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot <<'SQL'

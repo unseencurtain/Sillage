@@ -10,7 +10,7 @@ set -euo pipefail
 SHOP_FQDN="${1:?shop FQDN required}"
 DASH_FQDN="${2:?dash FQDN required}"
 IP="${3:?IPv4 required}"
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${PORKBUN_ENV:-$ROOT/.deploy/porkbun.env}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
