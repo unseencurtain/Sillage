@@ -15,6 +15,7 @@ import { finalizeWordPress } from "./finalize.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
+  ensureVendorShopCategories,
   rebuildCategoryLookup,
   recountTerms,
   syncCategories,
@@ -278,6 +279,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.termsCreated += result.created;
       }
 
+      const vendorShop = await ensureVendorShopCategories(allVendors, VENDOR_LABELS);
+      summary.termsCreated += vendorShop.created;
+
       await resolveProductIdentities(settings);
       await markDirtyFromPendingOffers();
       const reassigned = await selectPrimaryOffers(settings);
@@ -286,7 +290,14 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       if (options.dryRun) {
         log.warn("dry run — no WooCommerce writes performed");
       } else {
-        const ctx = await buildWriteContext(settings, allVendors, categoryMaps, brands.map, attributeMaps);
+        const ctx = await buildWriteContext(
+          settings,
+          allVendors,
+          categoryMaps,
+          brands.map,
+          attributeMaps,
+          vendorShop.bySlug,
+        );
         const written = await writePendingProducts(ctx, "full", (done, total) =>
           log.progress(`writing ${done}/${total}`),
         );

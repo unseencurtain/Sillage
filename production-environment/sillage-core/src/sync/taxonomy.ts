@@ -215,6 +215,26 @@ export async function syncCategories(
 }
 
 /**
+ * Top-level shop categories so customers can browse "all BeautyFort" / "all BTS" as normal
+ * WooCommerce category pages (in addition to the pa_vendor attribute filter).
+ */
+export async function ensureVendorShopCategories(
+  vendors: Array<{ slug: string; name: string }>,
+  labels: Record<string, string>,
+): Promise<{ bySlug: Map<string, TermRef>; created: number }> {
+  const names = new Set(vendors.map((v) => labels[v.slug] ?? v.name));
+  const { map, created } = await syncFlatTerms(CATEGORY_TAXONOMY, names);
+  const bySlug = new Map<string, TermRef>();
+  for (const v of vendors) {
+    const label = labels[v.slug] ?? v.name;
+    const ref = map.get(foldKey(label));
+    if (ref) bySlug.set(v.slug, ref);
+  }
+  if (created > 0) log.info(`vendor shop categories: ${created} product_cat terms created`);
+  return { bySlug, created };
+}
+
+/**
  * Create flat terms for a non-hierarchical taxonomy — brands and the `pa_*` attributes.
  *
  * Keyed by `foldKey`, which matches how the database's own collation compares strings, so "DIOR",

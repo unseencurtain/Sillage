@@ -46,7 +46,12 @@ export const api = {
   approveOrder: (id: number) =>
     request<{ ok: boolean; reason?: string }>(`/api/orders/${id}/approve`, { method: "POST" }),
   dispatchOrder: (id: number, live: boolean) =>
-    request<{ status: string; reason?: string; dryRun: boolean }>(`/api/orders/${id}/dispatch`, {
+    request<{
+      status: string;
+      reason?: string;
+      dryRun: boolean;
+      vendorOrderNumber?: string | null;
+    }>(`/api/orders/${id}/dispatch`, {
       method: "POST",
       body: JSON.stringify({ live }),
     }),
