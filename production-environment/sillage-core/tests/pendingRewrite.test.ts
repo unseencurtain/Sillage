@@ -22,13 +22,28 @@ describe("pending price rewrite on Save", () => {
 
   test("runSync releases the advisory lock even if startRun fails", () => {
     // Lock acquire must be paired with try/finally before any throwy setup (ENUM, no vendors).
-    const acquireAt = runSrc.indexOf('if (!(await acquireLock("sync")))');
+    // GET_LOCK is connection-scoped — must hold one dedicated pool connection for the run.
+    expect(runSrc).toContain("acquireLockOn");
+    expect(runSrc).toContain("releaseLockOn");
+    expect(runSrc).toContain("getPool().getConnection()");
+    expect(runSrc).toContain("lockConn.release()");
+    expect(runSrc).toContain("lockConn.destroy()");
+    const acquireAt = runSrc.indexOf('if (!(await acquireLockOn(lockConn, "sync")))');
     const tryAt = runSrc.indexOf("try {", acquireAt);
     const startRunAt = runSrc.indexOf("await startRun(", acquireAt);
     expect(acquireAt).toBeGreaterThan(-1);
     expect(tryAt).toBeGreaterThan(acquireAt);
     expect(startRunAt).toBeGreaterThan(tryAt);
     expect(runSrc).toContain("if (runId > 0)");
+  });
+
+  test("content rewrite lock race re-flags price pending", () => {
+    expect(pendingSrc).toContain("if (hadPrice) await flagPending(\"price\")");
+  });
+
+  test("settings Save only kicks rewrite when price/content values change", () => {
+    expect(apiSrc).toContain("prior.get(key) !== persist");
+    expect(apiSrc).toContain("if (!changed) continue");
   });
 
   test("settings and vendor pricing Save kick rewrite-only", () => {

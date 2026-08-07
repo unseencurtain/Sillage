@@ -781,6 +781,17 @@ api.put("/settings", async (c) => {
   ]);
   const contentKeys = new Set(["description_mode", "volume_filter_mode"]);
 
+  // Dashboard Save posts the whole form. Only kick rewrites when a price/content key
+  // actually changes — otherwise every Save queues a full/cache rewrite forever.
+  const priorRows = await query<RowDataPacket & { setting_key: string; setting_value: string }>(
+    `SELECT setting_key, setting_value FROM ${sil("sil_settings")} WHERE setting_key IN (${[...allowed]
+      .filter((k) => !k.startsWith("company_billing_"))
+      .map(() => "?")
+      .join(",")})`,
+    [...allowed].filter((k) => !k.startsWith("company_billing_")),
+  );
+  const prior = new Map(priorRows.map((r) => [r.setting_key, r.setting_value]));
+
   let n = 0;
   let touchPrice = false;
   let touchContent = false;
@@ -797,13 +808,15 @@ api.put("/settings", async (c) => {
       n++;
       continue;
     }
+    let persist = value;
     if (key === "price_tiers") {
       // Persist the canonical sorted/validated form so the dashboard round-trips cleanly.
       const parsed = parsePriceTiers(value);
-      await setSetting(key, JSON.stringify(parsed.tiers));
-    } else {
-      await setSetting(key, value);
+      persist = JSON.stringify(parsed.tiers);
     }
+    const changed = prior.get(key) !== persist;
+    if (!changed) continue;
+    await setSetting(key, persist);
     n++;
     if (priceKeys.has(key)) touchPrice = true;
     if (contentKeys.has(key)) touchContent = true;

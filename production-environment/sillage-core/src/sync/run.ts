@@ -1,6 +1,7 @@
 import { applyRuntimeUrls, env, sil } from "../config/env.ts";
 import { loadSecretsOverlay } from "../config/secrets.ts";
-import { execute, query, type RowDataPacket } from "../db/pool.ts";
+import { execute, getPool, query, type RowDataPacket } from "../db/pool.ts";
+import type { PoolConnection } from "mysql2/promise";
 import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
 import { formatDuration, logger } from "../lib/log.ts";
 import { createConnector, isParkedB2bVendor } from "../vendors/registry.ts";
@@ -157,17 +158,24 @@ async function finishRun(runId: number, startedAt: number, summary: Partial<Sync
   );
 }
 
-/** Guard against two syncs writing the same rows concurrently. */
-async function acquireLock(name: string, timeoutSeconds = 0): Promise<boolean> {
-  const rows = await query<RowDataPacket & { locked: number | null }>(`SELECT GET_LOCK(?, ?) AS locked`, [
-    `sillage:${name}`,
-    timeoutSeconds,
-  ]);
+/**
+ * Guard against two syncs writing the same rows concurrently.
+ *
+ * MariaDB GET_LOCK is connection-scoped. The shared pool must NOT run GET_LOCK /
+ * RELEASE_LOCK on arbitrary checked-out connections — RELEASE on connection B leaves
+ * the lock held forever on idle connection A, and every later Save queues forever.
+ * Hold one dedicated connection for the whole sync lifetime.
+ */
+async function acquireLockOn(conn: PoolConnection, name: string, timeoutSeconds = 0): Promise<boolean> {
+  const [rows] = await conn.query<Array<RowDataPacket & { locked: number | null }>>(
+    `SELECT GET_LOCK(?, ?) AS locked`,
+    [`sillage:${name}`, timeoutSeconds],
+  );
   return rows[0]?.locked === 1;
 }
 
-async function releaseLock(name: string): Promise<void> {
-  await query(`SELECT RELEASE_LOCK(?)`, [`sillage:${name}`]);
+async function releaseLockOn(conn: PoolConnection, name: string): Promise<void> {
+  await conn.query(`SELECT RELEASE_LOCK(?)`, [`sillage:${name}`]);
 }
 
 export async function runSync(options: SyncOptions): Promise<SyncSummary> {
@@ -175,9 +183,13 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   // Pick up dashboard Secrets overlay without restarting sillage-cron / sillage-core.
   loadSecretsOverlay();
 
-  if (!(await acquireLock("sync"))) {
+  const lockConn = await getPool().getConnection();
+  let lockHeld = false;
+  if (!(await acquireLockOn(lockConn, "sync"))) {
+    lockConn.release();
     throw new Error("another sync is already running");
   }
+  lockHeld = true;
 
   // Everything after acquireLock must release — including failures before startRun
   // (e.g. invalid source ENUM) so the pool connection does not hold GET_LOCK forever.
@@ -420,7 +432,20 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     }
     throw err;
   } finally {
-    await releaseLock("sync");
+    let releasedOk = !lockHeld;
+    if (lockHeld) {
+      try {
+        await releaseLockOn(lockConn, "sync");
+        releasedOk = true;
+      } catch (err) {
+        log.error(`failed to RELEASE_LOCK(sillage:sync): ${String(err)}`);
+      }
+      lockHeld = false;
+    }
+    // Never return a connection that still holds GET_LOCK to the pool — that leaves
+    // every later Save queued forever until the process restarts.
+    if (releasedOk) lockConn.release();
+    else lockConn.destroy();
     // Settings/vendor pricing saves may have marked dirty while we held the lock — pick them up.
     const { drainPendingRewrites } = await import("./pendingRewrite.ts");
     await drainPendingRewrites();
