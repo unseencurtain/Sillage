@@ -3,10 +3,8 @@
 ## What This Is
 
 Cross-vendor image enrichment tool. Matches BeautyFort products against multiple external
-catalogs (OceanFragrances, Shopify, BTS Wholesaler) to find real product images, then writes:
-
-1. WooCommerce-ready CSVs (analysis / optional import)
-2. **`image_overrides.json`** — Bun-ready EAN → HTTPS URL map for `sillage-core`
+catalogs (Ocean / wholesale-perfumes.eu XML, OceanFragrances CSV, Shopify, BTS) to find real
+product images, then writes Bun-ready `image_overrides.json`.
 
 BeautyFort CDN images are often placeholders forever. This pipeline stays outside the Bun app.
 
@@ -15,59 +13,48 @@ BeautyFort CDN images are often placeholders forever. This pipeline stays outsid
 ```bash
 cd production-environment/python-analysis
 
+# optional: copy .env.example → .env and set OCEAN_USER / OCEAN_TOKEN
 python3 beautyfort-enriched/test.py
-python3 beautyfort-enriched/enrich.py
-python3 beautyfort-enriched/enrich.py --install-core
-# copies output/image_overrides.json → sillage-core/data/image_overrides.json
+python3 beautyfort-enriched/fetch_ocean.py
+python3 beautyfort-enriched/enrich.py --fetch-ocean --install-core
 ```
 
 After `--install-core`, run a **fast / rewrite sync** on the shop so `_external_thumbnail_url`
 updates for existing products.
 
+Ocean catalog etiquette: download at most once per day (script caches ~20h).
+
 ## Structure
 
 ```
 beautyfort-enriched/
-  enrich.py                    — main script (multi-EAN fan-out + --install-core)
-  test.py                      — unit + integration tests
+  enrich.py
+  fetch_ocean.py               — wholesale-perfumes.eu catalog download + parse
+  test.py
+  fixtures/
+    ocean_catalog_sample.xml   — tiny fixture for tests
   data/
-    image_overrides.json       — seed + regenerated map (also installed into sillage-core)
-  products/                    — local fixtures (large; gitignored)
-    beautyfort.json
-    bts_wholeseller.json
-    bts_wholeseller_categories.json
-    oceanfragrances.csv
-    products_export_1.csv
+    image_overrides.json
+  products/                    — gitignored dumps (beautyfort.json, ocean_catalog.xml, …)
   output/
-    image_overrides.json       — Bun-facing map (all EANs on a matched product)
-    beautyfort_normalized.csv
-    beautyfort_woocommerce.csv
-    report.json
 ```
 
-## How Image Enrichment Works
+## Source priority
 
-Each BeautyFort product can have multiple comma-separated barcodes. For each product, EANs are
-checked against sources in priority order:
+1. seed `data/image_overrides.json`
+2. **Ocean XML** (`products/ocean_catalog.xml` from `--fetch-ocean`)
+3. oceanfragrances.csv (legacy)
+4. Shopify CSV
+5. BTS JSON
 
-1. **seed `data/image_overrides.json`**
-2. **oceanfragrances.csv** — every EAN listed on the row
-3. **products_export_1.csv** — Shopify barcode
-4. **bts_wholeseller.json** — primary EAN (+ optional all_eans)
-
-On the first real image hit, **every** EAN on that BeautyFort product is written into the
-overrides map with the same URL (so Bun matches whichever EAN is on `sil_offers` / the index).
-
-No thumbnail / `no_image` / `woocommerce-placeholder` URLs are kept.
+Multi-EAN fan-out: any hit maps **all** barcodes on that BeautyFort product to the same URL.
 
 ## Bun consumption
 
-[`sillage-core/src/sync/images.ts`](../sillage-core/src/sync/images.ts) loads
-`sillage-core/data/image_overrides.json` at sync time, then falls back to other vendors' live
-offer URLs by EAN.
+`sillage-core/src/sync/images.ts` loads `sillage-core/data/image_overrides.json` at sync time.
 
 ## Watch Out For
 
-- German-encoded strings (e.g. `Ã¶`) — handled by `fix_encoding()`
-- BeautyFort products without any barcode are skipped
-- Large JSON/CSV fixtures under `products/` are regenerable inputs — do not commit them
+- `OCEAN_TOKEN` is the API token from wholesale-perfumes **user settings**, not necessarily the shop password.
+- Large fixtures under `products/` are not committed.
+- Next vendor image work: Brasty Playwright scraper (CSV has no images).
