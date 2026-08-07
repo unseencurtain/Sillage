@@ -179,29 +179,11 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     throw new Error("another sync is already running");
   }
 
-  // A previous Stop must not permanently block the next deliberate run.
-  await clearSyncAbort();
-
-  const settings = await loadSettings();
-  applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
-  const allVendors = await loadVendors();
-  // Empty vendors = --vendor=all → retail only (parked B2B excluded). Explicit slug list
-  // may still name wholesale-perfumes for offline tests / a future B2B site.
-  const pool = options.vendors?.length
-    ? allVendors.filter((v) => options.vendors!.includes(v.slug))
-    : allVendors.filter((v) => !isParkedB2bVendor(v.slug));
-  const selected = pool.filter((v) => v.active);
-  if (selected.length === 0) throw new Error("no active vendors selected");
-
-  const runId = await startRun(options.mode, options.source, selected.length === 1 ? selected[0]!.id : null);
-  log.info(
-    `run ${runId}: ${options.mode} sync from ${options.source}` +
-      (options.rewriteOnly ? " (rewrite-only, no vendor fetch)" : "") +
-      ` for ${selected.map((v) => v.slug).join(", ")}`,
-  );
-
+  // Everything after acquireLock must release — including failures before startRun
+  // (e.g. invalid source ENUM) so the pool connection does not hold GET_LOCK forever.
+  let runId = 0;
   const summary: SyncSummary = {
-    runId,
+    runId: 0,
     mode: options.mode,
     durationMs: 0,
     fetched: 0,
@@ -217,6 +199,28 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   };
 
   try {
+    // A previous Stop must not permanently block the next deliberate run.
+    await clearSyncAbort();
+
+    const settings = await loadSettings();
+    applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
+    const allVendors = await loadVendors();
+    // Empty vendors = --vendor=all → retail only (parked B2B excluded). Explicit slug list
+    // may still name wholesale-perfumes for offline tests / a future B2B site.
+    const pool = options.vendors?.length
+      ? allVendors.filter((v) => options.vendors!.includes(v.slug))
+      : allVendors.filter((v) => !isParkedB2bVendor(v.slug));
+    const selected = pool.filter((v) => v.active);
+    if (selected.length === 0) throw new Error("no active vendors selected");
+
+    runId = await startRun(options.mode, options.source, selected.length === 1 ? selected[0]!.id : null);
+    summary.runId = runId;
+    log.info(
+      `run ${runId}: ${options.mode} sync from ${options.source}` +
+        (options.rewriteOnly ? " (rewrite-only, no vendor fetch)" : "") +
+        ` for ${selected.map((v) => v.slug).join(", ")}`,
+    );
+
     if (options.rewriteAll) {
       const marked = await markAllProductsDirty();
       log.info(`rewrite-all: ${marked} products re-marked for a full content rewrite`);
@@ -402,14 +406,18 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   } catch (err) {
     summary.durationMs = Date.now() - startedAt;
     const aborted = err instanceof SyncAbortedError || String(err).includes("aborted");
-    await finishRun(runId, startedAt, summary, err);
-    await recordEvent(
-      aborted ? "warn" : "error",
-      "sync",
-      `run ${runId} ${aborted ? "aborted" : "failed"}: ${String(err)}`,
-      undefined,
-      runId,
-    );
+    if (runId > 0) {
+      await finishRun(runId, startedAt, summary, err);
+      await recordEvent(
+        aborted ? "warn" : "error",
+        "sync",
+        `run ${runId} ${aborted ? "aborted" : "failed"}: ${String(err)}`,
+        undefined,
+        runId,
+      );
+    } else {
+      await recordEvent("error", "sync", `sync failed before run row: ${String(err)}`);
+    }
     throw err;
   } finally {
     await releaseLock("sync");
