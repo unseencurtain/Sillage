@@ -221,12 +221,13 @@ This is a closed list. If a task seems to require adding write logic here, it be
 5. Fire an HMAC-signed webhook to sillage-core when an order reaches a dispatchable status
 6. On activation: register `pa_gender` / `pa_item-type` / `pa_volume` via `wc_create_attribute()`
 7. A read-only wp-admin status page linking to the dashboard
-8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
-9. Exclude B2B wholesaler products (`_sillage_vendor=wholesale-perfumes`) from the main shop,
-   search (including Blocksy REST live search via `rest_post_search_query`), and other product
-   queries; allow them only on the dedicated B2B page (`_sillage_b2b_shop` postmeta), where
-   `[products]` is scoped to that vendor meta. Vendor lanes are never `product_cat` — use
-   `_sillage_vendor` + `pa_vendor` instead. Also enforce catalog visibility (hide
+8. Apply the small-order cart fee (global `cart_min_*`) and hard-block cart/checkout when a
+   vendor subtotal is below that vendor's `order_config.min_order_value_eur` (storefront-label
+   shortfall message). Portal/B2B extras are out of scope — same sell path as BF/BTS plus MOQ.
+9. Catalog helpers: all vendors (including wholesale-perfumes) appear on the main shop like
+   BF/BTS. Optional `/b2b-wholesale/` (`_sillage_b2b_shop`) stays a filtered landing that scopes
+   `[products]` to `_sillage_vendor=wholesale-perfumes`. Vendor lanes are never `product_cat` —
+   use `_sillage_vendor` + `pa_vendor` instead. Also enforce catalog visibility (hide
    `exclude-from-catalog`) on product listing/search queries, strip legacy LPS* product_cat
    terms from category widgets/`get_terms`/nav, and hide empty feed categories. Optional safety
    CSS so external thumbs cannot stretch product cards.

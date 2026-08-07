@@ -340,8 +340,9 @@ const B2B_VENDOR_SLUG = "wholesale-perfumes";
 const B2B_PAGE_SLUG = "b2b-wholesale";
 
 /**
- * Ensure a published WordPress page that lists only the B2B wholesaler.
- * The bridge filters `[products]` on this page by `_sillage_vendor=wholesale-perfumes`
+ * Ensure an optional WordPress landing page that lists only wholesale-perfumes.
+ * Main shop includes that vendor like BF/BTS; this page is a filtered shortcut.
+ * The bridge scopes `[products]` here by `_sillage_vendor=wholesale-perfumes`
  * (not by a product_cat lane — vendor identity must stay off product categories).
  */
 export async function ensureB2bShopPage(): Promise<{ pageId: number; created: boolean } | null> {

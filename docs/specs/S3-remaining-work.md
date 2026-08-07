@@ -214,15 +214,15 @@ None of these are engineering decisions. Get the values from the operator; do no
 - **Markup tiers.** The client said "up to €80 × 1.7, above €80 × 1.5" but also "it varies a lot",
   which is why the tiers are editable data seeded empty. Entering them changes every price, so it
   needs `--rewrite-all` and a deliberate decision, not a drive-by edit.
-- **Small-order fee.** Currently disabled, with placeholder defaults of a €50 minimum and a €5 fee.
-  The fee applies once per cart, never stacks, and is non-taxable. Per-vendor minimums live on the
-  vendor row and are now editable on the Vendors page.
-- **wholesale-perfumes go-live.** Three things must still be confirmed before the vendor is activated
-  (migration `013` guesses): the real minimum order value, the shipping country list, and the VAT
-  rate (stored as a **fraction** — 21% is `0.21`, not `21`). Cart `code` = catalog product `id` is
-  confirmed by the vendor B2B API doc (`docs/vendors/wholesale-perfumes-api.md`); still prefer a
-  staging cart round-trip before first live spend. The API token that appeared in the client chat
-  should be treated as compromised and rotated.
+- **Small-order fee / MOQ.** Global `cart_min_*` fee remains opt-in (defaults off). Per-vendor
+  `min_order_value_eur` hard-blocks cart/checkout with a storefront-label shortfall — wired so
+  customers see it before dispatch. wholesale-perfumes seed is still €100 until the operator
+  confirms the real figure.
+- **wholesale-perfumes sell path.** Product decision: same path as BF/BTS (main shop → cart →
+  checkout → Sillage) plus MOQ; no B2B portal. Cart `code` = catalog product `id` confirmed
+  (`docs/vendors/wholesale-perfumes-api.md`). Still confirm exact MOQ euros, shipping countries,
+  and VAT (fraction — 21% is `0.21`) before first live spend; keep `orders_dry_run=1` until then.
+  Prefer a staging cart round-trip. Rotate any API token that appeared in client chat.
 
 ---
 
@@ -243,9 +243,10 @@ Read these before touching the related code; each one cost real time to establis
 - **A per-vendor price multiplier disables tiered pricing for that vendor**, by design: the
   precedence is vendor override, then tiers, then the global multiplier. The Vendors page says so;
   keep it saying so.
-- **The cart fee fails open in every direction.** An unreachable database, a missing setting or a
-  message template without its `{remaining}` placeholder must never block a sale. Any change here
-  must keep that true.
+- **Global cart fee fails open; vendor MOQ fails open only if vendors cannot be read.** An
+  unreachable settings row or a message template without `{remaining}` must never block a sale via
+  the fee path. Per-vendor MOQ intentionally blocks checkout when `min_order_value_eur` is set and
+  readable — that is the wholesaler floor, not the optional Foodpanda fee.
 - **Never change `sku_prefix`, vendor slugs, or the product slug formula.** They are baked into
   roughly 52,000 SKUs and into existing order history. Storefront naming is a separate
   `storefront_label` column precisely so renaming is safe.
@@ -259,6 +260,5 @@ Read these before touching the related code; each one cost real time to establis
   reference material.
 - Matching Google's consumer prices. Not implementable as stated without price scraping; the markup
   tiers are the agreed approximation.
-- The B2B lane for higher-minimum suppliers. Still a design question, not a build. It needs a
-  decision about whether it is a separate section, a customer role, or a separate site before any
-  code is written.
+- B2B portal / separate higher-MOQ lane. **Decided out of scope:** same sell path as BF/BTS +
+  per-vendor MOQ; optional `/b2b-wholesale/` filtered landing only.
