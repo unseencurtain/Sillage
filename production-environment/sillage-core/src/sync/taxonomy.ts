@@ -29,6 +29,9 @@ export const ATTRIBUTE_TAXONOMIES: Record<string, string> = {
 export const BRAND_TAXONOMY = "product_brand";
 export const CATEGORY_TAXONOMY = "product_cat";
 
+const B2B_VENDOR_SLUG = "wholesale-perfumes";
+const B2B_PAGE_SLUG = "b2b-wholesale";
+
 interface TermRow extends RowDataPacket {
   term_id: number;
   term_taxonomy_id: number;
@@ -301,6 +304,120 @@ export async function purgeVendorProductCatLanes(
 }
 
 /**
+ * Remove mistaken brand→product_cat wiring for wholesale-perfumes.
+ *
+ * Older connector versions nested `brand:{id}` under type in `product_cat`, which flooded the
+ * B2B sidebar with an A–Z brand list. Brands belong on `product_brand` only; browse cats are types.
+ */
+export async function purgeWholesalePerfumesBrandProductCats(): Promise<{
+  mapRowsDeleted: number;
+  relationshipsRemoved: number;
+  termsDeleted: number;
+}> {
+  const vendorRows = await query<RowDataPacket & { id: number }>(
+    `SELECT id FROM ${sil("sil_vendors")} WHERE slug = ? LIMIT 1`,
+    [B2B_VENDOR_SLUG],
+  );
+  const vendorId = vendorRows[0]?.id;
+  if (!vendorId) {
+    return { mapRowsDeleted: 0, relationshipsRemoved: 0, termsDeleted: 0 };
+  }
+
+  const brandMaps = await query<MapRow>(
+    `SELECT vendor_category_key, wp_term_id, wp_term_taxonomy_id
+       FROM ${sil("sil_category_map")}
+      WHERE vendor_id = ? AND vendor_category_key LIKE 'brand:%'`,
+    [vendorId],
+  );
+  if (brandMaps.length === 0) {
+    return { mapRowsDeleted: 0, relationshipsRemoved: 0, termsDeleted: 0 };
+  }
+
+  const ttIds = [...new Set(brandMaps.map((r) => r.wp_term_taxonomy_id))];
+  const termIds = [...new Set(brandMaps.map((r) => r.wp_term_id))];
+  const ttPh = ttIds.map(() => "?").join(",");
+
+  // Drop only relationships on wholesale-perfumes products — never strip a shared BF/BTS term.
+  // Subquery form — multi-table DELETE aliases break when the pool has no default schema.
+  const relResult = await execute(
+    `DELETE FROM ${wp("term_relationships")}
+      WHERE term_taxonomy_id IN (${ttPh})
+        AND object_id IN (
+          SELECT post_id FROM ${wp("postmeta")}
+           WHERE meta_key = '_sillage_vendor' AND meta_value = ?
+        )`,
+    [...ttIds, B2B_VENDOR_SLUG],
+  );
+
+  const mapResult = await execute(
+    `DELETE FROM ${sil("sil_category_map")}
+      WHERE vendor_id = ? AND vendor_category_key LIKE 'brand:%'`,
+    [vendorId],
+  );
+
+  // Delete orphan terms that no longer appear in any sil_category_map and have no relationships.
+  let termsDeleted = 0;
+  const idPh = termIds.map(() => "?").join(",");
+  const stillMapped = new Set(
+    (
+      await query<RowDataPacket & { wp_term_id: number }>(
+        `SELECT DISTINCT wp_term_id FROM ${sil("sil_category_map")} WHERE wp_term_id IN (${idPh})`,
+        termIds,
+      )
+    ).map((r) => r.wp_term_id),
+  );
+  const orphans = termIds.filter((id) => !stillMapped.has(id));
+  if (orphans.length > 0) {
+    const orphanPh = orphans.map(() => "?").join(",");
+    const withRels = new Set(
+      (
+        await query<RowDataPacket & { term_id: number }>(
+          `SELECT DISTINCT tt.term_id
+             FROM ${wp("term_taxonomy")} tt
+             INNER JOIN ${wp("term_relationships")} tr
+               ON tr.term_taxonomy_id = tt.term_taxonomy_id
+            WHERE tt.taxonomy = ? AND tt.term_id IN (${orphanPh})`,
+          [CATEGORY_TAXONOMY, ...orphans],
+        )
+      ).map((r) => r.term_id),
+    );
+    const deletable = orphans.filter((id) => !withRels.has(id));
+    if (deletable.length > 0) {
+      const delPh = deletable.map(() => "?").join(",");
+      await execute(
+        `DELETE FROM ${wp("term_relationships")}
+          WHERE term_taxonomy_id IN (
+                SELECT term_taxonomy_id FROM ${wp("term_taxonomy")}
+                 WHERE taxonomy = ? AND term_id IN (${delPh})
+              )`,
+        [CATEGORY_TAXONOMY, ...deletable],
+      );
+      await execute(`DELETE FROM ${wp("termmeta")} WHERE term_id IN (${delPh})`, deletable);
+      await execute(
+        `DELETE FROM ${wp("term_taxonomy")} WHERE taxonomy = ? AND term_id IN (${delPh})`,
+        [CATEGORY_TAXONOMY, ...deletable],
+      );
+      await execute(`DELETE FROM ${wp("terms")} WHERE term_id IN (${delPh})`, deletable);
+      await execute(
+        `DELETE FROM ${wp("wc_category_lookup")}
+          WHERE category_tree_id IN (${delPh}) OR category_id IN (${delPh})`,
+        [...deletable, ...deletable],
+      );
+      termsDeleted = deletable.length;
+    }
+  }
+
+  log.info(
+    `purged WPF brand product_cat: map=${mapResult.affectedRows} rels=${relResult.affectedRows} terms=${termsDeleted}`,
+  );
+  return {
+    mapRowsDeleted: mapResult.affectedRows,
+    relationshipsRemoved: relResult.affectedRows,
+    termsDeleted,
+  };
+}
+
+/**
  * Reload vendor feed → product_cat maps from `sil_category_map` without fetching a feed.
  * Used by rewrite-only syncs so content rewrites cannot wipe categories with empty maps.
  */
@@ -336,12 +453,9 @@ export async function loadFlatTermMapFromDb(taxonomy: string): Promise<Map<strin
   return map;
 }
 
-const B2B_VENDOR_SLUG = "wholesale-perfumes";
-const B2B_PAGE_SLUG = "b2b-wholesale";
-
 /**
- * Ensure an optional WordPress landing page that lists only wholesale-perfumes.
- * Main shop includes that vendor like BF/BTS; this page is a filtered shortcut.
+ * Ensure the WordPress landing page that lists only wholesale-perfumes.
+ * Main shop / search exclude that vendor; `/b2b-wholesale/` is the listing.
  * The bridge scopes `[products]` here by `_sillage_vendor=wholesale-perfumes`
  * (not by a product_cat lane — vendor identity must stay off product categories).
  */
@@ -581,10 +695,13 @@ export async function attributeTaxonomyExists(taxonomy: string): Promise<boolean
  * WooCommerce counts only published products, and the storefront hides products carrying
  * `exclude-from-catalog`, so those are excluded here too — otherwise category counts overstate
  * what a shopper can actually see.
+ *
+ * For `product_cat` only, also exclude wholesale-perfumes products: they are hidden from the
+ * main shop/search, so shop sidebar counts should reflect BF/BTS browse inventory. The B2B
+ * page computes its own WPF-scoped counts.
  */
 export async function recountTerms(taxonomies: string[]): Promise<void> {
   if (taxonomies.length === 0) return;
-  const placeholders = taxonomies.map(() => "?").join(",");
 
   const excluded = await query<RowDataPacket & { term_taxonomy_id: number }>(
     `SELECT tt.term_taxonomy_id FROM ${wp("term_taxonomy")} tt
@@ -593,23 +710,55 @@ export async function recountTerms(taxonomies: string[]): Promise<void> {
   );
   const hiddenTtId = excluded[0]?.term_taxonomy_id ?? 0;
 
-  await execute(
-    `UPDATE ${wp("term_taxonomy")} tt
-        SET tt.count = (
-          SELECT COUNT(DISTINCT p.ID)
-            FROM ${wp("term_relationships")} tr
-            JOIN ${wp("posts")} p ON p.ID = tr.object_id
-           WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
-             AND p.post_type = 'product'
-             AND p.post_status = 'publish'
-             AND NOT EXISTS (
-               SELECT 1 FROM ${wp("term_relationships")} hidden
-                WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
-             )
-        )
-      WHERE tt.taxonomy IN (${placeholders})`,
-    [hiddenTtId, ...taxonomies],
-  );
+  const cats = taxonomies.filter((t) => t === CATEGORY_TAXONOMY);
+  const others = taxonomies.filter((t) => t !== CATEGORY_TAXONOMY);
+
+  if (cats.length > 0) {
+    await execute(
+      `UPDATE ${wp("term_taxonomy")} tt
+          SET tt.count = (
+            SELECT COUNT(DISTINCT p.ID)
+              FROM ${wp("term_relationships")} tr
+              JOIN ${wp("posts")} p ON p.ID = tr.object_id
+             WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
+               AND p.post_type = 'product'
+               AND p.post_status = 'publish'
+               AND NOT EXISTS (
+                 SELECT 1 FROM ${wp("term_relationships")} hidden
+                  WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM ${wp("postmeta")} pm_wpf
+                  WHERE pm_wpf.post_id = p.ID
+                    AND pm_wpf.meta_key = '_sillage_vendor'
+                    AND pm_wpf.meta_value = ?
+               )
+          )
+        WHERE tt.taxonomy = ?`,
+      [hiddenTtId, B2B_VENDOR_SLUG, CATEGORY_TAXONOMY],
+    );
+  }
+
+  if (others.length > 0) {
+    const placeholders = others.map(() => "?").join(",");
+    await execute(
+      `UPDATE ${wp("term_taxonomy")} tt
+          SET tt.count = (
+            SELECT COUNT(DISTINCT p.ID)
+              FROM ${wp("term_relationships")} tr
+              JOIN ${wp("posts")} p ON p.ID = tr.object_id
+             WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
+               AND p.post_type = 'product'
+               AND p.post_status = 'publish'
+               AND NOT EXISTS (
+                 SELECT 1 FROM ${wp("term_relationships")} hidden
+                  WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
+               )
+          )
+        WHERE tt.taxonomy IN (${placeholders})`,
+      [hiddenTtId, ...others],
+    );
+  }
 
   log.info(`recounted ${taxonomies.join(", ")}`);
 }

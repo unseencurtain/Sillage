@@ -78,6 +78,10 @@ describe("wholesale-perfumes XML parse + normalize", () => {
     expect(p!.vendorPrice).toBe(125.64);
     expect(p!.stock).toBe(10);
     expect(p!.imageUrl).toContain("HQlgckCAqXUZdlXzHgtlzQ");
+    // product_cat = type only; brand stays on product_brand via `brand`.
+    expect(p!.categoryRefs.every((k) => k.startsWith("type:"))).toBe(true);
+    expect(p!.categoryRefs.some((k) => k.startsWith("brand:"))).toBe(false);
+    expect(p!.brand).toBeTruthy();
   });
 
   test("product missing flask_front has null imageUrl", async () => {

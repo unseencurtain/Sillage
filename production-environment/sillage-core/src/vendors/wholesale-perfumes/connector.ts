@@ -183,18 +183,14 @@ export class WholesalePerfumesConnector extends VendorConnector {
 
     const eans = [...new Set((r.allEans ?? []).map((e) => String(e).trim()).filter((e) => /^\d+$/.test(e)))];
 
+    // Browse categories = product type only (Eau de Parfum, Blush, …). Brands already map to
+    // WooCommerce `product_brand` via `brand` below — nesting them under product_cat produced the
+    // A–Z brand dump in the /b2b-wholesale/ sidebar.
     const categoryRefs: string[] = [];
     if (r.typeId || r.typeName) {
       const key = r.typeId ? `type:${r.typeId}` : `type:${r.typeName}`;
       const label = (r.typeName ?? r.typeId ?? "").trim() || key;
       this.ensureCategory(key, label, null);
-      categoryRefs.push(key);
-    }
-    if (r.brandId || r.brand) {
-      const key = r.brandId ? `brand:${r.brandId}` : `brand:${r.brand}`;
-      const label = (r.brand ?? r.brandId ?? "").trim() || key;
-      const parent = categoryRefs[0] ?? null;
-      this.ensureCategory(key, label, parent);
       categoryRefs.push(key);
     }
 

@@ -161,15 +161,24 @@ final class Sillage_Rest {
 	 *
 	 * Blocksy keeps a taxonomy lookup table. Astra / Elementor may expose similar refresh entry
 	 * points — each check is guarded so this is a no-op when those themes/plugins are absent.
+	 *
+	 * Prefer a direct SQL rebuild: Blocksy's `regenerate_inline` loads every product through
+	 * `wc_get_products( limit=-1 )`, which OOMs / times out on a ~60k catalogue. The wrong
+	 * action name (`blocksy:products:taxonomies-lookup:regenerate`) was also a no-op — the
+	 * real hook is `blocksy:pro:woo-extra:filters:lookup-table:regenerate`.
 	 */
 	private function regenerate_theme_lookups(): bool {
 		$did = false;
 
-		if (
+		if ( $this->rebuild_blocksy_taxonomy_lookup() ) {
+			$did = true;
+		} elseif (
 			function_exists( 'blocksy_get_product_taxonomies_lookup_table' )
+			|| class_exists( '\Blocksy\Extensions\WoocommerceExtra\FiltersTaxonomiesProductsLookupTable' )
 			|| class_exists( '\Blocksy\ProductTaxonomiesLookup' )
 		) {
-			do_action( 'blocksy:products:taxonomies-lookup:regenerate' );
+			// Fallback for smaller installs / future Blocksy versions.
+			do_action( 'blocksy:pro:woo-extra:filters:lookup-table:regenerate' );
 			$did = true;
 		}
 
@@ -190,7 +199,59 @@ final class Sillage_Rest {
 			$did = true;
 		}
 
+		delete_transient( 'sillage_b2b_cats_v1' );
+		delete_transient( 'sillage_b2b_cats_v2' );
+
 		return $did;
+	}
+
+	/**
+	 * Populate `wp_blocksy_product_taxonomies_lookup` from live term relationships.
+	 *
+	 * Without this, Blocksy's Ajax category filter only sees the handful of starter-site
+	 * demo products that were indexed before the bulk SQL import.
+	 */
+	private function rebuild_blocksy_taxonomy_lookup(): bool {
+		global $wpdb;
+		$table = $wpdb->prefix . 'blocksy_product_taxonomies_lookup';
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+		if ( $table !== $exists ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( "TRUNCATE TABLE {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		// Mirror Blocksy's store: product_cat + brand taxonomy (WC registers singular product_brand;
+		// older Blocksy rows used product_brands — index both spellings when present).
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$inserted = $wpdb->query(
+			"INSERT INTO {$table} (product_id, taxonomy, term_id)
+			SELECT DISTINCT p.ID, tt.taxonomy, tt.term_id
+			FROM {$wpdb->posts} p
+			INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID
+			INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+			WHERE p.post_type = 'product'
+			  AND p.post_status = 'publish'
+			  AND tt.taxonomy IN ('product_cat', 'product_brand', 'product_brands')"
+		);
+
+		if ( false === $inserted ) {
+			return false;
+		}
+
+		update_option(
+			'blocksy_taxonomy_lookup_regeneration_state',
+			array(
+				'state'   => 'idle',
+				'enabled' => true,
+			),
+			false
+		);
+
+		return true;
 	}
 
 	/** Health and configuration snapshot, used by the dashboard's Overview page. */

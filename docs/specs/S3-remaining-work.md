@@ -218,7 +218,7 @@ None of these are engineering decisions. Get the values from the operator; do no
   `min_order_value_eur` hard-blocks cart/checkout with a storefront-label shortfall — wired so
   customers see it before dispatch. wholesale-perfumes seed is still €100 until the operator
   confirms the real figure.
-- **wholesale-perfumes sell path.** Product decision: same path as BF/BTS (main shop → cart →
+- **wholesale-perfumes sell path.** Listed on `/b2b-wholesale/` only; same cart →
   checkout → Sillage) plus MOQ; no B2B portal. Cart `code` = catalog product `id` confirmed
   (`docs/vendors/wholesale-perfumes-api.md`). Still confirm exact MOQ euros, shipping countries,
   and VAT (fraction — 21% is `0.21`) before first live spend; keep `orders_dry_run=1` until then.
@@ -261,4 +261,4 @@ Read these before touching the related code; each one cost real time to establis
 - Matching Google's consumer prices. Not implementable as stated without price scraping; the markup
   tiers are the agreed approximation.
 - B2B portal / separate higher-MOQ lane. **Decided out of scope:** same sell path as BF/BTS +
-  per-vendor MOQ; optional `/b2b-wholesale/` filtered landing only.
+  per-vendor MOQ; `/b2b-wholesale/` is the WPF listing (main shop excludes WPF).
