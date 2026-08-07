@@ -16,8 +16,16 @@ import type {
 } from "./types.js";
 
 const THUMB_RE = /\/images\/w60\//i;
-const NO_IMAGE_RE = /no-image|\/images\/w\d+\/\.webp/i;
+/** Placeholders: no-image.jpg and bare `/images/w700/.webp` (Tester rows). */
+const NO_IMAGE_RE = /no-image|\/images\/w\d+\/\.webp(?:\?|$)/i;
 const WIDTH_RE = /\/images\/w(\d+)\//i;
+
+/** Stem from `/images/wN/<stem>.ext` — used to keep network URLs row-scoped. */
+export function imageStem(url: string): string | null {
+  const m = /\/images\/w\d+\/([^/?#]+)\./i.exec(url);
+  if (!m?.[1] || m[1] === "" || /^no-image$/i.test(m[1])) return null;
+  return m[1];
+}
 
 /**
  * Prefer the visually / byte-wise largest candidate when multiple URLs exist.
@@ -91,41 +99,7 @@ export async function collectDomImageCandidates(
   const urls = new Set<string>();
   const pageUrl = page.url();
 
-  const fromEval = await page.evaluate(() => {
-    const out: string[] = [];
-    const push = (u: string | null | undefined): void => {
-      if (u) out.push(u);
-    };
-    const imgs = Array.from(document.querySelectorAll("img"));
-    for (const img of imgs) {
-      push(img.currentSrc || img.src);
-      push(img.getAttribute("data-src"));
-      push(img.getAttribute("data-original"));
-      push(img.getAttribute("data-zoom-image"));
-      push(img.getAttribute("data-large"));
-      push(img.getAttribute("data-full"));
-      for (let ai = 0; ai < img.attributes.length; ai++) {
-        const attr = img.attributes.item(ai);
-        if (
-          attr &&
-          attr.name.startsWith("data-") &&
-          (/^https?:\/\//i.test(attr.value) || attr.value.startsWith("/images/"))
-        ) {
-          out.push(attr.value);
-        }
-      }
-    }
-    for (const pic of Array.from(document.querySelectorAll("picture[data-image]"))) {
-      push(pic.getAttribute("data-image"));
-    }
-    return out;
-  });
-  for (const u of fromEval) {
-    const abs = absolutize(pageUrl, u);
-    if (isUsableLargeUrl(abs)) urls.add(abs);
-  }
-
-  // Row-scoped: prefer picture[data-image], never bare thumb src alone.
+  // Row-scoped only — never scan the whole page (other rows' data-image leaks).
   const dataImage = await row
     .locator("picture[data-image]")
     .first()
@@ -167,52 +141,70 @@ export const listRowHoverLargeStrategy: ExtractionStrategy = {
   async extract(ctx: ExtractionContext): Promise<string | null> {
     const pageUrl = ctx.page.url();
 
-    // 1) Network images that appeared around hover (highest trust).
-    const net = collectNetworkImageCandidates(ctx.network);
-    const fromNet = pickLargestImageUrl(net);
-    if (fromNet) return fromNet;
-
-    // 2) Large img currently visible in the DOM (post-hover preview).
-    const largeDom = await ctx.page.evaluate(() => {
-      const out: string[] = [];
-      for (const img of Array.from(document.querySelectorAll("img"))) {
-        const src = img.currentSrc || img.src || "";
-        if (!src || /\/images\/w60\//i.test(src) || /no-image/i.test(src)) continue;
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
-        if (w >= 300 && h >= 300) out.push(src);
-      }
-      return out;
-    });
-    const fromDomLarge = pickLargestImageUrl(
-      largeDom.map((u) => absolutize(pageUrl, u)),
-    );
-    if (fromDomLarge) return fromDomLarge;
-
-    // 3) picture[data-image] on the matched row (stores w700 path).
+    // Row anchors first — Tester rows use no-image / `/images/w700/.webp`.
     const dataImage = await ctx.row
       .locator("picture[data-image]")
       .first()
       .getAttribute("data-image")
       .catch(() => null);
-    if (dataImage) {
-      const abs = absolutize(pageUrl, dataImage);
-      if (isUsableLargeUrl(abs)) return abs;
-    }
+    const dataAbs = dataImage ? absolutize(pageUrl, dataImage) : null;
+    const rowDataOk = dataAbs && isUsableLargeUrl(dataAbs) ? dataAbs : null;
 
-    // 4) Last resort: rewrite thumb path w60 → w700 (same stem).
     const thumbSrc = await ctx.row
       .locator(".c-product__img img, picture img, img")
       .first()
       .getAttribute("src")
       .catch(() => null);
-    if (thumbSrc) {
-      const rewritten = thumbToLargeUrl(absolutize(pageUrl, thumbSrc), pageUrl);
+    const thumbAbs = thumbSrc ? absolutize(pageUrl, thumbSrc) : null;
+    if (thumbAbs && NO_IMAGE_RE.test(thumbAbs) && !rowDataOk) {
+      return null; // genuine missing photo — do not steal another row's image
+    }
+    const rowStem =
+      (rowDataOk && imageStem(rowDataOk)) ||
+      (thumbAbs && imageStem(thumbAbs)) ||
+      null;
+
+    // 1) Network images from this hover, filtered to the row stem when known.
+    const net = collectNetworkImageCandidates(ctx.network).filter((u) => {
+      if (!rowStem) return isUsableLargeUrl(u);
+      const stem = imageStem(u);
+      return stem !== null && stem === rowStem;
+    });
+    const fromNet = pickLargestImageUrl(net);
+    if (fromNet) return fromNet;
+
+    // 2) Row picture[data-image] (confirmed w700 path).
+    if (rowDataOk) return rowDataOk;
+
+    // 3) Post-hover preview img — only if its stem matches this row.
+    if (rowStem) {
+      const largeDom = (await ctx.page.evaluate(`(() => {
+        const out = [];
+        for (const img of Array.from(document.querySelectorAll("img"))) {
+          const src = img.currentSrc || img.src || "";
+          if (!src || /\\/images\\/w60\\//i.test(src) || /no-image/i.test(src)) continue;
+          if (/\\/images\\/w\\d+\\/\\.webp/i.test(src)) continue;
+          const w = img.naturalWidth || img.width;
+          const h = img.naturalHeight || img.height;
+          if (w >= 300 && h >= 300) out.push(src);
+        }
+        return out;
+      })()`)) as string[];
+      const matched = largeDom
+        .map((u) => absolutize(pageUrl, u))
+        .filter((u) => imageStem(u) === rowStem && isUsableLargeUrl(u));
+      const fromDomLarge = pickLargestImageUrl(matched);
+      if (fromDomLarge) return fromDomLarge;
+    }
+
+    // 4) Rewrite this row's thumb w60 → w700 (same stem).
+    if (thumbAbs) {
+      const rewritten = thumbToLargeUrl(thumbAbs, pageUrl);
       if (rewritten && isUsableLargeUrl(rewritten)) return rewritten;
     }
 
-    const dom = await collectDomImageCandidates(ctx);
-    return pickLargestImageUrl(dom);
+    // 5) Row-scoped DOM candidates only (never page-wide).
+    return pickLargestImageUrl(await collectDomImageCandidates(ctx));
   },
 };
 

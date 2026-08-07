@@ -90,6 +90,8 @@ changes.
 
 ## 3. Download
 
+### 3a. CSV / EAN search (targeted batches)
+
 Point `BRASTY_CSV_PATH` at the Brasty product CSV (BOM + `,` / `;` tolerated; EAN and
 name columns auto-detected).
 
@@ -110,6 +112,34 @@ Behaviour:
 
 Structured log categories: `downloaded`, `already_exists`, `missing_image`,
 `search_failed`, `hover_failed`, `network_timeout`, `unexpected_page_structure`.
+
+### 3b. Full-catalog list crawl (preferred for “all IN STOCK”)
+
+Paginate the logged-in B2B product list (no per-EAN search). Live filters:
+
+| Filter | Checkbox value | Approx size |
+|---|---|---|
+| IN STOCK | `f[t][]=1000001` | ~14 462 (~60/page × ~242 pages) |
+| OUT OF STOCK | `f[t][]=1000002` | ~23 k |
+
+```bash
+# Prefer the laptop (Playwright + disk). Keep CONCURRENCY=1.
+# Abort if free disk < ~8 GiB.
+CATALOG_STOCK_FILTER=in_stock POLITENESS_DELAY_MS=1500 \
+  nohup npm run crawl-catalog > logs/catalog-nohup.out 2>&1 &
+
+# Trial first 2 pages:
+CATALOG_MAX_PAGES=2 npm run crawl-catalog
+
+# Resume after interrupt (default): re-run the same command — uses
+# logs/catalog-checkpoint.json + logs/manifest.jsonl
+npm run crawl-catalog
+```
+
+Per row: read EAN from the list → hover `.c-product__img` → capture `/images/w700/`
+→ HTTP download → `output/EAN.jpg`. Already-downloaded EANs are skipped. After a
+solid chunk: `npm run watermark` → `npm run build-overrides` (with
+`LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz`) → rsync media → rewrite sync.
 
 ## 4. Watermark (optional LPS logo)
 
@@ -177,7 +207,8 @@ npm run build-overrides  # merge EAN→URL into image_overrides.json
 |---|---|
 | `npm run login` | Headless credential login → `storageState.json` |
 | `npm run investigate` | Evidence gate for image preview mechanism |
-| `npm run download` | Production CSV → `output/EAN.jpg` |
+| `npm run download` | CSV EANs → search → `output/EAN.jpg` |
+| `npm run crawl-catalog` | Paginate IN STOCK (or all) list → `output/EAN.jpg` |
 | `npm run watermark` | LPS logo composite → `watermarked/` |
 | `npm run build-overrides` | Merge EAN→URL into `image_overrides.json` |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -195,9 +226,11 @@ tools/images/brasty/
     login.ts
     investigate.ts
     download-images.ts
+    crawl-catalog.ts     ← full list pagination (IN STOCK first)
+    catalog.ts           ← list URL / paging / checkpoint helpers
     search.ts
     hover.ts
-    imageExtractor.ts   ← pluggable strategy (pending investigation)
+    imageExtractor.ts   ← list-row-hover-large (w700, never w60)
     downloader.ts
     logger.ts
     config.ts

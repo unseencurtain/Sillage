@@ -85,7 +85,8 @@ npx playwright install --with-deps chromium   # once per host
 npm run login                 # headless → storageState.json (gitignored)
 npm run investigate           # evidence gate — see findings/
 # implement ExtractionStrategy in src/imageExtractor.ts from findings
-npm run download              # trial 10–20 EANs first; then scale on ovhe
+npm run download              # CSV / targeted EANs
+npm run crawl-catalog         # full IN STOCK list (~14k); resume-safe; prefer laptop
 npm run watermark             # optional LPS logo → watermarked/
 npm run build-overrides       # merge into sillage-core/data/image_overrides.json
 ```
