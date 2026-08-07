@@ -69,11 +69,12 @@ async function tryStartFromPending(): Promise<RewriteKickStatus> {
     await clearFlag(PENDING_CONTENT_KEY);
     await clearFlag(PENDING_PRICE_KEY);
     void runSync({ mode: "full", source: "cache" }).catch(async (err) => {
-      await flagPending("content");
       if (String(err).includes("another sync is already running")) {
+        await flagPending("content");
         log.info("content rewrite: lock busy — left pending for drain after current run");
         return;
       }
+      // Non-lock failure: leave flags clear so we do not spin forever; operator can Save again.
       log.error("content rewrite failed", String(err));
     });
     return "started";
@@ -81,8 +82,8 @@ async function tryStartFromPending(): Promise<RewriteKickStatus> {
 
   await clearFlag(PENDING_PRICE_KEY);
   void runSync({ mode: "fast", source: "cache", rewriteOnly: true }).catch(async (err) => {
-    await flagPending("price");
     if (String(err).includes("another sync is already running")) {
+      await flagPending("price");
       log.info("price rewrite: lock busy — left pending for drain after current run");
       return;
     }
