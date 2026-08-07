@@ -71,49 +71,49 @@ final class Sillage_Catalog {
 	/**
 	 * Top-level feed browse categories for the retail shop sidebar (BF/BTS counts).
 	 *
-	 * Blocksy's Ajax category filter dumps a flat A–Z of nested brand leaves even with
-	 * hierarchical=true; this shortcode is the theme-agnostic browse list.
+	 * Reads `wp_term_taxonomy.count` directly — WooCommerce's `wc_change_term_counts`
+	 * zeroes get_terms() counts outside a product loop, which emptied this list.
 	 *
 	 * @param array|string $atts Shortcode attributes (unused).
 	 */
 	public function shortcode_shop_categories( $atts = array() ): string {
 		unset( $atts );
-		$terms = get_terms(
-			array(
-				'taxonomy'   => 'product_cat',
-				'parent'     => 0,
-				'hide_empty' => true,
-				'orderby'    => 'name',
-				'order'      => 'ASC',
-			)
+		global $wpdb;
+
+		$exclude = array_merge( self::LEGACY_VENDOR_CAT_SLUGS, self::DEMO_CAT_SLUGS );
+		$ph      = implode( ',', array_fill( 0, count( $exclude ), '%s' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, t.name, t.slug, tt.count
+				FROM {$wpdb->terms} t
+				INNER JOIN {$wpdb->term_taxonomy} tt
+					ON tt.term_id = t.term_id AND tt.taxonomy = 'product_cat' AND tt.parent = 0
+				WHERE tt.count >= 20
+				  AND t.slug NOT IN ({$ph})
+				ORDER BY t.name ASC",
+				$exclude
+			),
+			ARRAY_A
 		);
-		if ( is_wp_error( $terms ) || ! is_array( $terms ) || array() === $terms ) {
+
+		if ( ! is_array( $rows ) || array() === $rows ) {
 			return '';
 		}
 
-		$legacy = self::LEGACY_VENDOR_CAT_SLUGS;
-		$demo   = self::DEMO_CAT_SLUGS;
-		$html   = '<ul class="sillage-shop-cats">';
-		foreach ( $terms as $term ) {
-			if ( ! ( $term instanceof WP_Term ) ) {
+		$html = '<ul class="sillage-shop-cats">';
+		foreach ( $rows as $row ) {
+			$name = (string) ( $row['name'] ?? '' );
+			$slug = (string) ( $row['slug'] ?? '' );
+			if ( '' === $slug || preg_match( '/^lps0[123]$/i', $name ) ) {
 				continue;
 			}
-			$slug = (string) $term->slug;
-			if ( in_array( $slug, $legacy, true ) || in_array( $slug, $demo, true ) ) {
-				continue;
-			}
-			if ( preg_match( '/^lps0[123]$/i', (string) $term->name ) ) {
-				continue;
-			}
-			// Starter-site leftovers often sit at parent=0 with tiny counts.
-			if ( (int) $term->count < 20 ) {
-				continue;
-			}
-			$url   = get_term_link( $term );
-			$url   = is_wp_error( $url ) ? '' : (string) $url;
-			$label = $term->name;
-			$count = (int) $term->count;
-			$html .= '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label )
+			$term_id = (int) ( $row['term_id'] ?? 0 );
+			$count   = (int) ( $row['count'] ?? 0 );
+			$url     = $term_id > 0 ? get_term_link( $term_id, 'product_cat' ) : '';
+			$url     = is_wp_error( $url ) ? '' : (string) $url;
+			$html   .= '<li><a href="' . esc_url( $url ) . '">' . esc_html( $name )
 				. '<span class="count">(' . esc_html( (string) $count ) . ')</span></a></li>';
 		}
 		$html .= '</ul>';
