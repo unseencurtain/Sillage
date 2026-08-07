@@ -124,10 +124,17 @@ only one vendor ships a real photo.
 Product images are **external URLs** — WordPress never creates attachments. Host scraped or
 watermarked files outside `data/wp/`:
 
-1. Directory: `production-environment/ecom_sites/data/media/`
-2. Bind-mount read-only into `ecom` at `/var/www/lps-media` (see `compose.yaml`)
-3. Served at **`/lps-media/`** (Apache locally, Caddy on VPS)
-4. Set `PUBLIC_URL_BASE=https://<shop>/lps-media` in tool `.env` before `build-overrides`
+1. **Host directory** (bind-mount, not a Docker named volume):
+   `production-environment/ecom_sites/data/media/`
+2. Dedicated **`lps-media`** container (`nginx:alpine`) mounts that path read-only as its
+   document root (`/usr/share/nginx/html`). No PHP, no DB, no WooCommerce.
+3. Public path stays **`/lps-media/<file>`** so existing override URLs keep working:
+   - Local compose: `shop-gateway` (Caddy) `handle_path /lps-media/*` → `lps-media`
+   - VPS: host Caddy `handle_path /lps-media/*` → `127.0.0.1:105` (`lps-media`)
+4. `ecom` does **not** mount or Alias media — Apache no longer serves product images.
+5. Set `PUBLIC_URL_BASE=https://<shop>/lps-media` in tool `.env` before `build-overrides`
+
+Drop new files onto the host `data/media/` path; nginx serves them immediately (read-only mount).
 
 Brasty watermark asset: `tools/images/brasty/assets/lps-logo.png`.
 

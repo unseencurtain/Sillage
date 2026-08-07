@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         "--media-dir",
         type=Path,
         default=REPO_ECOM_MEDIA,
-        help="Host directory bind-mounted as /lps-media",
+        help="Host directory bind-mounted into lps-media nginx (served at /lps-media/)",
     )
     parser.add_argument(
         "--host",
