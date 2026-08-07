@@ -46,6 +46,10 @@ final class Sillage_Catalog {
 	public function register(): void {
 		add_action( 'pre_get_posts', array( $this, 'exclude_b2b_from_main_catalog' ), 20 );
 		add_action( 'woocommerce_product_query', array( $this, 'exclude_b2b_from_wc_query' ), 20 );
+		// Blocksy live search uses WP REST /wp/v2/search (not the main query). After Blocksy's
+		// rest_post_search_query (priority 999) so we keep its visibility/tax patches and still
+		// exclude LPS03 the same way the search results page does.
+		add_filter( 'rest_post_search_query', array( $this, 'exclude_b2b_from_rest_search' ), 1000, 2 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_image_safety_css' ), 30 );
 		add_filter( 'get_terms', array( $this, 'hide_empty_b2b_from_term_lists' ), 20, 3 );
 		add_filter( 'woocommerce_product_categories_widget_args', array( $this, 'exclude_empty_b2b_from_category_widget' ), 20 );
@@ -100,6 +104,55 @@ final class Sillage_Catalog {
 			return;
 		}
 		$this->append_b2b_exclusion( $query );
+	}
+
+	/**
+	 * Exclude LPS03 from Blocksy/WP REST live search so dropdown matches /?s= results.
+	 *
+	 * @param array            $args    WP_Query args for the search.
+	 * @param WP_REST_Request  $request REST request.
+	 * @return array
+	 */
+	public function exclude_b2b_from_rest_search( $args, $request ) {
+		if ( ! is_array( $args ) ) {
+			return $args;
+		}
+
+		$post_type = $args['post_type'] ?? '';
+		$includes_product = ( 'product' === $post_type )
+			|| ( is_array( $post_type ) && in_array( 'product', $post_type, true ) );
+		if ( ! $includes_product ) {
+			return $args;
+		}
+
+		unset( $request );
+		$slug = $this->b2b_category_slug();
+		if ( '' !== $slug && isset( $args['tax_query'] ) && is_array( $args['tax_query'] )
+			&& $this->tax_query_targets_b2b( $args['tax_query'], $slug ) ) {
+			return $args;
+		}
+		// Same Blocksy ?ct_tax_query=product_cat:{id} allow as the main search query.
+		if ( $this->request_targets_b2b_category() ) {
+			return $args;
+		}
+
+		$tt_id = $this->b2b_term_taxonomy_id();
+		if ( $tt_id <= 0 ) {
+			return $args;
+		}
+
+		$tax_query = isset( $args['tax_query'] ) && is_array( $args['tax_query'] )
+			? $args['tax_query']
+			: array();
+		$tax_query[] = array(
+			'taxonomy' => 'product_cat',
+			'field'    => 'term_taxonomy_id',
+			'terms'    => array( $tt_id ),
+			'operator' => 'NOT IN',
+		);
+		$args['tax_query'] = $tax_query;
+
+		return $args;
 	}
 
 	/**
