@@ -78,8 +78,9 @@ Two databases on **one** MariaDB server, so a single connection can transact acr
 | `sillage` | sillage-core (user `sillage`) | Our own state. Prefix `sil_` |
 
 Credentials are **not** in this file. They live in:
-- `production-environment/.env` — single file for MariaDB, WordPress, sillage-core, vendors, image tags (gitignored)
-- VPS: `~/sillage/.env` (same shape). Legacy split files under `ecom_sites/.env` / `sillage-core/.env` may still exist locally for host-side `bun` runs.
+- `production-environment/.env` — **single** file for MariaDB, WordPress, sillage-core, vendors, Hub image tags, domains (gitignored; template `.env.example`)
+- VPS: `~/sillage/.env` (same shape; compose `--env-file .env`)
+- Local-dev only: `sillage-core/.env` for host-side `bun run`; `ecom_sites/.env` / `redis/.env` are deprecated leftovers — safe to delete once `~/sillage/.env` (or root `.env`) is in use
 
 Always fully qualify cross-database table names (`earth.wp_posts`, `sillage.sil_offers`). Never
 rely on a pooled connection's default schema, because `USE` state leaks between reused connections.

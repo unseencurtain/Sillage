@@ -42,3 +42,21 @@ bun run sync -- --source=live --vendor=bts
 bun run dev                # API + dashboard on :4000
 bun test
 ```
+
+## Production deploy (one compose + one `.env`)
+
+Canonical env: `production-environment/.env.example` → laptop
+`production-environment/.env` → VPS `~/sillage/.env`.
+Compose: `production-environment/compose.yaml` only (legacy
+`ecom_sites/compose.yaml` / `redis/compose.yaml` are thin includes).
+Hub images: `unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`.
+
+```bash
+cp production-environment/.env.example production-environment/.env   # fill vendors
+./production-environment/scripts/deploy-vps.sh \
+  --host ovhe --shop … --dash … --images … --skip-build   # or omit --skip-build to push
+```
+
+Full recipe: `docs/VPS-DEPLOY.md`. Staging SSH alias `ovhe`; do not treat `ovh` as
+default until staging is proven. Split `ecom_sites/.env` / `sillage-core/.env` are
+local-dev / migration leftovers only.

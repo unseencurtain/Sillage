@@ -63,7 +63,8 @@ Host my-sillage
 
 ```bash
 cp production-environment/.env.example production-environment/.env
-# Fill BeautyFort + BTS credentials. Dashboard password is generated on deploy if missing remotely.
+# Fill BeautyFort + BTS (+ optional WHOLESALE_PERFUMES_*) credentials.
+# Dashboard password is generated on deploy if missing remotely.
 ```
 
 Optional DNS automation:

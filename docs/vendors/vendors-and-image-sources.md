@@ -1,6 +1,8 @@
 # Vendors and image sources — integration notes
 
-No credentials in this file. Put secrets in `python-analysis/.env` or `sillage-core/.env`.
+No credentials in this file. Stack secrets live in `production-environment/.env`
+(template: `production-environment/.env.example`). Offline tools may use their own
+local `.env` (`python-analysis/`, `tools/images/brasty/`) — not for compose/deploy.
 
 See also CONTEXT §6 “Vendors versus image sources”.
 
@@ -58,7 +60,8 @@ Docs: https://www.wholesale-perfumes.eu/api/docs/ · https://www.wholesale-perfu
 
 Env placeholders: `WHOLESALE_PERFUMES_USER`, `WHOLESALE_PERFUMES_TOKEN`,
 `WHOLESALE_PERFUMES_CATALOG_URL`, `WHOLESALE_PERFUMES_STOCK_URL`,
-`WHOLESALE_PERFUMES_API_BASE_URL` in `sillage-core/.env.example`.
+`WHOLESALE_PERFUMES_API_BASE_URL` in `production-environment/.env.example`
+(mirrored in `sillage-core/.env.example` for host-side `bun` only).
 
 ## oceanfragrances — image source only
 

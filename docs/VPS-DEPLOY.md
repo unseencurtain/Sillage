@@ -25,7 +25,7 @@ You run everything from your **laptop** in a clone of this repo. The VPS never n
 | `~/ecom_sites/data/{wp,wp-db,media}` | Host volumes (WP, MariaDB, product images) |
 | Host Caddy (`/etc/caddy/Caddyfile`) | TLS edge → `:104` / `:105` / `:4000` |
 
-Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`). Minimal rsync covers compose, config, plugin, and `image_overrides.json` only.
+Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`). Minimal rsync covers compose, config, plugin, and `image_overrides.json` only — **not** a full source-tree sync. After the first deploy, day-2 updates are Hub pull + that thin rsync.
 
 ---
 
@@ -212,3 +212,34 @@ docker exec sillage-core bun run migrate
 | `wordpress-image/Dockerfile` | WordPress + Redis PHP extension |
 
 Canonical product facts: [`CONTEXT.md`](CONTEXT.md).
+
+---
+
+## Production (`ovh`) cutover — commands only
+
+Do **not** run these until staging (`ovhe`) is green and the operator explicitly
+asks to cut over. Exact laptop commands (adjust domains/IP):
+
+```bash
+# 1) Ensure laptop production-environment/.env has all vendor + Hub keys
+cp -n production-environment/.env.example production-environment/.env
+
+# 2) Build/push tip images
+./production-environment/scripts/build-push-images.sh
+
+# 3) Deploy to production host (example alias `ovh`)
+./production-environment/scripts/deploy-vps.sh \
+  --host ovh \
+  --shop shop.YOUR_DOMAIN \
+  --dash ops.YOUR_DOMAIN \
+  --images images.YOUR_DOMAIN \
+  --skip-build \
+  --ip YOUR_PROD_IP
+
+# 4) Verify
+ssh ovh 'cd ~/sillage && docker compose --env-file .env ps && curl -sS http://127.0.0.1:4000/health'
+```
+
+Single env on prod must be `~/sillage/.env`. Keep Settings → Orders dry-run **on**
+until intentional live dispatch. `wholesale-perfumes` stays inactive until toggled
+in the dashboard (migration seeds `active=0`).
