@@ -297,7 +297,10 @@ export class WholesalePerfumesClient {
     return json ?? text;
   }
 
-  /** Insert lines into the account-global cart. */
+  /**
+   * Replace-style insert: POST /cart takes the full line list (`[{ code, quantity }, ...]`)
+   * and is all-or-nothing. Callers must clear first when building a fresh cart.
+   */
   async addToCart(lines: WholesalePerfumesCartLine[]): Promise<unknown> {
     const { json, text } = await this.request("POST", `${this.apiBaseUrl}/cart`, lines);
     return json ?? text;
