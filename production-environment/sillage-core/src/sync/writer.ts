@@ -6,6 +6,7 @@ import type { GlobalSettings, Vendor } from "../db/settings.ts";
 import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
+import { throwIfSyncAborted } from "./abort.ts";
 import { buildImageLookup, type ImageLookup } from "./images.ts";
 import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
@@ -54,6 +55,7 @@ const MANAGED_META_KEYS = [
   "_sillage_vendor",
   "_sillage_vendor_product_id",
   "_sillage_offer_id",
+  "_sillage_ship_countries",
   "_external_thumbnail_url",
   "_external_gallery_urls",
 ] as const;
@@ -78,6 +80,8 @@ export interface WriteContext {
   categoryMaps: Map<number, Map<string, TermRef>>;
   brandMap: Map<string, TermRef>;
   attributeMaps: Map<string, Map<string, TermRef>>;
+  /** product_cat term per vendor slug — "BeautyFort" / "BTS Wholesaler" shop sections. */
+  vendorShopCategories: Map<string, TermRef>;
   visibility: Record<string, TermRef>;
   productType: TermRef;
   /** Global attribute taxonomies the plugin has actually registered in WooCommerce. */
@@ -134,6 +138,8 @@ interface PreparedProduct {
   categoryTtIds: number[];
   attributeTerms: Array<{ taxonomy: string; termId: number; ttId: number }>;
   brandTtId: number | null;
+  /** ISO country codes this vendor can ship to — used by checkout country filter. */
+  shipCountries: string[];
   pricing: PricingResult;
   contentHash: string | null;
   priceHash: string;
@@ -223,6 +229,7 @@ export async function buildWriteContext(
   categoryMaps: Map<number, Map<string, TermRef>>,
   brandMap: Map<string, TermRef>,
   attributeMaps: Map<string, Map<string, TermRef>>,
+  vendorShopCategories: Map<string, TermRef> = new Map(),
 ): Promise<WriteContext> {
   const active = new Set<string>();
   for (const row of await query<RowDataPacket & { attribute_name: string }>(
@@ -237,6 +244,7 @@ export async function buildWriteContext(
     categoryMaps,
     brandMap,
     attributeMaps,
+    vendorShopCategories,
     visibility: await loadVisibilityTerms(),
     productType: await loadProductTypeTerm("simple"),
     activeAttributeTaxonomies: active,
@@ -296,6 +304,7 @@ export async function writePendingProducts(
     );
     if (rows.length === 0) break;
     lastId = rows[rows.length - 1]!.product_id;
+    await throwIfSyncAborted();
 
     try {
       const batch = rows.map((row) => prepare(row, ctx, mode));
@@ -356,6 +365,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     vendorSlug: vendor.slug,
     vendorProductId: row.vendor_product_id,
     sku: row.sku,
+    shipCountries: vendor.serviceableCountries,
     pricing,
     priceHash: pHash,
     writePrice,
@@ -399,6 +409,10 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     // Leaf terms only. WooCommerce walks ancestors itself for archives and counts.
     const term = categoryMap?.get(ref);
     if (term) categoryTtIds.push(term.ttId);
+  }
+  const vendorShop = ctx.vendorShopCategories.get(vendor.slug);
+  if (vendorShop && !categoryTtIds.includes(vendorShop.ttId)) {
+    categoryTtIds.push(vendorShop.ttId);
   }
 
   const attributeTerms: PreparedProduct["attributeTerms"] = [];
@@ -805,6 +819,7 @@ function metaFor(p: PreparedProduct, keys: readonly string[]): Array<[string, st
     _sillage_vendor: p.vendorSlug,
     _sillage_vendor_product_id: p.vendorProductId,
     _sillage_offer_id: String(p.offerId),
+    _sillage_ship_countries: JSON.stringify(p.shipCountries),
     // Rendered by sillage-bridge, byte-for-byte as the vendor supplied it. Nothing is downloaded
     // and no attachment is ever created.
     _external_thumbnail_url: p.imageUrl ?? "",

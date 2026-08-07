@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { env } from "../../config/env.ts";
 import { logger } from "../../lib/log.ts";
+import { readFeedCache, writeFeedCache } from "../feedCache.ts";
+import { recordLiveFetch, resolveLiveOrCache } from "../liveGate.ts";
 import { VendorConnector } from "../VendorConnector.ts";
 import type { FeedSource, NormalizedProduct, ProgressFn, VendorCategoryNode } from "../types.ts";
 import { BeautyfortClient, parseLenientJson } from "./BeautyfortClient.ts";
@@ -61,6 +63,26 @@ export class BeautyfortConnector extends VendorConnector {
       return parsed;
     }
 
+    if (source === "cache") {
+      const cached = await readFeedCache("beautyfort");
+      if (!cached) throw new Error("no BeautyFort feed cache — run one live sync first");
+      progress?.(`using cached BeautyFort feed (${cached.length} rows)`);
+      return cached;
+    }
+
+    // `live` — hard-gated. Prefer disk cache when the min interval or daily cap blocks us.
+    const resolved = await resolveLiveOrCache("beautyfort", "live");
+    if (resolved.mode === "cache") {
+      const cached = await readFeedCache("beautyfort");
+      if (cached) {
+        progress?.(
+          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${cached.length} rows)`,
+        );
+        return cached;
+      }
+      log.warn("live gated and no cache — forcing one BeautyFort download");
+    }
+
     progress?.("downloading stock file (SOAP, whole catalogue, no pagination)");
     const client = new BeautyfortClient({
       user: env.beautyfort.user,
@@ -70,6 +92,8 @@ export class BeautyfortConnector extends VendorConnector {
     });
     const rows = await client.getStockFile();
     log.info(`downloaded ${rows.length} products`);
+    await writeFeedCache("beautyfort", rows);
+    await recordLiveFetch("beautyfort");
     return rows;
   }
 

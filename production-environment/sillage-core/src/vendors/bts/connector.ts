@@ -3,6 +3,13 @@ import { join } from "node:path";
 import { env } from "../../config/env.ts";
 import { logger } from "../../lib/log.ts";
 import { parseLenientJson } from "../beautyfort/BeautyfortClient.ts";
+import {
+  feedCacheCategories,
+  feedCacheProducts,
+  readFeedCache,
+  writeFeedCache,
+} from "../feedCache.ts";
+import { recordLiveFetch, resolveLiveOrCache } from "../liveGate.ts";
 import { VendorConnector } from "../VendorConnector.ts";
 import type {
   FeedSource,
@@ -45,9 +52,37 @@ export class BtsConnector extends VendorConnector {
       const path = join(env.fixturesDir, "bts_categories_full.json");
       progress?.(`reading category fixture ${path}`);
       raw = parseLenientJson(await readFile(path, "utf8")) as Category[];
+    } else if (source === "cache") {
+      const cached = await readFeedCache("bts");
+      const cats = cached ? feedCacheCategories(cached) : null;
+      if (Array.isArray(cats) && cats.length > 0) {
+        progress?.(`using cached BTS categories (${cats.length})`);
+        raw = cats as Category[];
+      } else {
+        try {
+          const path = join(env.fixturesDir, "bts_categories_full.json");
+          raw = parseLenientJson(await readFile(path, "utf8")) as Category[];
+          progress?.(`cache missing categories — fixture ${path}`);
+        } catch {
+          raw = [];
+        }
+      }
     } else {
-      progress?.("fetching category tree");
-      raw = await this.client().getListCategories(env.bts.language);
+      const resolved = await resolveLiveOrCache("bts", "live");
+      if (resolved.mode === "cache") {
+        const cached = await readFeedCache("bts");
+        const cats = cached ? feedCacheCategories(cached) : null;
+        if (Array.isArray(cats) && cats.length > 0) {
+          progress?.(`live gated — cached BTS categories (${cats.length})`);
+          raw = cats as Category[];
+        } else {
+          progress?.("fetching category tree (no category cache)");
+          raw = await this.client().getListCategories(env.bts.language);
+        }
+      } else {
+        progress?.("fetching category tree");
+        raw = await this.client().getListCategories(env.bts.language);
+      }
     }
 
     for (const node of raw) {
@@ -58,8 +93,12 @@ export class BtsConnector extends VendorConnector {
         parentKey: node.parent_id && node.parent_id !== 0 ? String(node.parent_id) : null,
       });
     }
+    // Stash for writeFeedCache — products fetch will merge.
+    this._pendingCategories = raw;
     log.info(`category tree: ${this.categoryNodes.size} nodes`);
   }
+
+  private _pendingCategories: Category[] = [];
 
   async fetchRaw(source: FeedSource, progress?: ProgressFn): Promise<unknown[]> {
     if (source === "local") {
@@ -74,12 +113,35 @@ export class BtsConnector extends VendorConnector {
       return rows;
     }
 
+    if (source === "cache") {
+      const cached = await readFeedCache("bts");
+      if (!cached) throw new Error("no BTS feed cache — run one live sync first");
+      const rows = feedCacheProducts(cached);
+      progress?.(`using cached BTS feed (${rows.length} rows)`);
+      return rows;
+    }
+
+    const resolved = await resolveLiveOrCache("bts", "live");
+    if (resolved.mode === "cache") {
+      const cached = await readFeedCache("bts");
+      if (cached) {
+        const rows = feedCacheProducts(cached);
+        progress?.(
+          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${rows.length} rows)`,
+        );
+        return rows;
+      }
+      log.warn("live gated and no cache — forcing one BTS download");
+    }
+
     progress?.("downloading catalogue (paginated, 500/page)");
     const rows = await this.client().getAllProducts(
       { page_size: 500, language_code: env.bts.language },
       (page, totalPages, fetched) => progress?.(`page ${page}/${totalPages} — ${fetched} products`),
     );
     log.info(`downloaded ${rows.length} products`);
+    await writeFeedCache("bts", { products: rows, categories: this._pendingCategories });
+    await recordLiveFetch("bts");
     return rows;
   }
 
