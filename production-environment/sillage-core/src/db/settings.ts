@@ -1,5 +1,9 @@
 import { sil } from "../config/env.ts";
+import { logger } from "../lib/log.ts";
+import { parsePriceTiers, type PriceTier } from "../sync/pricing.ts";
 import { execute, query, type RowDataPacket } from "./pool.ts";
+
+const log = logger("settings");
 
 interface SettingRow extends RowDataPacket {
   setting_key: string;
@@ -10,32 +14,49 @@ export interface VendorRow extends RowDataPacket {
   id: number;
   slug: string;
   name: string;
+  storefront_label: string | null;
   sku_prefix: string;
   currency: string;
   fx_rate: string;
+  vat_rate: string | number | null;
   price_multiplier: string | null;
   min_visible_stock: number | null;
   serviceable_countries: string | string[];
   order_config: string | Record<string, unknown> | null;
   active: number;
+  live_max_per_day: number | null;
+  store_live_max_per_day: number | null;
+  store_live_min_minutes: number | null;
 }
 
 export interface Vendor {
   id: number;
   slug: string;
   name: string;
+  /** Customer-facing label (LPS01 / LPS02 / LPS03). Falls back to name when unset. */
+  storefrontLabel: string;
   skuPrefix: string;
   currency: string;
   fxRate: number;
+  /** Fraction uplift before markup. 0 for BF/BTS; wholesale-perfumes may need a confirmed rate. */
+  vatRate: number;
   priceMultiplier: number | null;
   minVisibleStock: number | null;
   serviceableCountries: string[];
   orderConfig: Record<string, unknown>;
   active: boolean;
+  /** Max live catalogue downloads per day; null = legacy setting / default. */
+  liveMaxPerDay: number | null;
+  /** Secondary feed (wholesale-perfumes store XML) daily cap. */
+  storeLiveMaxPerDay: number | null;
+  /** Secondary feed min interval minutes. */
+  storeLiveMinMinutes: number | null;
 }
 
 export interface GlobalSettings {
   priceMultiplier: number;
+  /** Cost bands; empty = use priceMultiplier only. */
+  priceTiers: PriceTier[];
   stockThreshold: number;
   maxRrpRatio: number;
   dedupeByEan: boolean;
@@ -45,8 +66,6 @@ export interface GlobalSettings {
   volumeFilterMode: "exact" | "ranges" | "off";
   /** Minimum minutes between live vendor catalogue downloads. Cache is used otherwise. */
   liveFeedMinMinutes: number;
-  beautyfortLiveMaxPerDay: number;
-  btsLiveMaxPerDay: number;
   writeBatchSize: number;
   maxStatementBytes: number;
   syncEnabled: boolean;
@@ -55,6 +74,16 @@ export interface GlobalSettings {
   /** Hour of day, 0-23, in the database server's time zone. */
   fullSyncHour: number;
   syncSource: "live" | "local";
+  /** Exclude products whose resolved image is still a placeholder. */
+  hideProductsWithoutImage: boolean;
+  /** Foodpanda-style small-order fee on the storefront (bridge reads these). */
+  cartMinEnabled: boolean;
+  cartMinSubtotalEur: number;
+  cartMinFeeEur: number;
+  /** Must contain `{remaining}`; bridge substitutes a WooCommerce-formatted amount. */
+  cartMinMessage: string;
+  /** Line-item label for the cart fee (bridge falls back to "Small order fee" if blank). */
+  cartMinFeeLabel: string;
   ordersDryRun: boolean;
   ordersAutoDispatch: boolean;
   ordersMaxValueEur: number;
@@ -91,8 +120,12 @@ export async function loadSettings(): Promise<GlobalSettings> {
     return v === undefined ? fallback : v === "1" || v === "true";
   };
 
+  const tiersParsed = parsePriceTiers(map.get("price_tiers") ?? "[]");
+  for (const w of tiersParsed.warnings) log.warn(w);
+
   return {
     priceMultiplier: num("global_price_multiplier", 1),
+    priceTiers: tiersParsed.tiers,
     stockThreshold: num("global_stock_threshold", 0),
     maxRrpRatio: num("max_rrp_ratio", 10),
     dedupeByEan: flag("dedupe_by_ean", true),
@@ -100,8 +133,6 @@ export async function loadSettings(): Promise<GlobalSettings> {
     descriptionMode: (map.get("description_mode") as GlobalSettings["descriptionMode"]) ?? "none",
     volumeFilterMode: (map.get("volume_filter_mode") as GlobalSettings["volumeFilterMode"]) ?? "ranges",
     liveFeedMinMinutes: num("live_feed_min_minutes", 60),
-    beautyfortLiveMaxPerDay: num("beautyfort_live_max_per_day", 20),
-    btsLiveMaxPerDay: num("bts_live_max_per_day", 48),
     writeBatchSize: num("write_batch_size", 500),
     maxStatementBytes: num("max_statement_bytes", 4_194_304),
     syncEnabled: flag("sync_enabled", true),
@@ -109,6 +140,17 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fullSyncEnabled: flag("full_sync_enabled", true),
     fullSyncHour: num("full_sync_hour", 3),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
+    hideProductsWithoutImage: flag("hide_products_without_image", true),
+    cartMinEnabled: flag("cart_min_enabled", false),
+    cartMinSubtotalEur: num("cart_min_subtotal_eur", 50),
+    cartMinFeeEur: num("cart_min_fee_eur", 5),
+    cartMinMessage:
+      map.get("cart_min_message") ??
+      "Add {remaining} more to your order to remove the small-order fee.",
+    cartMinFeeLabel: (() => {
+      const label = (map.get("cart_min_fee_label") ?? "").trim();
+      return label || "Small order fee";
+    })(),
     ordersDryRun: flag("orders_dry_run", true),
     ordersAutoDispatch: flag("orders_auto_dispatch", false),
     ordersMaxValueEur: num("orders_max_value_eur", 500),
@@ -127,18 +169,30 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 function toVendor(row: VendorRow): Vendor {
+  const label = (row.storefront_label ?? "").trim();
+  const intOrNull = (v: number | null | undefined): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    storefrontLabel: label || row.name,
     skuPrefix: row.sku_prefix,
     currency: row.currency,
     fxRate: Number(row.fx_rate),
+    vatRate: Number(row.vat_rate ?? 0) || 0,
     priceMultiplier: row.price_multiplier === null ? null : Number(row.price_multiplier),
     minVisibleStock: row.min_visible_stock,
     serviceableCountries: parseJson<string[]>(row.serviceable_countries, []),
     orderConfig: parseJson<Record<string, unknown>>(row.order_config, {}),
     active: row.active === 1,
+    // Pre-014 rows (or SELECT * before migrate) may omit these columns.
+    liveMaxPerDay: intOrNull(row.live_max_per_day),
+    storeLiveMaxPerDay: intOrNull(row.store_live_max_per_day),
+    storeLiveMinMinutes: intOrNull(row.store_live_min_minutes),
   };
 }
 
@@ -156,7 +210,20 @@ export async function loadVendor(slug: string): Promise<Vendor> {
 
 export async function updateVendor(
   slug: string,
-  patch: Partial<Pick<Vendor, "priceMultiplier" | "minVisibleStock" | "active" | "fxRate">> & {
+  patch: Partial<
+    Pick<
+      Vendor,
+      | "storefrontLabel"
+      | "priceMultiplier"
+      | "minVisibleStock"
+      | "active"
+      | "fxRate"
+      | "vatRate"
+      | "liveMaxPerDay"
+      | "storeLiveMaxPerDay"
+      | "storeLiveMinMinutes"
+    >
+  > & {
     serviceableCountries?: string[];
     orderConfig?: Record<string, unknown>;
   },
@@ -164,6 +231,10 @@ export async function updateVendor(
   const sets: string[] = [];
   const params: unknown[] = [];
 
+  if (patch.storefrontLabel !== undefined) {
+    sets.push("storefront_label = ?");
+    params.push(patch.storefrontLabel);
+  }
   if (patch.priceMultiplier !== undefined) {
     sets.push("price_multiplier = ?");
     params.push(patch.priceMultiplier);
@@ -180,6 +251,10 @@ export async function updateVendor(
     sets.push("fx_rate = ?");
     params.push(patch.fxRate);
   }
+  if (patch.vatRate !== undefined) {
+    sets.push("vat_rate = ?");
+    params.push(patch.vatRate);
+  }
   if (patch.serviceableCountries !== undefined) {
     sets.push("serviceable_countries = ?");
     params.push(JSON.stringify(patch.serviceableCountries));
@@ -187,6 +262,18 @@ export async function updateVendor(
   if (patch.orderConfig !== undefined) {
     sets.push("order_config = ?");
     params.push(JSON.stringify(patch.orderConfig));
+  }
+  if (patch.liveMaxPerDay !== undefined) {
+    sets.push("live_max_per_day = ?");
+    params.push(patch.liveMaxPerDay);
+  }
+  if (patch.storeLiveMaxPerDay !== undefined) {
+    sets.push("store_live_max_per_day = ?");
+    params.push(patch.storeLiveMaxPerDay);
+  }
+  if (patch.storeLiveMinMinutes !== undefined) {
+    sets.push("store_live_min_minutes = ?");
+    params.push(patch.storeLiveMinMinutes);
   }
   if (sets.length === 0) return;
 

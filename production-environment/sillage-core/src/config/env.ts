@@ -50,6 +50,8 @@ export const env = {
 
   wordpress: {
     baseUrl: str("WP_BASE_URL", "http://localhost").replace(/\/$/, ""),
+    /** In-Docker URL for finalize / REST (e.g. http://ecom). Falls back to baseUrl. */
+    internalUrl: (opt("WORDPRESS_INTERNAL_URL") || opt("WP_INTERNAL_URL") || "").replace(/\/$/, ""),
     sharedSecret: str("SILLAGE_SHARED_SECRET"),
   },
 
@@ -64,6 +66,20 @@ export const env = {
     token: opt("BTS_JWT_TOKEN"),
     baseUrl: opt("BTS_BASE_URL", "https://api.btswholesaler.com/v1/api"),
     language: opt("BTS_LANGUAGE", "en-US"),
+  },
+
+  wholesalePerfumes: {
+    user: opt("WHOLESALE_PERFUMES_USER"),
+    token: opt("WHOLESALE_PERFUMES_TOKEN"),
+    catalogUrl: opt(
+      "WHOLESALE_PERFUMES_CATALOG_URL",
+      "https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en",
+    ),
+    storeUrl: opt(
+      "WHOLESALE_PERFUMES_STOCK_URL",
+      "https://www.wholesale-perfumes.eu/xml/store/LovelyXml/EUR",
+    ),
+    apiBaseUrl: opt("WHOLESALE_PERFUMES_API_BASE_URL", "https://www.wholesale-perfumes.eu/api/v1"),
   },
 
   dashboard: {

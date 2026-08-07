@@ -34,7 +34,8 @@ export const api = {
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   overview: () => request<Overview>("/api/overview"),
-  syncRuns: () => request<{ runs: SyncRun[] }>("/api/sync/runs"),
+  syncRuns: (page = 1) =>
+    request<SyncRunsPage>(`/api/sync/runs?page=${page}&limit=50`),
   runSync: (mode: "fast" | "full") =>
     request<{ ok: boolean }>("/api/sync/run", { method: "POST", body: JSON.stringify({ mode }) }),
   stopSync: () =>
@@ -47,9 +48,22 @@ export const api = {
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
-  vendors: () => request<{ vendors: Vendor[] }>("/api/vendors"),
-  orders: (status?: string) =>
-    request<{ orders: VendorOrder[] }>(`/api/orders${status ? `?status=${status}` : ""}`),
+  vendors: () =>
+    request<{
+      vendors: Vendor[];
+      globalPriceMultiplier: number;
+      globalStockThreshold: number;
+    }>("/api/vendors"),
+  saveVendor: (slug: string, body: VendorPatch) =>
+    request<{ ok: boolean; syncStarted?: boolean }>(`/api/vendors/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  orders: (page = 1, status?: string) => {
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (status) params.set("status", status);
+    return request<OrdersPage>(`/api/orders?${params}`);
+  },
   order: (id: number) => request<OrderDetail>(`/api/orders/${id}`),
   approveOrder: (id: number) =>
     request<{ ok: boolean; reason?: string }>(`/api/orders/${id}/approve`, { method: "POST" }),
@@ -88,18 +102,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status, confirm }),
     }),
-  logs: (level?: string) =>
-    request<{ events: LogEvent[] }>(`/api/logs${level ? `?level=${level}` : ""}`),
+  logs: (page = 1, level?: string) => {
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (level) params.set("level", level);
+    return request<LogsPage>(`/api/logs?${params}`);
+  },
 };
 
 export interface Overview {
   offers: number;
   products: number;
+  /** WP `publish` count — includes catalog-excluded products. */
   published: number;
+  /** Shop loop roughly: publish and not `exclude-from-catalog`. */
+  catalogVisible: number;
+  hiddenFromCatalog: number;
+  outOfStock: number;
+  /** Hidden from catalog without outofstock term (usually no/placeholder image). */
+  hiddenNoImage: number;
+  /** Hidden from catalog with outofstock (stock threshold). */
+  hiddenStock: number;
   lastSync: SyncRun | null;
   ordersByStatus: Record<string, number>;
   syncsLast7Days: Array<{ day: string; n: number }>;
-  settings: { dryRun: boolean; autoDispatch: boolean; syncEnabled: boolean };
+  settings: {
+    dryRun: boolean;
+    autoDispatch: boolean;
+    syncEnabled: boolean;
+    hideProductsWithoutImage?: boolean;
+    stockThreshold?: number;
+  };
 }
 
 export interface SyncRun {
@@ -116,6 +148,27 @@ export interface SyncRun {
   errors: number;
   started_at: string;
   finished_at?: string | null;
+}
+
+export interface SyncRunsPage {
+  runs: SyncRun[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface OrdersPage {
+  orders: VendorOrder[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface LogsPage {
+  events: LogEvent[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface ProductsPage {
@@ -139,11 +192,36 @@ export interface Vendor {
   id: number;
   slug: string;
   name: string;
+  storefrontLabel: string;
   skuPrefix: string;
-  priceMultiplier: number;
-  minVisibleStock: number;
+  currency: string;
+  fxRate: number;
+  vatRate: number;
+  /** null = fall back to global multiplier + price tiers. */
+  priceMultiplier: number | null;
+  /** null = fall back to global stock threshold. */
+  minVisibleStock: number | null;
+  minOrderValueEur: number | null;
   serviceableCountries: string[];
   active: boolean;
+  liveMaxPerDay: number | null;
+  storeLiveMaxPerDay: number | null;
+  storeLiveMinMinutes: number | null;
+  orderConfig: Record<string, unknown>;
+}
+
+export interface VendorPatch {
+  storefrontLabel?: string;
+  priceMultiplier?: number | null;
+  minVisibleStock?: number | null;
+  fxRate?: number;
+  vatRate?: number;
+  minOrderValueEur?: number | null;
+  serviceableCountries?: string[];
+  active?: boolean;
+  liveMaxPerDay?: number | null;
+  storeLiveMaxPerDay?: number | null;
+  storeLiveMinMinutes?: number | null;
 }
 
 export interface VendorOrder {

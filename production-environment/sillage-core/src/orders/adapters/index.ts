@@ -1,9 +1,10 @@
 import type { VendorOrderAdapter } from "../adapter.ts";
 import { BeautyfortOrderAdapter } from "./beautyfort.ts";
 import { BtsOrderAdapter } from "./bts.ts";
+import { WholesalePerfumesOrderAdapter } from "./wholesale-perfumes.ts";
 
 export function createOrderAdapters(): VendorOrderAdapter[] {
-  return [new BeautyfortOrderAdapter(), new BtsOrderAdapter()];
+  return [new BeautyfortOrderAdapter(), new BtsOrderAdapter(), new WholesalePerfumesOrderAdapter()];
 }
 
 export function createOrderAdapter(slug: string): VendorOrderAdapter {

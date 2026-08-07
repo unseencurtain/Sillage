@@ -6,6 +6,7 @@
  *   bun run sync -- --mode=full --source=local --dry-run
  *   bun run sync -- --mode=full --source=local --redrive
  *   bun run sync -- --mode=full --source=local --rewrite-all
+ *   bun run sync -- --mode=full --rewrite-only --rewrite-all
  */
 import { env } from "../config/env.ts";
 import { closePool, waitForDatabase } from "../db/pool.ts";
@@ -26,6 +27,7 @@ const vendorArg = flag("vendor") ?? "all";
 const dryRun = args.includes("--dry-run");
 const redrive = args.includes("--redrive");
 const rewriteAll = args.includes("--rewrite-all");
+const rewriteOnly = args.includes("--rewrite-only");
 
 if (mode !== "full" && mode !== "fast") {
   log.error(`--mode must be "full" or "fast", got "${mode}"`);
@@ -45,6 +47,7 @@ try {
     dryRun,
     redrive,
     rewriteAll,
+    rewriteOnly,
   });
   console.log(JSON.stringify(summary, null, 2));
 } catch (err) {

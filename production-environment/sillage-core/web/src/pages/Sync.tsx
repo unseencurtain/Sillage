@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Square } from "lucide-react";
 import { api, type SyncRun } from "@/lib/api";
+import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { fmtDate } from "@/lib/utils";
@@ -21,14 +22,20 @@ function isRunFinished(run: SyncRun) {
 export function Sync() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { data, isLoading } = useQuery({
-    queryKey: ["sync-runs"],
-    queryFn: api.syncRuns,
+  const [page, setPage] = useState(1);
+  // Always keep page 1 warm so the running banner stays accurate while browsing history.
+  const latest = useQuery({
+    queryKey: ["sync-runs", 1],
+    queryFn: () => api.syncRuns(1),
     refetchInterval: (query) => {
-      const runs = query.state.data?.runs ?? [];
-      const newest = runs[0];
+      const newest = query.state.data?.runs?.[0];
       return isRunActive(newest) ? 2_000 : 5_000;
     },
+  });
+  const list = useQuery({
+    queryKey: ["sync-runs", page],
+    queryFn: () => api.syncRuns(page),
+    // Share cache with `latest` when page === 1.
   });
 
   const live = useQuery({
@@ -37,8 +44,10 @@ export function Sync() {
     refetchInterval: 15_000,
   });
 
+  const data = list.data;
+  const isLoading = list.isLoading;
   const runs = data?.runs ?? [];
-  const newest = runs[0];
+  const newest = latest.data?.runs?.[0];
   const syncRunning = isRunActive(newest);
 
   const run = useMutation({
@@ -225,6 +234,10 @@ export function Sync() {
           </tbody>
         </table>
       </div>
+
+      {data ? (
+        <Pagination page={page} limit={data.limit} total={data.total} onPageChange={setPage} />
+      ) : null}
     </div>
   );
 }

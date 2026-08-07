@@ -79,13 +79,15 @@ if (is_plugin_active($plugin)) {
     echo is_wp_error($result) ? "FAILED: " . $result->get_error_message() . "\n" : "activated\n";
 }'
 
-echo "==> Granting WordPress read access to the EAN index"
-if run_sql -e "SELECT 1 FROM information_schema.tables
-               WHERE table_schema='sillage' AND table_name='sil_ean_index';" | grep -q 1; then
-  run_sql -e "GRANT SELECT ON sillage.sil_ean_index TO '${MYSQL_USER}'@'%'; FLUSH PRIVILEGES;"
-  echo "    granted"
-else
-  echo "    sil_ean_index does not exist yet — run 'bun run migrate' then re-run this script"
-fi
+echo "==> Granting WordPress read access to sillage tables the plugin needs"
+for tbl in sil_ean_index sil_settings sil_vendors; do
+  if run_sql -e "SELECT 1 FROM information_schema.tables
+                 WHERE table_schema='sillage' AND table_name='${tbl}';" | grep -q 1; then
+    run_sql -e "GRANT SELECT ON sillage.${tbl} TO '${MYSQL_USER}'@'%'; FLUSH PRIVILEGES;"
+    echo "    granted SELECT on sillage.${tbl}"
+  else
+    echo "    ${tbl} does not exist yet — run 'bun run migrate' then re-run this script"
+  fi
+done
 
 echo "==> Done"
