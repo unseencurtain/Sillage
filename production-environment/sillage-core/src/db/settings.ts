@@ -1,5 +1,9 @@
 import { sil } from "../config/env.ts";
+import { logger } from "../lib/log.ts";
+import { parsePriceTiers, type PriceTier } from "../sync/pricing.ts";
 import { execute, query, type RowDataPacket } from "./pool.ts";
+
+const log = logger("settings");
 
 interface SettingRow extends RowDataPacket {
   setting_key: string;
@@ -10,6 +14,7 @@ export interface VendorRow extends RowDataPacket {
   id: number;
   slug: string;
   name: string;
+  storefront_label: string | null;
   sku_prefix: string;
   currency: string;
   fx_rate: string;
@@ -24,6 +29,8 @@ export interface Vendor {
   id: number;
   slug: string;
   name: string;
+  /** Customer-facing label (LPS01 / LPS02). Falls back to name when unset. */
+  storefrontLabel: string;
   skuPrefix: string;
   currency: string;
   fxRate: number;
@@ -36,6 +43,8 @@ export interface Vendor {
 
 export interface GlobalSettings {
   priceMultiplier: number;
+  /** Cost bands; empty = use priceMultiplier only. */
+  priceTiers: PriceTier[];
   stockThreshold: number;
   maxRrpRatio: number;
   dedupeByEan: boolean;
@@ -55,6 +64,8 @@ export interface GlobalSettings {
   /** Hour of day, 0-23, in the database server's time zone. */
   fullSyncHour: number;
   syncSource: "live" | "local";
+  /** Exclude products whose resolved image is still a placeholder. */
+  hideProductsWithoutImage: boolean;
   ordersDryRun: boolean;
   ordersAutoDispatch: boolean;
   ordersMaxValueEur: number;
@@ -91,8 +102,12 @@ export async function loadSettings(): Promise<GlobalSettings> {
     return v === undefined ? fallback : v === "1" || v === "true";
   };
 
+  const tiersParsed = parsePriceTiers(map.get("price_tiers") ?? "[]");
+  for (const w of tiersParsed.warnings) log.warn(w);
+
   return {
     priceMultiplier: num("global_price_multiplier", 1),
+    priceTiers: tiersParsed.tiers,
     stockThreshold: num("global_stock_threshold", 0),
     maxRrpRatio: num("max_rrp_ratio", 10),
     dedupeByEan: flag("dedupe_by_ean", true),
@@ -109,6 +124,7 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fullSyncEnabled: flag("full_sync_enabled", true),
     fullSyncHour: num("full_sync_hour", 3),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
+    hideProductsWithoutImage: flag("hide_products_without_image", true),
     ordersDryRun: flag("orders_dry_run", true),
     ordersAutoDispatch: flag("orders_auto_dispatch", false),
     ordersMaxValueEur: num("orders_max_value_eur", 500),
@@ -127,10 +143,12 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 function toVendor(row: VendorRow): Vendor {
+  const label = (row.storefront_label ?? "").trim();
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    storefrontLabel: label || row.name,
     skuPrefix: row.sku_prefix,
     currency: row.currency,
     fxRate: Number(row.fx_rate),

@@ -18,9 +18,10 @@ export function Vendors() {
           <article key={v.id} className="rounded-xl border border-line bg-panel p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">{v.name}</h2>
+                <h2 className="text-lg font-semibold">{v.storefrontLabel || v.name}</h2>
                 <div className="font-mono text-xs text-muted">
                   {v.slug} · SKU {v.skuPrefix}-*
+                  {v.storefrontLabel && v.storefrontLabel !== v.name ? ` · internal ${v.name}` : ""}
                 </div>
               </div>
               <span

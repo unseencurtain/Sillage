@@ -18,6 +18,7 @@ import { destinationAddress, readWooOrder } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
 import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
+import { parsePriceTiers } from "../../sync/pricing.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
 import type { OrderAddress } from "../../orders/types.ts";
 import { feedCacheAgeMinutes } from "../../vendors/feedCache.ts";
@@ -155,7 +156,7 @@ api.get("/products", async (c) => {
     ),
     query<RowDataPacket>(
       `SELECT p.id, p.sku, p.wp_post_id, p.slug, o.name, o.stock, o.vendor_price, o.primary_ean,
-              v.slug AS vendor, o.image_url
+              COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          JOIN ${sil("sil_vendors")} v ON v.id = o.vendor_id
@@ -176,6 +177,7 @@ api.get("/vendors", async (c) => {
       id: v.id,
       slug: v.slug,
       name: v.name,
+      storefrontLabel: v.storefrontLabel,
       skuPrefix: v.skuPrefix,
       currency: v.currency,
       fxRate: v.fxRate,
@@ -445,7 +447,9 @@ api.get("/settings", async (c) => {
     full_sync_hour: String(s.fullSyncHour),
     sync_source: s.syncSource,
     global_price_multiplier: String(s.priceMultiplier),
+    price_tiers: JSON.stringify(s.priceTiers),
     global_stock_threshold: String(s.stockThreshold),
+    hide_products_without_image: s.hideProductsWithoutImage ? "1" : "0",
     orders_dry_run: s.ordersDryRun ? "1" : "0",
     orders_auto_dispatch: s.ordersAutoDispatch ? "1" : "0",
     orders_max_value_eur: String(s.ordersMaxValueEur),
@@ -471,7 +475,9 @@ api.put("/settings", async (c) => {
     "full_sync_hour",
     "sync_source",
     "global_price_multiplier",
+    "price_tiers",
     "global_stock_threshold",
+    "hide_products_without_image",
     "orders_dry_run",
     "orders_auto_dispatch",
     "orders_max_value_eur",
@@ -488,7 +494,12 @@ api.put("/settings", async (c) => {
   ]);
   // Settings that change what we write to WooCommerce. Hashes only see vendor feed data, so a
   // multiplier edit would otherwise look like "nothing changed" forever.
-  const priceKeys = new Set(["global_price_multiplier", "global_stock_threshold"]);
+  const priceKeys = new Set([
+    "global_price_multiplier",
+    "price_tiers",
+    "global_stock_threshold",
+    "hide_products_without_image",
+  ]);
   const contentKeys = new Set(["description_mode", "volume_filter_mode"]);
 
   let n = 0;
@@ -507,7 +518,13 @@ api.put("/settings", async (c) => {
       n++;
       continue;
     }
-    await setSetting(key, value);
+    if (key === "price_tiers") {
+      // Persist the canonical sorted/validated form so the dashboard round-trips cleanly.
+      const parsed = parsePriceTiers(value);
+      await setSetting(key, JSON.stringify(parsed.tiers));
+    } else {
+      await setSetting(key, value);
+    }
     n++;
     if (priceKeys.has(key)) touchPrice = true;
     if (contentKeys.has(key)) touchContent = true;

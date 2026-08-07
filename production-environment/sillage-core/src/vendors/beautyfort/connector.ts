@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { env } from "../../config/env.ts";
 import { logger } from "../../lib/log.ts";
-import { readFeedCache, writeFeedCache } from "../feedCache.ts";
+import { feedCacheProducts, readFeedCache, writeFeedCache } from "../feedCache.ts";
 import { recordLiveFetch, resolveLiveOrCache } from "../liveGate.ts";
 import { VendorConnector } from "../VendorConnector.ts";
 import type { FeedSource, NormalizedProduct, ProgressFn, VendorCategoryNode } from "../types.ts";
@@ -66,8 +66,9 @@ export class BeautyfortConnector extends VendorConnector {
     if (source === "cache") {
       const cached = await readFeedCache("beautyfort");
       if (!cached) throw new Error("no BeautyFort feed cache — run one live sync first");
-      progress?.(`using cached BeautyFort feed (${cached.length} rows)`);
-      return cached;
+      const rows = feedCacheProducts(cached);
+      progress?.(`using cached BeautyFort feed (${rows.length} rows)`);
+      return rows;
     }
 
     // `live` — hard-gated. Prefer disk cache when the min interval or daily cap blocks us.
@@ -75,10 +76,11 @@ export class BeautyfortConnector extends VendorConnector {
     if (resolved.mode === "cache") {
       const cached = await readFeedCache("beautyfort");
       if (cached) {
+        const rows = feedCacheProducts(cached);
         progress?.(
-          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${cached.length} rows)`,
+          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${rows.length} rows)`,
         );
-        return cached;
+        return rows;
       }
       log.warn("live gated and no cache — forcing one BeautyFort download");
     }

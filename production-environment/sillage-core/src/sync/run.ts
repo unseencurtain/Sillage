@@ -23,7 +23,7 @@ import {
   type TermRef,
 } from "./taxonomy.ts";
 import { clearSyncAbort, SyncAbortedError, throwIfSyncAborted } from "./abort.ts";
-import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
+import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
 import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
 
@@ -106,6 +106,8 @@ export interface SyncSummary {
   pricesUpdated: number;
   termsCreated: number;
   errors: number;
+  /** Products hidden because the resolved image was still missing/placeholder. */
+  hiddenNoImage: number;
 }
 
 async function startRun(mode: WriteMode, source: FeedSource, vendorId: number | null): Promise<number> {
@@ -195,6 +197,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     pricesUpdated: 0,
     termsCreated: 0,
     errors: 0,
+    hiddenNoImage: 0,
   };
 
   try {
@@ -219,6 +222,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.postsUpdated = written.postsUpdated;
         summary.pricesUpdated = written.pricesUpdated;
         summary.errors += written.errors;
+        summary.hiddenNoImage = written.hiddenNoImage;
       }
       summary.durationMs = Date.now() - startedAt;
       await finishRun(runId, startedAt, summary);
@@ -297,7 +301,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
             bucket = new Set();
             attributeValues.set(vendorTax, bucket);
           }
-          bucket.add(VENDOR_LABELS[vendor.slug] ?? vendor.name);
+          bucket.add(vendorStorefrontLabel(vendor));
         }
       }
     }
@@ -313,7 +317,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.termsCreated += result.created;
       }
 
-      const vendorShop = await ensureVendorShopCategories(allVendors, VENDOR_LABELS);
+      const storefrontLabels: Record<string, string> = {};
+      for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
+      const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
       summary.termsCreated += vendorShop.created;
 
       await resolveProductIdentities(settings);
@@ -340,6 +346,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.postsUpdated = written.postsUpdated;
         summary.pricesUpdated = written.pricesUpdated;
         summary.errors += written.errors;
+        summary.hiddenNoImage = written.hiddenNoImage;
 
         // Once per run, never per batch.
         await recountTerms(["product_cat", BRAND_TAXONOMY, ...Object.values(ATTRIBUTE_TAXONOMIES)]);
@@ -354,6 +361,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       log.progressEnd();
       summary.pricesUpdated = written.pricesUpdated;
       summary.errors += written.errors;
+      summary.hiddenNoImage = written.hiddenNoImage;
 
       // Stock changes move products in and out of the catalogue, so counts shift.
       await recountTerms(["product_cat", BRAND_TAXONOMY]);
@@ -366,7 +374,8 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     log.info(
       `run ${runId} finished in ${formatDuration(summary.durationMs)} — ` +
         `${summary.postsCreated} created, ${summary.postsUpdated} updated, ` +
-        `${summary.pricesUpdated} repriced, ${summary.vanished} vanished, ${summary.errors} errors`,
+        `${summary.pricesUpdated} repriced, ${summary.vanished} vanished, ` +
+        `${summary.hiddenNoImage} hidden (no image), ${summary.errors} errors`,
     );
     return summary;
   } catch (err) {

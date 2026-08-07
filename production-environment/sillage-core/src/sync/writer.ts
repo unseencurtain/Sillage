@@ -7,7 +7,7 @@ import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
 import { throwIfSyncAborted } from "./abort.ts";
-import { buildImageLookup, type ImageLookup } from "./images.ts";
+import { buildImageLookup, shouldHideForMissingImage, type ImageLookup } from "./images.ts";
 import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
@@ -16,7 +16,7 @@ import {
   loadVisibilityTerms,
   type TermRef,
 } from "./taxonomy.ts";
-import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
+import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
 
 const log = logger("writer");
 
@@ -60,8 +60,15 @@ const MANAGED_META_KEYS = [
   "_external_gallery_urls",
 ] as const;
 
-/** The subset the 30-minute fast sync rewrites. */
-const PRICE_META_KEYS = ["_regular_price", "_sale_price", "_price", "_stock", "_stock_status"] as const;
+/** The subset the 30-minute fast sync rewrites (includes image so cross-vendor fill can land). */
+const PRICE_META_KEYS = [
+  "_regular_price",
+  "_sale_price",
+  "_price",
+  "_stock",
+  "_stock_status",
+  "_external_thumbnail_url",
+] as const;
 
 /** Taxonomies the writer owns. A term outside this list is never removed from a product. */
 const OWNED_TAXONOMIES = [
@@ -80,7 +87,7 @@ export interface WriteContext {
   categoryMaps: Map<number, Map<string, TermRef>>;
   brandMap: Map<string, TermRef>;
   attributeMaps: Map<string, Map<string, TermRef>>;
-  /** product_cat term per vendor slug — "BeautyFort" / "BTS Wholesaler" shop sections. */
+  /** product_cat term per vendor slug — storefront labels (LPS01 / LPS02). */
   vendorShopCategories: Map<string, TermRef>;
   visibility: Record<string, TermRef>;
   productType: TermRef;
@@ -95,6 +102,8 @@ export interface WriteResult {
   pricesUpdated: number;
   skipped: number;
   errors: number;
+  /** Products excluded from catalog/search because the resolved image was still unusable. */
+  hiddenNoImage: number;
 }
 
 interface PendingRow extends RowDataPacket {
@@ -141,6 +150,8 @@ interface PreparedProduct {
   /** ISO country codes this vendor can ship to — used by checkout country filter. */
   shipCountries: string[];
   pricing: PricingResult;
+  /** True when hidden solely (or also) because the resolved image is missing/placeholder. */
+  hiddenNoImage: boolean;
   contentHash: string | null;
   priceHash: string;
   /** Rewrite title, body, slug, terms, images. Always true for a product being created. */
@@ -263,7 +274,14 @@ export async function writePendingProducts(
   mode: WriteMode,
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteResult> {
-  const result: WriteResult = { postsCreated: 0, postsUpdated: 0, pricesUpdated: 0, skipped: 0, errors: 0 };
+  const result: WriteResult = {
+    postsCreated: 0,
+    postsUpdated: 0,
+    pricesUpdated: 0,
+    skipped: 0,
+    errors: 0,
+    hiddenNoImage: 0,
+  };
 
   // The fast sync never creates products; that is the nightly full sync's job. Restricting it to
   // rows that already have a post keeps the 30-minute path to price, stock and visibility only.
@@ -313,6 +331,7 @@ export async function writePendingProducts(
       result.postsUpdated += written.postsUpdated;
       result.pricesUpdated += written.pricesUpdated;
       result.skipped += written.skipped;
+      result.hiddenNoImage += written.hiddenNoImage;
     } catch (err) {
       result.errors += rows.length;
       log.error(`batch ending at product ${lastId} failed`, String(err));
@@ -336,6 +355,10 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   const vendor = ctx.vendorsById.get(row.vendor_id);
   if (!vendor) throw new Error(`offer ${row.offer_id} references unknown vendor ${row.vendor_id}`);
 
+  const eans = parseJson<string[]>(row.eans, []);
+  // Cross-vendor / override fill on every path — not only BeautyFort thumbs and not only full sync.
+  const imageUrl = ctx.images.resolve(eans, row.image_url);
+
   const pricing = computePricing(
     {
       vendorPrice: Number(row.vendor_price),
@@ -348,12 +371,17 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
         multiplier: ctx.settings.priceMultiplier,
         stockThreshold: ctx.settings.stockThreshold,
         maxRrpRatio: ctx.settings.maxRrpRatio,
+        priceTiers: ctx.settings.priceTiers,
       },
       vendor,
     ),
   );
 
-  const pHash = priceHash(pricing);
+  const hiddenNoImage = shouldHideForMissingImage(imageUrl, ctx.settings.hideProductsWithoutImage);
+  // Stock-threshold hide and missing-image hide OR together onto the same visibility terms.
+  const effectivePricing: PricingResult = hiddenNoImage ? { ...pricing, hidden: true } : pricing;
+
+  const pHash = priceHash(effectivePricing);
   const isNew = row.wp_post_id === null;
   const writePrice = isNew || pHash !== row.applied_price_hash;
 
@@ -366,21 +394,22 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     vendorProductId: row.vendor_product_id,
     sku: row.sku,
     shipCountries: vendor.serviceableCountries,
-    pricing,
+    pricing: effectivePricing,
+    hiddenNoImage,
     priceHash: pHash,
     writePrice,
   };
 
   // The fast path deliberately does not resolve terms or rebuild the content hash. It touches
-  // price, stock and visibility only, so loading category and brand maps would be wasted work.
+  // price, stock, visibility and the external image URL only.
   if (mode === "fast") {
     return {
       ...base,
       name: row.name,
       description: "",
       slug: "",
-      eans: parseJson<string[]>(row.eans, []),
-      imageUrl: row.image_url,
+      eans,
+      imageUrl,
       galleryUrls: [],
       categoryTtIds: [],
       attributeTerms: [],
@@ -390,18 +419,16 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     };
   }
 
-  const eans = parseJson<string[]>(row.eans, []);
   const categoryRefs = parseJson<string[]>(row.category_refs, []);
   const attributes = parseJson<Record<string, string>>(row.attributes, {});
   const extra = parseJson<Record<string, unknown>>(row.extra, {});
   const galleryUrls = parseJson<string[]>(row.gallery_urls, []);
-  const imageUrl = ctx.images.resolve(eans, row.image_url);
 
   const volume = normalizeVolume(attributes["volume"], ctx.settings.volumeFilterMode);
   if (volume) attributes["volume"] = volume;
   else delete attributes["volume"];
 
-  attributes["vendor"] = VENDOR_LABELS[vendor.slug] ?? vendor.name;
+  attributes["vendor"] = vendorStorefrontLabel(vendor);
 
   const categoryMap = ctx.categoryMaps.get(row.vendor_id);
   const categoryTtIds: number[] = [];
@@ -471,11 +498,20 @@ async function writeBatch(
   ctx: WriteContext,
   mode: WriteMode,
 ): Promise<WriteResult> {
-  const result: WriteResult = { postsCreated: 0, postsUpdated: 0, pricesUpdated: 0, skipped: 0, errors: 0 };
+  const result: WriteResult = {
+    postsCreated: 0,
+    postsUpdated: 0,
+    pricesUpdated: 0,
+    skipped: 0,
+    errors: 0,
+    hiddenNoImage: 0,
+  };
   const maxBytes = ctx.settings.maxStatementBytes;
 
   const work = batch.filter((p) => p.writeContent || p.writePrice);
   result.skipped = batch.length - work.length;
+  // Count every dirty product assessed this batch, not only rows that needed a write.
+  result.hiddenNoImage = batch.filter((p) => p.hiddenNoImage).length;
   if (work.length === 0) {
     await clearDirtyFlags(conn, batch, mode);
     return result;
