@@ -18,6 +18,7 @@ everything you need is in those two files.
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |
 | `docs/` | Context, decisions, data profile, task specs |
+| `docs/OPERATOR-DASHBOARD.md` | Operator paper: every dashboard control ↔ backend |
 | `tools/images/` | Offline image tools (Brasty Playwright scrape, etc.) |
 
 ## Hard rules
