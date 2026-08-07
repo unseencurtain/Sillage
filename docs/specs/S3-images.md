@@ -11,8 +11,8 @@ Everything else in this document is an *image source*: EAN → URL, no stock, no
 
 | SSH host | Role | What you may do |
 |---|---|---|
-| `ovhe` (`ovh-experi`) | Staging | Deploy, migrate, sync, run image tools freely. Caddy owns `:80`; ecom is `127.0.0.1:104→80` |
-| `ovh` | **Production** | Read-only inspection unless the operator explicitly approves writes |
+| `ovhe` (`ovh-experi`) | **Live** retail shop | Deploy, migrate, sync, run image tools. Caddy owns `:80`; ecom is `127.0.0.1:104→80` |
+| `ovh` | Unused (empty) | Do not deploy unless repurposed |
 
 ---
 

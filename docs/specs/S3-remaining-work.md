@@ -32,8 +32,8 @@ tree are deliberate image-source references — leave them.
 
 | SSH host | Hostname | Role | What you may do |
 |---|---|---|---|
-| `ovhe` | `ovh-experi` | Staging | Test freely: deploy, migrate, sync, restart |
-| `ovh` | `ovh` | **Production**, live shop | Read-only inspection. No deploy, no migrate, no restart, without explicit operator approval |
+| `ovhe` | `ovh-experi` | **Live** retail shop | Deploy, migrate, sync, restart |
+| `ovh` | `ovh` | Unused (empty) | Do not deploy unless repurposed |
 
 Test on `ovhe` once local `bun test` / `bun run typecheck` are green. Regardless of host: never run
 `--source=live` against the wholesaler, and never dispatch a real vendor order — that spends real
