@@ -34,7 +34,8 @@ export const api = {
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   overview: () => request<Overview>("/api/overview"),
-  syncRuns: () => request<{ runs: SyncRun[] }>("/api/sync/runs"),
+  syncRuns: (page = 1) =>
+    request<SyncRunsPage>(`/api/sync/runs?page=${page}&limit=50`),
   runSync: (mode: "fast" | "full") =>
     request<{ ok: boolean }>("/api/sync/run", { method: "POST", body: JSON.stringify({ mode }) }),
   stopSync: () =>
@@ -58,8 +59,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  orders: (status?: string) =>
-    request<{ orders: VendorOrder[] }>(`/api/orders${status ? `?status=${status}` : ""}`),
+  orders: (page = 1, status?: string) => {
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (status) params.set("status", status);
+    return request<OrdersPage>(`/api/orders?${params}`);
+  },
   order: (id: number) => request<OrderDetail>(`/api/orders/${id}`),
   approveOrder: (id: number) =>
     request<{ ok: boolean; reason?: string }>(`/api/orders/${id}/approve`, { method: "POST" }),
@@ -98,8 +102,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status, confirm }),
     }),
-  logs: (level?: string) =>
-    request<{ events: LogEvent[] }>(`/api/logs${level ? `?level=${level}` : ""}`),
+  logs: (page = 1, level?: string) => {
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (level) params.set("level", level);
+    return request<LogsPage>(`/api/logs?${params}`);
+  },
 };
 
 export interface Overview {
@@ -126,6 +133,27 @@ export interface SyncRun {
   errors: number;
   started_at: string;
   finished_at?: string | null;
+}
+
+export interface SyncRunsPage {
+  runs: SyncRun[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface OrdersPage {
+  orders: VendorOrder[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface LogsPage {
+  events: LogEvent[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface ProductsPage {
