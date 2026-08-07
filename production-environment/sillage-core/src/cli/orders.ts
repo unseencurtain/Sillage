@@ -9,7 +9,8 @@
  *   bun run orders -- dispatch --id=1 [--force] [--live]
  *   bun run orders -- dispatch-order --order=123 [--force] [--live]
  *
- * `--live` overrides the dry_run setting for that call. Without it, dispatch never spends money.
+ * Without `--live`, dispatch always dry-runs (never spends money), even if `orders_dry_run` is off.
+ * `--live` is required to honour a live setting / spend money.
  */
 import { env, sil } from "../config/env.ts";
 import { closePool, query, waitForDatabase } from "../db/pool.ts";
@@ -147,7 +148,8 @@ try {
       }
       console.log(
         JSON.stringify(
-          await dispatchVendorOrder(id, { force: has("force"), dryRun: has("live") ? false : undefined }),
+          // Explicit true (not undefined): settings.ordersDryRun may be off on a staging box.
+          await dispatchVendorOrder(id, { force: has("force"), dryRun: !has("live") }),
           null,
           2,
         ),
@@ -165,7 +167,7 @@ try {
       for (const row of rows) {
         const result = await dispatchVendorOrder(row.id, {
           force: has("force"),
-          dryRun: has("live") ? false : undefined,
+          dryRun: !has("live"),
         });
         console.log(JSON.stringify(result));
       }

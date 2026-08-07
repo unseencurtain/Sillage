@@ -29,10 +29,10 @@ const CART_LOCK = "sillage:wholesale-perfumes-cart";
 const CART_LOCK_TIMEOUT_SEC = 120;
 
 /**
- * ASSUMPTION (unconfirmed — verify with a real dry-run against the portal before going live):
- * wholesale-perfumes cart line `code` is the catalog product `id`, not the EAN. The PHP sample in the vendor
- * docs posts `{ code: 3, quantity: 4 }` and catalog records key on `<id>`. If the live API
- * actually wants EAN or another SKU, change only this function.
+ * Cart line `code` = catalog product `id` (not EAN). Confirmed by wpjshop docs PHP sample
+ * (`{ code: 3, quantity: 4 }` against catalog `<id>`) and the all-or-nothing POST /cart body.
+ * Still treat as an assumption until a non-dry-run cart round-trip is observed in staging —
+ * dry-run performs zero remote cart I/O (decision 25). Change only this function if wrong.
  */
 function wholesalePerfumesCartCode(item: OrderItem): string {
   return item.vendorProductId;
