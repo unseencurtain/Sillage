@@ -15,7 +15,9 @@ const log = logger("finalize");
  * on their own — so it is logged rather than thrown.
  */
 export async function finalizeWordPress(): Promise<boolean> {
-  const url = `${env.wordpress.baseUrl}/wp-json/sillage/v1/finalize`;
+  // Prefer the in-network WordPress hostname — public WP_BASE_URL often fails from inside Docker.
+  const origin = env.wordpress.internalUrl || env.wordpress.baseUrl;
+  const url = `${origin}/wp-json/sillage/v1/finalize`;
   const body = JSON.stringify({ timestamp: Date.now() });
   const signature = signPayload(body, env.wordpress.sharedSecret);
 

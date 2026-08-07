@@ -224,7 +224,25 @@ const products = Number(await scalar(`SELECT COUNT(*) FROM ${sil("sil_products")
 const published = Number(
   await scalar(`SELECT COUNT(*) FROM ${wp("posts")} WHERE post_type = 'product' AND post_status = 'publish'`),
 );
-add("Catalogue", true, `${offers} offers, ${products} products, ${published} published in WooCommerce`);
+const catalogVisible = Number(
+  await scalar(
+    `SELECT COUNT(*) FROM ${wp("posts")} p
+      WHERE p.post_type = 'product' AND p.post_status = 'publish'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${wp("term_relationships")} tr
+          JOIN ${wp("term_taxonomy")} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+          JOIN ${wp("terms")} t ON t.term_id = tt.term_id
+          WHERE tr.object_id = p.ID
+            AND tt.taxonomy = 'product_visibility'
+            AND t.slug = 'exclude-from-catalog'
+        )`,
+  ),
+);
+add(
+  "Catalogue",
+  true,
+  `${offers} offers, ${products} products, ${catalogVisible} visible in shop / ${published} published`,
+);
 
 // ── Report ──────────────────────────────────────────────────────────────────
 const width = Math.max(...checks.map((c) => c.name.length)) + 2;

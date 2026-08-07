@@ -7,28 +7,46 @@ how WordPress and WooCommerce normally behave; several things in this install ar
 
 ## 1. Running infrastructure
 
-Two independent Docker Compose projects.
+One Docker Compose project: `production-environment/compose.yaml` + one `.env`.
 
 | Container | Image | Role | Ports |
 |---|---|---|---|
-| `ecom` | `lime/wordpress:latest` (WordPress 7.0.3, PHP 8.3.33, Apache) | Storefront | `80:80` |
+| `shop-gateway` | `caddy:2-alpine` | Local edge only (`--profile local`). VPS uses host Caddy. | `80:80` (local) |
+| `ecom` | `unseencurtain/sillage-wordpress:<tag>` | Storefront (no product-image serving) | `127.0.0.1:104→80` |
+| `lps-media` | `nginx:alpine` | Static product images only | `127.0.0.1:105→80` |
 | `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | Database | `127.0.0.1:3307:3306` |
 | `valkey` | `valkey/valkey:8-alpine` | Object cache (ephemeral) | internal only |
-| `sillage-core` | built from `sillage-core/Dockerfile` (Bun) | Sync scheduler (supercronic) | internal only |
+| `sillage-core` | `unseencurtain/sillage-core:<tag>` | API + dashboard | `127.0.0.1:4000→4000` |
+| `sillage-cron` | same image as sillage-core | Sync scheduler (supercronic) | internal only |
 
 Networks are **external** and must exist before `docker compose up`:
-`ecom_network` (ecom ↔ ecom-db ↔ sillage-core) and `redis_network` (ecom ↔ valkey ↔ sillage-core).
+`ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
+`redis_network` (ecom ↔ valkey ↔ sillage-core).
+
+**Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
+(on VPS: `~/ecom_sites/data/media`) is bind-mounted read-only into `lps-media` at
+`/usr/share/nginx/html` (never a named/anonymous Docker volume). Preferred public URLs are
+`https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
+`https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
+`shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
+Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). Base URL is
+configurable via `sil_settings.image_cdn_base_url` (dashboard) and tool env
+`LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default `https://images.slilverbelt.xyz`).
 
 ```bash
 docker network create ecom_network
 docker network create redis_network
+cp production-environment/.env.example production-environment/.env
+cd production-environment && docker compose --env-file .env up -d
 ```
 
-Compose files: `production-environment/ecom_sites/compose.yaml`, `production-environment/redis/compose.yaml`.
+Compose: `production-environment/compose.yaml`. Env template: `production-environment/.env.example`.
+Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
-**Production target (later):** OVH VPS, 4 GB RAM, SSH host alias `ovhe` (`ubuntu@139.99.61.71`).
-On that box the MariaDB buffer pool must drop from the localhost `2G` to roughly `1G` —
-WordPress, Valkey, Bun and MariaDB share the same 4 GB.
+**Staging VPS:** SSH host alias `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`).  
+App dir `~/sillage/`; data stays at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
+WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. Do not treat `ovh` (production) as the
+default deploy target until staging is proven.
 
 One image, one role per container. `sillage-core` runs supercronic; the dashboard service overrides
 `command` to run the API instead. A full sync must never be able to stall the dashboard, and either
@@ -60,8 +78,8 @@ Two databases on **one** MariaDB server, so a single connection can transact acr
 | `sillage` | sillage-core (user `sillage`) | Our own state. Prefix `sil_` |
 
 Credentials are **not** in this file. They live in:
-- `production-environment/ecom_sites/.env` — `MYSQL_ROOT_PWD`, `MYSQL_DB`, `MYSQL_USER`, `MYSQL_PWD`
-- `production-environment/sillage-core/.env` — everything sillage-core needs (gitignored)
+- `production-environment/.env` — single file for MariaDB, WordPress, sillage-core, vendors, image tags (gitignored)
+- VPS: `~/sillage/.env` (same shape). Legacy split files under `ecom_sites/.env` / `sillage-core/.env` may still exist locally for host-side `bun` runs.
 
 Always fully qualify cross-database table names (`earth.wp_posts`, `sillage.sil_offers`). Never
 rely on a pooled connection's default schema, because `USE` state leaks between reused connections.
@@ -79,8 +97,17 @@ plus `SELECT` on `wp_options`, `wp_wc_orders`, `wp_wc_order_addresses`,
 
 Nothing on `wp_users`, `wp_usermeta`, or writes to `wp_options`.
 
-`lime` (WordPress) gets `SELECT` on `sillage.sil_ean_index` only — that is the single table the
-plugin reads directly.
+`lime` (WordPress) gets `SELECT` on exactly the sillage tables the plugin reads:
+
+```
+sillage.sil_ean_index
+sillage.sil_settings
+sillage.sil_vendors
+```
+
+Granted by `ecom_sites/bootstrap-sillage.sh` and `scripts/deploy-vps.sh` / `vps-bootstrap.sh`
+after migrate (table-level `GRANT` requires the tables to exist). `config/sillage-grants.sql`
+documents the sillage-core user only; the lime grants stay in those post-migrate scripts.
 
 ### MariaDB tuning
 
@@ -190,6 +217,12 @@ This is a closed list. If a task seems to require adding write logic here, it be
 5. Fire an HMAC-signed webhook to sillage-core when an order reaches a dispatchable status
 6. On activation: register `pa_gender` / `pa_item-type` / `pa_volume` via `wc_create_attribute()`
 7. A read-only wp-admin status page linking to the dashboard
+8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
+9. Exclude the B2B wholesaler (`wholesale-perfumes` / LPS03) `product_cat` from the main shop,
+   search, and other product queries; allow it only on that category archive and the dedicated
+   B2B page (`_sillage_b2b_shop` postmeta). When that term has zero products, also hide it from
+   category widgets, `get_terms` lists, and nav menus (auto-shows once count > 0). Optional
+   safety CSS so external thumbs cannot stretch product cards.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
@@ -228,6 +261,42 @@ attribute mapping, or the taxonomy a term lives in.
 ---
 
 ## 6. Vendors
+
+### Vendors versus image sources — read this before adding anything
+
+Getting this wrong has already cost a rename. Two different kinds of external system exist and they
+are **not** interchangeable.
+
+A **vendor** is a supplier we buy from. It has a row in `sil_vendors`, a `VendorConnector`, a SKU
+prefix, stock and prices, and an order path that spends real money. **There are exactly three, and
+adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
+
+| Vendor | Slug | SKU prefix | Storefront label | What it is |
+|---|---|---|---|---|
+| BTS Wholesaler | `bts` | `BTS` | LPS01 | REST + JWT |
+| BeautyFort | `beautyfort` | `BF` | LPS02 | SOAP v4 |
+| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | B2B wholesaler: catalog + stock XML, cart order API |
+
+An **image source** only ever produces `EAN → image URL` pairs. It has no vendor row, no connector,
+no stock, no prices and no order path. Images are matched to products by EAN alone, so any source
+can illustrate any vendor's product.
+
+| Image source | Where | Notes |
+|---|---|---|
+| oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
+| Brasty | `tools/images/brasty/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
+| Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export |
+| Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
+| wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |
+
+Naming rules, because these have been confused before:
+
+- **Never call wholesale-perfumes.eu "ocean".** "Ocean" means oceanfragrances, the image CSV.
+- Its credential is an **API token** from the portal user settings, used as the HTTP Basic password
+  with the account email. There is no separate Sillage password for it.
+- Its SKU prefix is `WPF`, not `WP` — `wp` means WordPress everywhere else in this codebase.
+
+### Vendor API details
 
 | | BeautyFort | BTS Wholesaler |
 |---|---|---|

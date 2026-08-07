@@ -26,6 +26,17 @@ one is linked. Acceptance criteria are what "done" means — not aspirations.
 | S2-tracking | Poller → tracking back into WooCommerce | `sillage-core/src/orders/tracking.ts` | Tracking number and courier appear on the WooCommerce order with an order note |
 | S2-dashboard | React operations dashboard | `sillage-core/web/` | All seven pages functional against real data, authenticated |
 
+## Stage 3
+
+| id | Task | Files | Done when |
+|---|---|---|---|
+| S3-images | [Deep spec](S3-images.md) — ordered image playbook (WPF XML → ocean CSV → Brasty → cross-vendor) | `tools/images/`, `sillage-core/data/image_overrides.json` | Every catalogue product resolves to a real photo URL; overrides merged in priority order |
+| S3-remaining | [Deep spec](S3-remaining-work.md) — Brasty photos, deploy, feature switch-on | `tools/images/brasty/`, deploy scripts, dashboard settings | Every product in the catalogue has a real photo, Stage 3 is live on cosmetic2, and the operator's numbers are entered |
+
+Read the S3 spec in full before starting any of it. It carries the hazards and the assumptions that
+are still open, and it is written to be followed without the context of the sessions that produced
+Stage 3.
+
 ## Conventions
 
 - TypeScript strict. No ORM, no query builder — parameterized SQL through `mysql2/promise`.

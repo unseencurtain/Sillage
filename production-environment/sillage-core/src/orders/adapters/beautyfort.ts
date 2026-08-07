@@ -9,7 +9,11 @@ import { env } from "../../config/env.ts";
 import { query, type RowDataPacket } from "../../db/pool.ts";
 import { loadVendor } from "../../db/settings.ts";
 import { sil } from "../../config/env.ts";
-import { BeautyfortClient, type Address } from "../../vendors/beautyfort/BeautyfortClient.ts";
+import {
+  BeautyfortClient,
+  BeautyfortError,
+  type Address,
+} from "../../vendors/beautyfort/BeautyfortClient.ts";
 import type {
   CancelResult,
   Destination,
@@ -239,11 +243,18 @@ export class BeautyfortOrderAdapter implements VendorOrderAdapter {
   }
 
   async poll(vendorOrderNumber: string, ourReference?: string): Promise<VendorOrderStatus> {
-    const detail = await client().getOrderDetail(
-      vendorOrderNumber ? Number(vendorOrderNumber) : undefined,
-      ourReference,
-      true,
-    );
+    const refNum = vendorOrderNumber.trim() ? Number(vendorOrderNumber) : NaN;
+    const orderReference = Number.isFinite(refNum) && refNum > 0 ? refNum : undefined;
+    if (!orderReference && !ourReference) {
+      throw new BeautyfortError(
+        `invalid vendor order number: ${vendorOrderNumber}`,
+        "GetOrderDetail",
+        undefined,
+        true,
+      );
+    }
+
+    const detail = await client().getOrderDetail(orderReference, ourReference, true);
     const raw = detail.status;
     const lower = raw.toLowerCase();
 

@@ -50,6 +50,8 @@ export class BeautyfortError extends Error {
     message: string,
     readonly operation: string,
     readonly raw?: string,
+    /** When true, retrying will not help (missing/unknown order). Tracking should park the row. */
+    readonly permanent = false,
   ) {
     super(message);
     this.name = "BeautyfortError";
@@ -286,7 +288,16 @@ export class BeautyfortClient {
 
     const ref = tag(text, "OrderReference");
     if (!ref) {
-      throw new BeautyfortError("no OrderReference in the response", "GetOrderDetail", text.slice(0, 2000));
+      // Soft failures (unknown / cancelled / never-placed refs) often return a body with warnings
+      // and no OrderReference — not a SOAP Fault. Retrying forever only spams sil_events.
+      const warns = warnings(text);
+      const hint = warns[0] ?? "order not found or empty GetOrderDetail response";
+      throw new BeautyfortError(
+        `no OrderReference in the response (${hint})`,
+        "GetOrderDetail",
+        text.slice(0, 2000),
+        true,
+      );
     }
 
     const subtotal = tag(text, "Subtotal");
