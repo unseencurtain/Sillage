@@ -112,11 +112,26 @@ export const api = {
 export interface Overview {
   offers: number;
   products: number;
+  /** WP `publish` count — includes catalog-excluded products. */
   published: number;
+  /** Shop loop roughly: publish and not `exclude-from-catalog`. */
+  catalogVisible: number;
+  hiddenFromCatalog: number;
+  outOfStock: number;
+  /** Hidden from catalog without outofstock term (usually no/placeholder image). */
+  hiddenNoImage: number;
+  /** Hidden from catalog with outofstock (stock threshold). */
+  hiddenStock: number;
   lastSync: SyncRun | null;
   ordersByStatus: Record<string, number>;
   syncsLast7Days: Array<{ day: string; n: number }>;
-  settings: { dryRun: boolean; autoDispatch: boolean; syncEnabled: boolean };
+  settings: {
+    dryRun: boolean;
+    autoDispatch: boolean;
+    syncEnabled: boolean;
+    hideProductsWithoutImage?: boolean;
+    stockThreshold?: number;
+  };
 }
 
 export interface SyncRun {
