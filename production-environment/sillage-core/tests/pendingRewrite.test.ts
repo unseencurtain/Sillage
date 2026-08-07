@@ -20,6 +20,17 @@ describe("pending price rewrite on Save", () => {
     expect(runSrc).toContain('await import("./pendingRewrite.ts")');
   });
 
+  test("runSync releases the advisory lock even if startRun fails", () => {
+    // Lock acquire must be paired with try/finally before any throwy setup (ENUM, no vendors).
+    const acquireAt = runSrc.indexOf('if (!(await acquireLock("sync")))');
+    const tryAt = runSrc.indexOf("try {", acquireAt);
+    const startRunAt = runSrc.indexOf("await startRun(", acquireAt);
+    expect(acquireAt).toBeGreaterThan(-1);
+    expect(tryAt).toBeGreaterThan(acquireAt);
+    expect(startRunAt).toBeGreaterThan(tryAt);
+    expect(runSrc).toContain("if (runId > 0)");
+  });
+
   test("settings and vendor pricing Save kick rewrite-only", () => {
     expect(apiSrc).toContain("kickPriceRewrite");
     expect(apiSrc).toContain("kickContentRewrite");
