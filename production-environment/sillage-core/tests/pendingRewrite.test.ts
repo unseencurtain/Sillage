@@ -28,4 +28,15 @@ describe("pending price rewrite on Save", () => {
     expect(apiSrc).toContain("global_price_multiplier");
     expect(apiSrc).toContain("alreadyRunning");
   });
+
+  test("migration widens sil_sync_runs.source for cache/rewrite-only", () => {
+    const mig = readFileSync(
+      join(import.meta.dir, "../migrations/018_sync_run_source_cache.sql"),
+      "utf8",
+    );
+    expect(mig).toContain("sil_sync_runs");
+    expect(mig).toContain("'cache'");
+    expect(mig).toContain("ENUM('live', 'local', 'cache')");
+  });
 });
+
