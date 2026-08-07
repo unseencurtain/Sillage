@@ -38,21 +38,22 @@ Day-2 deploy still tags by git SHA; the `pre-scratch-*` tags are restore markers
 
 ## Database restore (ovhe)
 
-After Phase C, SQL dumps live on the VPS:
+Phase C dumps (taken before the catalogue wipe):
 
 ```text
-~/sillage/backups/pre-scratch-*.sql.gz
+~/sillage/backups/pre-scratch-20260807-212049-earth.sql.gz
+~/sillage/backups/pre-scratch-20260807-212049-sillage.sql.gz
 ```
 
-Typical restore (WordPress `earth`; add `sillage` dump if present):
+Typical restore:
 
 ```bash
 ssh ovhe
 cd ~/sillage
-gunzip -c backups/pre-scratch-YYYYMMDD-HHMMSS-earth.sql.gz \
+set -a; source .env; set +a
+gunzip -c backups/pre-scratch-20260807-212049-earth.sql.gz \
   | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot earth
-# if a sillage dump was taken:
-gunzip -c backups/pre-scratch-YYYYMMDD-HHMMSS-sillage.sql.gz \
+gunzip -c backups/pre-scratch-20260807-212049-sillage.sql.gz \
   | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot sillage
 ```
 
@@ -60,7 +61,8 @@ Credentials come from `~/sillage/.env` on the VPS. Media files under `~/ecom_sit
 
 ## B2B code
 
-After the split, wholesale-perfumes lives in its own GitHub repo (see top-level `b2b-wholesale/README.md` pointer). The pre-scratch tag still contains the in-tree `b2b-wholesale/` scaffold plus the connector under `sillage-core`.
+Canonical B2B repo: [https://github.com/unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)  
+Retail tree keeps a thin pointer under `b2b-wholesale/`. The pre-scratch tag still contains the older in-tree scaffold plus the parked connector under `sillage-core`.
 
 ## What this does *not* restore
 
