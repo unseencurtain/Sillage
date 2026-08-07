@@ -132,11 +132,10 @@ final class Sillage_Rest {
 			$done[] = 'theme_lookup';
 		}
 
-		// Blocksy's category filter defaults to a flat A–Z of every product_cat (including nested
-		// brand leaves from the BTS feed). Force hierarchical+expandable so /shop shows feed
-		// browse roots (Makeup, Hair, Parapharmacy, …) instead of demo/brand noise.
-		if ( $this->ensure_shop_category_filters_hierarchical() ) {
-			$done[] = 'category_filter_hierarchy';
+		// Blocksy's Ajax category filter dumps a flat brand A–Z; swap those widgets for the
+		// theme-agnostic [sillage_shop_categories] browse list (top-level BF/BTS feed cats).
+		if ( $this->ensure_shop_category_browse_widgets() ) {
+			$done[] = 'shop_category_browse';
 		}
 
 		/**
@@ -275,17 +274,28 @@ final class Sillage_Rest {
 	}
 
 	/**
-	 * Idempotently set hierarchical+expandable on Blocksy product_cat filter widgets.
+	 * Replace Blocksy product_cat Ajax filters with [sillage_shop_categories].
 	 *
 	 * Leaves attribute filters (volume, etc.) and brand logo filters untouched.
-	 * Parses JSON with nested objects (`"lock":{"remove":true}`) — a naive `[^{}]*`
-	 * regex misses those and silently no-ops.
 	 */
-	private function ensure_shop_category_filters_hierarchical(): bool {
+	private function ensure_shop_category_browse_widgets(): bool {
 		$widgets = get_option( 'widget_block', null );
 		if ( ! is_array( $widgets ) ) {
 			return false;
 		}
+
+		$replacement = '<!-- sillage-shop-cats -->'
+			. '<!-- wp:heading {"level":6,"className":"widget-title","style":{"spacing":{"margin":{"top":"0","bottom":"15px"}}}} -->'
+			. "\n"
+			. '<h6 class="wp-block-heading widget-title" id="categories" style="margin-top:0;margin-bottom:15px">Categories</h6>'
+			. "\n"
+			. '<!-- /wp:heading -->'
+			. "\n\n"
+			. '<!-- wp:shortcode -->'
+			. "\n"
+			. '[sillage_shop_categories]'
+			. "\n"
+			. '<!-- /wp:shortcode -->';
 
 		$changed = false;
 		foreach ( $widgets as $key => $widget ) {
@@ -293,15 +303,23 @@ final class Sillage_Rest {
 				continue;
 			}
 			$content = $widget['content'];
+			if ( false !== strpos( $content, 'sillage-shop-cats' ) || false !== strpos( $content, '[sillage_shop_categories]' ) ) {
+				continue;
+			}
 			if ( false === strpos( $content, 'wp:blocksy/woocommerce-filters' ) ) {
 				continue;
 			}
-
-			$new = $this->patch_blocksy_category_filter_content( $content );
-			if ( $new !== $content ) {
-				$widgets[ $key ]['content'] = $new;
-				$changed                    = true;
+			// Skip attribute / brand-logo filter widgets.
+			if (
+				false !== strpos( $content, '"type":"attributes"' )
+				|| false !== strpos( $content, '"attribute"' )
+				|| false !== strpos( $content, '"taxonomy":"product_brand' )
+			) {
+				continue;
 			}
+			// Default Blocksy filter without type/taxonomy is product_cat.
+			$widgets[ $key ]['content'] = $replacement;
+			$changed                    = true;
 		}
 
 		if ( ! $changed ) {
@@ -310,88 +328,6 @@ final class Sillage_Rest {
 
 		update_option( 'widget_block', $widgets, false );
 		return true;
-	}
-
-	/**
-	 * @param string $content Widget block HTML comment content.
-	 */
-	private function patch_blocksy_category_filter_content( string $content ): string {
-		$needle = '<!-- wp:blocksy/woocommerce-filters ';
-		$offset = 0;
-		$out    = '';
-		$len    = strlen( $content );
-
-		while ( false !== ( $pos = strpos( $content, $needle, $offset ) ) ) {
-			$out       .= substr( $content, $offset, $pos - $offset );
-			$json_start = $pos + strlen( $needle );
-			if ( $json_start >= $len || '{' !== $content[ $json_start ] ) {
-				$out   .= $needle;
-				$offset = $json_start;
-				continue;
-			}
-
-			$depth = 0;
-			$i     = $json_start;
-			for ( ; $i < $len; $i++ ) {
-				$ch = $content[ $i ];
-				if ( '{' === $ch ) {
-					++$depth;
-				} elseif ( '}' === $ch ) {
-					--$depth;
-					if ( 0 === $depth ) {
-						++$i;
-						break;
-					}
-				}
-			}
-
-			$json = substr( $content, $json_start, $i - $json_start );
-			$end  = $i;
-			if ( $end + 3 < $len && ' -->' === substr( $content, $end, 4 ) ) {
-				$end += 4;
-			}
-
-			$attrs = json_decode( $json, true );
-			if ( ! is_array( $attrs ) ) {
-				$out   .= substr( $content, $pos, $end - $pos );
-				$offset = $end;
-				continue;
-			}
-
-			// Attribute filters and brand logo strips stay as-is.
-			$type     = isset( $attrs['type'] ) ? (string) $attrs['type'] : '';
-			$taxonomy = isset( $attrs['taxonomy'] ) ? (string) $attrs['taxonomy'] : '';
-			if (
-				'attributes' === $type
-				|| isset( $attrs['attribute'] )
-				|| in_array( $taxonomy, array( 'product_brand', 'product_brands' ), true )
-			) {
-				$out   .= substr( $content, $pos, $end - $pos );
-				$offset = $end;
-				continue;
-			}
-
-			$already = ! empty( $attrs['hierarchical'] ) && ! empty( $attrs['expandable'] );
-			if ( $already ) {
-				$out   .= substr( $content, $pos, $end - $pos );
-				$offset = $end;
-				continue;
-			}
-
-			$attrs['hierarchical'] = true;
-			$attrs['expandable']   = true;
-			$encoded               = wp_json_encode( $attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-			if ( ! is_string( $encoded ) ) {
-				$out   .= substr( $content, $pos, $end - $pos );
-				$offset = $end;
-				continue;
-			}
-
-			$out   .= $needle . $encoded . ' -->';
-			$offset = $end;
-		}
-
-		return $out . substr( $content, $offset );
 	}
 
 	/** Health and configuration snapshot, used by the dashboard's Overview page. */
