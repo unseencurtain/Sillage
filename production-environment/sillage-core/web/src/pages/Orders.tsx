@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Loader2 } from "lucide-react";
-import { api, emptyAddress, type OrderAddress } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  emptyAddress,
+  emptyCompanyBilling,
+  type CompanyBillingAddress,
+  type OrderAddress,
+} from "@/lib/api";
 import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -21,12 +28,36 @@ const ADDRESS_FIELDS: Array<{ key: keyof OrderAddress; label: string; wide?: boo
   { key: "phone", label: "Phone" },
 ];
 
+const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; wide?: boolean }> = [
+  { key: "company", label: "Company", wide: true },
+  { key: "vat", label: "VAT / BTW", wide: true },
+  ...ADDRESS_FIELDS.filter((f) => f.key !== "company"),
+];
+
+const STAGES = ["received", "approved", "submitted", "confirmed", "dispatched", "delivered"] as const;
+const TERMINAL = new Set(["failed", "needs_attention", "cancelled"]);
+
+function formatAddress(a: OrderAddress | null | undefined): string {
+  if (!a) return "—";
+  const lines = [
+    [a.firstName, a.lastName].filter(Boolean).join(" "),
+    a.company,
+    a.address1,
+    a.address2,
+    [a.postcode, a.city].filter(Boolean).join(" "),
+    [a.state, a.country].filter(Boolean).join(" "),
+  ].filter(Boolean);
+  return lines.join("\n") || "—";
+}
+
 export function Orders() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [selected, setSelected] = useState<number | null>(null);
   const [confirmLiveId, setConfirmLiveId] = useState<number | null>(null);
-  const [address, setAddress] = useState<OrderAddress>(emptyAddress());
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState<OrderAddress>(emptyAddress());
+  const [billing, setBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
 
   const { data, isLoading } = useQuery({
     queryKey: ["orders"],
@@ -41,14 +72,17 @@ export function Orders() {
   });
 
   useEffect(() => {
-    if (detail.data?.address) {
-      setAddress(detail.data.address);
-    } else if (detail.data) {
-      setAddress({
+    if (!detail.data) return;
+    const d = detail.data.deliveryAddress ?? detail.data.address;
+    if (d) setDelivery(d);
+    else {
+      setDelivery({
         ...emptyAddress(),
         country: String(detail.data.order.destination_country ?? ""),
       });
     }
+    setBilling(detail.data.billingAddress ?? emptyCompanyBilling());
+    setConfirmStatus(null);
   }, [detail.data]);
 
   const approve = useMutation({
@@ -78,18 +112,63 @@ export function Orders() {
         toast(`${label}: ${res.reason}${vendorNo}`, "error");
         return;
       }
-      // BeautyFort often lands in "Payment Hold" — still a real vendor order; pay in their portal.
       toast(`${label} → ${res.status}${vendorNo}. Tracking appears here after the vendor ships.`, "ok");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
-  const saveAddress = useMutation({
-    mutationFn: () => api.updateOrderAddress(selected!, address),
+
+  const saveDelivery = useMutation({
+    mutationFn: () => api.updateOrderAddress(selected!, { delivery }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["order", selected] });
-      toast("Ship-to address saved", "ok");
+      toast("Delivery address saved (Sillage only — WooCommerce unchanged)", "ok");
     },
     onError: (err: Error) => toast(err.message, "error"),
+  });
+
+  const saveBilling = useMutation({
+    mutationFn: () => api.updateOrderAddress(selected!, { billing }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["order", selected] });
+      toast("Billing / invoice address saved", "ok");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+
+  const useCompany = useMutation({
+    mutationFn: () => api.updateOrderAddress(selected!, { useCompanyBilling: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["order", selected] });
+      toast("Filled from saved company billing", "ok");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+
+  const resetDelivery = useMutation({
+    mutationFn: () => api.updateOrderAddress(selected!, { resetDeliveryFromWoo: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["order", selected] });
+      toast("Delivery reset from WooCommerce", "ok");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: ({ status, confirm }: { status: string; confirm?: boolean }) =>
+      api.updateOrderStatus(selected!, status, confirm),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order", selected] });
+      setConfirmStatus(null);
+      toast(`Status → ${res.status}`, "ok");
+    },
+    onError: (err: Error, vars) => {
+      if (err instanceof ApiError && err.status === 409 && !vars.confirm) {
+        setConfirmStatus(vars.status);
+        return;
+      }
+      toast(err.message, "error");
+    },
   });
 
   const pendingAction =
@@ -102,6 +181,8 @@ export function Orders() {
 
   const order = detail.data?.order;
   const showLiveConfirm = confirmLiveId !== null && confirmLiveId === selected;
+  const currentStatus = String(order?.status ?? "");
+  const stageIndex = STAGES.indexOf(currentStatus as (typeof STAGES)[number]);
 
   return (
     <div className="space-y-6">
@@ -229,6 +310,16 @@ export function Orders() {
                       cost {eur(String(order.items_cost))} · revenue {eur(String(order.revenue))}
                       {order.shipping_cost ? ` · ship ${eur(String(order.shipping_cost))}` : ""}
                     </div>
+                    {detail.data.wpAdminUrl ? (
+                      <a
+                        href={detail.data.wpAdminUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                      >
+                        Open in WooCommerce <ExternalLink size={12} />
+                      </a>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <ActionBtn
@@ -269,20 +360,110 @@ export function Orders() {
                     />
                   </div>
                 ) : null}
+
+                {confirmStatus ? (
+                  <div className="mt-4">
+                    <ConfirmPanel
+                      title="Override status after live submit?"
+                      description={`Move this live order to “${confirmStatus}”. Vendor polling still only advances forward.`}
+                      confirmLabel="Confirm override"
+                      danger
+                      pending={setStatus.isPending}
+                      onCancel={() => setConfirmStatus(null)}
+                      onConfirm={() => setStatus.mutate({ status: confirmStatus, confirm: true })}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
                 <section>
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Ship-to address</h3>
-                    <button
-                      type="button"
-                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink disabled:opacity-50"
-                      disabled={saveAddress.isPending}
-                      onClick={() => saveAddress.mutate()}
-                    >
-                      {saveAddress.isPending ? "Saving…" : "Save address"}
-                    </button>
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                    Tracking stage
+                  </h3>
+                  {TERMINAL.has(currentStatus) ? (
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={currentStatus} />
+                      <span className="text-xs text-muted">Terminal status — pick a stage below to reopen</span>
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex items-center gap-0 overflow-x-auto pb-1">
+                    {STAGES.map((stage, i) => {
+                      const filled = stageIndex >= 0 && i <= stageIndex;
+                      const current = stage === currentStatus;
+                      return (
+                        <div key={stage} className="flex min-w-0 flex-1 items-center">
+                          <button
+                            type="button"
+                            title={`Set status to ${stage}`}
+                            disabled={setStatus.isPending}
+                            onClick={() => setStatus.mutate({ status: stage })}
+                            className={cn(
+                              "flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1 text-center disabled:opacity-50",
+                              current ? "bg-teal-50" : "hover:bg-canvas/60",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "h-2.5 w-2.5 rounded-full border-2",
+                                filled ? "border-accent bg-accent" : "border-line bg-panel",
+                              )}
+                            />
+                            <span
+                              className={cn(
+                                "text-[10px] leading-tight",
+                                current ? "font-semibold text-ink" : "text-muted",
+                              )}
+                            >
+                              {stage}
+                            </span>
+                          </button>
+                          {i < STAGES.length - 1 ? (
+                            <div
+                              className={cn(
+                                "mx-0.5 h-0.5 w-3 shrink-0 sm:w-4",
+                                stageIndex > i ? "bg-accent" : "bg-line",
+                              )}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                    WooCommerce customer (read-only)
+                  </h3>
+                  <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-canvas/30 px-3 py-2 font-mono text-xs text-muted">
+                    {formatAddress(detail.data.wooAddress)}
+                  </pre>
+                </section>
+
+                <section>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                      Delivery (vendor ship-to)
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-line px-2.5 py-1.5 text-xs hover:bg-canvas disabled:opacity-50"
+                        disabled={resetDelivery.isPending}
+                        onClick={() => resetDelivery.mutate()}
+                      >
+                        Reset from WooCommerce
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink disabled:opacity-50"
+                        disabled={saveDelivery.isPending}
+                        onClick={() => saveDelivery.mutate()}
+                      >
+                        {saveDelivery.isPending ? "Saving…" : "Save delivery"}
+                      </button>
+                    </div>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {ADDRESS_FIELDS.map((f) => (
@@ -290,9 +471,52 @@ export function Orders() {
                         <span className="text-xs text-muted">{f.label}</span>
                         <input
                           className="mt-1 w-full rounded-lg border border-line px-2.5 py-1.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-                          value={address[f.key]}
-                          disabled={saveAddress.isPending}
-                          onChange={(e) => setAddress((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                          value={delivery[f.key]}
+                          disabled={saveDelivery.isPending}
+                          onChange={(e) => setDelivery((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                      Billing / invoice (company)
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-line px-2.5 py-1.5 text-xs hover:bg-canvas disabled:opacity-50"
+                        disabled={useCompany.isPending}
+                        onClick={() => useCompany.mutate()}
+                      >
+                        Use saved company billing
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink disabled:opacity-50"
+                        disabled={saveBilling.isPending}
+                        onClick={() => saveBilling.mutate()}
+                      >
+                        {saveBilling.isPending ? "Saving…" : "Save billing"}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="mb-2 text-xs text-muted">
+                    BeautyFort: invoice address. BTS: account invoice is portal-side; still shown in dry-run
+                    payload.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {BILLING_FIELDS.map((f) => (
+                      <label key={f.key} className={cn("block", f.wide && "sm:col-span-2")}>
+                        <span className="text-xs text-muted">{f.label}</span>
+                        <input
+                          className="mt-1 w-full rounded-lg border border-line px-2.5 py-1.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                          value={billing[f.key]}
+                          disabled={saveBilling.isPending}
+                          onChange={(e) => setBilling((prev) => ({ ...prev, [f.key]: e.target.value }))}
                         />
                       </label>
                     ))}

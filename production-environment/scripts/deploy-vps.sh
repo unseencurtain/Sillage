@@ -464,6 +464,8 @@ sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ~/ecom_sites/config/sil
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
   -e "GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%'; FLUSH PRIVILEGES;"
 
+# Plugin download above cds to /tmp — compose.yaml lives in ecom_sites.
+cd ~/ecom_sites
 docker compose build sillage-core
 docker compose up -d sillage-core sillage-cron ecom
 docker exec sillage-core bun run migrate

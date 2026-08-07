@@ -128,7 +128,18 @@ export class BeautyfortOrderAdapter implements VendorOrderAdapter {
       : quotes[0]!;
 
     const itemsCost = order.items.reduce((s, i) => s + i.unitCost * i.quantity, 0);
-    const addr = toAddress(order.destination);
+    const deliveryAddr = toAddress(order.destination);
+    const billingSrc = order.billing ?? order.destination;
+    const invoiceAddr = toAddress({
+      address: billingSrc.address,
+      country: billingSrc.country || order.destination.country,
+    });
+    const invoiceFirst =
+      billingSrc.address.firstName ||
+      billingSrc.address.company ||
+      order.destination.address.firstName ||
+      ".";
+    const invoiceLast = billingSrc.address.lastName || ".";
     const attemptAutomaticPayment = Boolean(
       (await loadVendor("beautyfort")).orderConfig.attemptAutomaticPayment,
     );
@@ -138,7 +149,17 @@ export class BeautyfortOrderAdapter implements VendorOrderAdapter {
       orderType: "Direct Dispatch",
       deliveryOptionId: Number(chosen.id),
       items: order.items.map((i) => ({ stockCode: i.vendorProductId, quantity: i.quantity })),
-      address: addr,
+      invoice: {
+        firstName: invoiceFirst,
+        lastName: invoiceLast,
+        address: invoiceAddr,
+        vat: order.billing?.vat || undefined,
+      },
+      delivery: {
+        firstName: order.destination.address.firstName,
+        lastName: order.destination.address.lastName,
+        address: deliveryAddr,
+      },
       attemptAutomaticPayment,
       itemsCost,
       shippingCost: chosen.cost,
@@ -172,12 +193,12 @@ export class BeautyfortOrderAdapter implements VendorOrderAdapter {
 
       const placed = await bf.placeOrder({
         deliveryOptionId: Number(chosen.id),
-        invoiceFirstName: order.destination.address.firstName,
-        invoiceLastName: order.destination.address.lastName,
-        invoiceAddress: addr,
+        invoiceFirstName: invoiceFirst,
+        invoiceLastName: invoiceLast,
+        invoiceAddress: invoiceAddr,
         deliveryFirstName: order.destination.address.firstName,
         deliveryLastName: order.destination.address.lastName,
-        deliveryAddress: addr,
+        deliveryAddress: deliveryAddr,
         orderReference: Number(orderReference),
         yourOrderReference: order.ourReference,
         attemptAutomaticPayment,

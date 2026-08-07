@@ -120,6 +120,24 @@ than one status poll per 5 minutes.
 
 On first tracking, hand off to S2-tracking to write back into WooCommerce.
 
+## Billing vs delivery addresses
+
+- **Delivery** (customer ship-to) lives in `sil_vendor_orders.delivery_address_json`. Ingest
+  snapshots WooCommerce shipping (else billing) once. Dashboard edits update only Sillage — they
+  never write HPOS `wp_wc_order_addresses`.
+- **Billing / invoice** uses Settings profiles `company_billing_beautyfort` /
+  `company_billing_bts`, overridable per order via `billing_address_json`.
+- BeautyFort: `InvoiceAddress*` ← company billing; `DeliveryAddress*` ← delivery JSON.
+- BTS: API ship-to only (delivery + `dropshipping: 1`). Company billing is recorded in the dry-run
+  payload for ops; there is no BTS billing address API field.
+
+## WooCommerce order status
+
+Sillage marks the WC order `completed` only when every **non-dry-run** vendor row for that order
+is `delivered` or `cancelled`. Rows in `submitted` / `confirmed` / `dispatched` leave WC at
+`processing`. If a brand-new checkout jumps to `completed` before any poll, that is WooCommerce
+payment/auto-complete config — not this path.
+
 ## Acceptance
 
 - Dry run completes end to end for both vendors and spends nothing
@@ -128,3 +146,6 @@ On first tracking, hand off to S2-tracking to write back into WooCommerce.
 - Exceeding either spend rail blocks dispatch and records why
 - A mixed-vendor order dispatches to both vendors independently, and one failing does not roll back
   the other
+- Address edits in the dashboard do not change WooCommerce shipping
+- Dry-run payloads show company invoice and customer delivery as separate blocks
+- WC completes only after all live vendor rows are delivered (or cancelled)

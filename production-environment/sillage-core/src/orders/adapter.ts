@@ -51,7 +51,13 @@ export interface VendorOrderDraft {
   ourReference: string;
   /** WooCommerce HPOS order id. */
   wcOrderId: number;
+  /** Customer ship-to (delivery). */
   destination: Destination;
+  /**
+   * Company invoice / billing profile. BeautyFort maps this to InvoiceAddress*.
+   * BTS has no billing API fields — adapters still include it in dry-run payloads for ops.
+   */
+  billing?: Destination & { vat?: string };
   items: OrderItem[];
   /** Already-chosen shipping option, when re-submitting after a quote. */
   shippingOptionId?: string;
