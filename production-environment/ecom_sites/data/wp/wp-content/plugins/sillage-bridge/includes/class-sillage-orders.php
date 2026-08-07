@@ -97,6 +97,21 @@ final class Sillage_Orders {
 			return;
 		}
 
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		if ( $code < 200 || $code >= 300 ) {
+			// Do not set _sillage_notified — allow a status re-transition or operator retry.
+			// Sweep still picks the order up within a few minutes regardless.
+			$order->add_order_note(
+				sprintf(
+					/* translators: %d: HTTP status code */
+					__( 'Sillage: sync engine rejected the notify webhook (HTTP %d). It will be picked up by the next sweep.', 'sillage-bridge' ),
+					$code
+				)
+			);
+			$order->save();
+			return;
+		}
+
 		$order->update_meta_data( self::NOTIFIED_META, (string) time() );
 		$order->add_order_note( __( 'Sillage: queued for vendor dispatch.', 'sillage-bridge' ) );
 		$order->save();

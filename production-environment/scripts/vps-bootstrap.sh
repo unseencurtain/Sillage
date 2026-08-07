@@ -72,8 +72,15 @@ else:
         f"define( 'SILLAGE_DASHBOARD_URL', '{dash}' );",
         text,
     )
-    if new != text:
-        text = new
+    # Keep HMAC secret in lockstep with sillage-core/.env — a redeploy that rotates
+    # the env secret must rewrite wp-config or order webhooks get 401 forever.
+    new2 = re.sub(
+        r"define\(\s*'SILLAGE_SHARED_SECRET'\s*,\s*'[^']*'\s*\)\s*;",
+        f"define( 'SILLAGE_SHARED_SECRET', '{secret}' );",
+        new,
+    )
+    if new2 != text:
+        text = new2
         changed = True
 if changed:
     path.write_text(text)
