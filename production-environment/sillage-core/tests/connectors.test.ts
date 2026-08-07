@@ -314,6 +314,35 @@ describe("pricing", () => {
       150,
     );
   });
+
+  test("vat_rate 0 reproduces pre-VAT numbers exactly", () => {
+    const input = { vendorPrice: 30.1, vendorRecommendedPrice: null, stock: 44 };
+    const without = computePricing(input, { ...DEFAULT_RULES, multiplier: 1.2, vatRate: 0 });
+    const withExplicitZero = computePricing(input, { ...DEFAULT_RULES, multiplier: 1.2 });
+    expect(without.effectivePrice).toBe(36.12);
+    expect(withExplicitZero.effectivePrice).toBe(36.12);
+    expect(resolveRules(
+      { multiplier: 1.2, stockThreshold: 0, maxRrpRatio: 10, priceTiers: [] },
+      { priceMultiplier: null, minVisibleStock: null, fxRate: 1, vatRate: 0 },
+    ).vatRate).toBe(0);
+  });
+
+  test("vat_rate uplifts cost before the markup tier is chosen", () => {
+    const tiers = parsePriceTiers([
+      { maxCost: 80, multiplier: 1.7 },
+      { maxCost: null, multiplier: 1.5 },
+    ]).tiers;
+    // vendor 70 × (1+0.2) = 84 → above the ≤80 band → 1.5×
+    const rules = { ...DEFAULT_RULES, multiplier: 1.0, priceTiers: tiers, vatRate: 0.2 };
+    expect(computePricing({ vendorPrice: 70, vendorRecommendedPrice: null, stock: 1 }, rules).effectivePrice).toBe(
+      126,
+    );
+    // Same vendor price with vat 0 stays in the ≤80 band.
+    const zeroVat = { ...rules, vatRate: 0 };
+    expect(computePricing({ vendorPrice: 70, vendorRecommendedPrice: null, stock: 1 }, zeroVat).effectivePrice).toBe(
+      119,
+    );
+  });
 });
 
 describe("shouldHideForMissingImage", () => {

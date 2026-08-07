@@ -1,5 +1,6 @@
 import { BeautyfortConnector } from "./beautyfort/connector.ts";
 import { BtsConnector } from "./bts/connector.ts";
+import { OceanConnector } from "./ocean/connector.ts";
 import type { VendorConnector } from "./VendorConnector.ts";
 
 /**
@@ -7,7 +8,7 @@ import type { VendorConnector } from "./VendorConnector.ts";
  * changes and no schema changes.
  */
 export function createConnectors(): VendorConnector[] {
-  return [new BeautyfortConnector(), new BtsConnector()];
+  return [new BeautyfortConnector(), new BtsConnector(), new OceanConnector()];
 }
 
 export function createConnector(slug: string): VendorConnector {

@@ -66,6 +66,17 @@ export const env = {
     language: opt("BTS_LANGUAGE", "en-US"),
   },
 
+  ocean: {
+    user: opt("OCEAN_USER"),
+    token: opt("OCEAN_TOKEN"),
+    catalogUrl: opt(
+      "OCEAN_CATALOG_URL",
+      "https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en",
+    ),
+    storeUrl: opt("OCEAN_STOCK_URL", "https://www.wholesale-perfumes.eu/xml/store/LovelyXml/EUR"),
+    apiBaseUrl: opt("OCEAN_API_BASE_URL", "https://www.wholesale-perfumes.eu/api/v1"),
+  },
+
   dashboard: {
     user: opt("DASHBOARD_USER", "admin"),
     password: opt("DASHBOARD_PASSWORD"),

@@ -1,9 +1,10 @@
 /**
  * Pure pricing and visibility rules. No database imports — unit-testable against DATA-PROFILE edge cases.
  *
- * Storefront price is always cost × fx × multiplier. Vendor recommended retail (RRP) is ignored:
- * BTS publishes zeros on ~46% of rows and absurd outliers (up to 42,795), so using RRP as a
- * "was/now" strike-through misleads customers and hides the multiplier effect.
+ * Storefront price is always cost × multiplier. Cost = vendorPrice × fxRate × (1 + vatRate).
+ * Vendor recommended retail (RRP) is ignored: BTS publishes zeros on ~46% of rows and absurd
+ * outliers (up to 42,795), so using RRP as a "was/now" strike-through misleads customers and hides
+ * the multiplier effect.
  *
  * Multiplier precedence: per-vendor price_multiplier override > matching price tier > global multiplier.
  */
@@ -30,6 +31,11 @@ export interface PricingRules {
    */
   priceTiers: PriceTier[];
   fxRate: number;
+  /**
+   * Fraction uplift applied before markup (Ocean publishes price_no_vat). Default 0 so existing
+   * vendors are unchanged: cost = vendorPrice × fxRate × (1 + vatRate).
+   */
+  vatRate: number;
   /** Inclusive: stock <= threshold hides the product. */
   stockThreshold: number;
   /** Kept for settings compatibility; unused after RRP was dropped. */
@@ -50,6 +56,7 @@ export const DEFAULT_RULES: PricingRules = {
   multiplier: 1.0,
   priceTiers: [],
   fxRate: 1.0,
+  vatRate: 0,
   stockThreshold: 0,
   maxRrpRatio: 10,
 };
@@ -130,7 +137,7 @@ export function parsePriceTiers(raw: unknown): { tiers: PriceTier[]; warnings: s
   return { tiers: parsed, warnings };
 }
 
-/** cost = vendorPrice × fxRate; first tier with maxCost >= cost wins (null = always matches). */
+/** cost = vendorPrice × fxRate × (1 + vatRate); first tier with maxCost >= cost wins (null = always matches). */
 export function resolveTierMultiplier(cost: number, rules: PricingRules): number {
   for (const tier of rules.priceTiers) {
     if (tier.maxCost === null || cost <= tier.maxCost) return tier.multiplier;
@@ -142,7 +149,8 @@ export function computePricing(input: PricingInput, rules: PricingRules): Pricin
   void input.vendorRecommendedPrice;
   void rules.maxRrpRatio;
 
-  const cost = input.vendorPrice * rules.fxRate;
+  const vat = Number.isFinite(rules.vatRate) ? Math.max(0, rules.vatRate) : 0;
+  const cost = input.vendorPrice * rules.fxRate * (1 + vat);
   const multiplier = resolveTierMultiplier(cost, rules);
   const computed = round2(cost * multiplier);
   // Never free: a tiny multiplier that rounds to 0 becomes 0.01.
@@ -163,7 +171,7 @@ export function computePricing(input: PricingInput, rules: PricingRules): Pricin
 
 export function resolveRules(
   global: { multiplier: number; stockThreshold: number; maxRrpRatio: number; priceTiers: PriceTier[] },
-  vendor: { priceMultiplier: number | null; minVisibleStock: number | null; fxRate: number },
+  vendor: { priceMultiplier: number | null; minVisibleStock: number | null; fxRate: number; vatRate?: number },
 ): PricingRules {
   // Explicit per-vendor override wins over tiers; clear the list so computePricing uses multiplier.
   const hasVendorOverride = vendor.priceMultiplier != null;
@@ -171,6 +179,7 @@ export function resolveRules(
     multiplier: vendor.priceMultiplier ?? global.multiplier,
     priceTiers: hasVendorOverride ? [] : global.priceTiers,
     fxRate: vendor.fxRate,
+    vatRate: vendor.vatRate ?? 0,
     stockThreshold: vendor.minVisibleStock ?? global.stockThreshold,
     maxRrpRatio: global.maxRrpRatio,
   };

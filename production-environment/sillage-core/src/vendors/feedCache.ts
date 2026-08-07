@@ -11,7 +11,7 @@ import { logger } from "../lib/log.ts";
 
 const log = logger("feed-cache");
 
-export type CacheVendor = "beautyfort" | "bts";
+export type CacheVendor = "beautyfort" | "bts" | "ocean";
 
 interface CacheMeta {
   vendor: CacheVendor;
@@ -31,10 +31,10 @@ function metaPath(vendor: CacheVendor): string {
   return join(cacheDir(vendor), "meta.json");
 }
 
-/** Optional envelope so BTS can persist the category tree next to products. */
+/** Optional envelope so BTS can persist categories and Ocean can persist the store feed. */
 export type FeedCachePayload =
   | unknown[]
-  | { products: unknown[]; categories?: unknown[] };
+  | { products: unknown[]; categories?: unknown[]; store?: unknown[] };
 
 export async function writeFeedCache(vendor: CacheVendor, payload: FeedCachePayload): Promise<void> {
   await mkdir(cacheDir(vendor), { recursive: true });
@@ -74,6 +74,12 @@ export function feedCacheProducts(payload: FeedCachePayload): unknown[] {
 export function feedCacheCategories(payload: FeedCachePayload): unknown[] | null {
   if (Array.isArray(payload)) return null;
   return Array.isArray(payload.categories) ? payload.categories : null;
+}
+
+/** Ocean hourly price/stock rows persisted beside the catalog. */
+export function feedCacheStore(payload: FeedCachePayload): unknown[] | null {
+  if (Array.isArray(payload)) return null;
+  return Array.isArray(payload.store) ? payload.store : null;
 }
 
 export async function readFeedCacheMeta(vendor: CacheVendor): Promise<CacheMeta | null> {
