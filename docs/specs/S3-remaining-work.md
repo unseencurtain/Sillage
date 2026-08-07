@@ -16,8 +16,9 @@ For **product images**, read [S3-images.md](S3-images.md) first — it is the or
 
 Two things have already caused real mistakes. Both are settled; do not re-derive them.
 
-**There are exactly three vendors.** `bts`, `beautyfort`, and `wholesale-perfumes` (the B2B
-wholesaler at wholesale-perfumes.eu, legal entity SoleLuna). Everything else that produces pictures
+**There are exactly three vendors in code.** `bts`, `beautyfort`, and `wholesale-perfumes` (B2B
+at wholesale-perfumes.eu / SoleLuna). **This retail shop syncs only BF + BTS**; wholesale-perfumes
+is parked under `b2b-wholesale/` for a future separate site. Everything else that produces pictures
 — **oceanfragrances** (a CSV), **Brasty**, the Shopify export, one vendor's photo filling another's
 product — is an *image source*: EAN → image URL, no stock, no prices, no orders. Do not add a fourth
 vendor row, connector, or SKU prefix for an image source. The full table is in `CONTEXT.md` §6 under
@@ -218,11 +219,10 @@ None of these are engineering decisions. Get the values from the operator; do no
   `min_order_value_eur` hard-blocks cart/checkout with a storefront-label shortfall — wired so
   customers see it before dispatch. wholesale-perfumes seed is still €100 until the operator
   confirms the real figure.
-- **wholesale-perfumes sell path.** Listed on `/b2b-wholesale/` only; same cart →
-  checkout → Sillage) plus MOQ; no B2B portal. Cart `code` = catalog product `id` confirmed
-  (`docs/vendors/wholesale-perfumes-api.md`). Still confirm exact MOQ euros, shipping countries,
-  and VAT (fraction — 21% is `0.21`) before first live spend; keep `orders_dry_run=1` until then.
-  Prefer a staging cart round-trip. Rotate any API token that appeared in client chat.
+- **wholesale-perfumes sell path.** **Parked** for a separate B2B site (`b2b-wholesale/`). Not
+  sold on this retail shop. Cart `code` = catalog product `id` confirmed
+  (`b2b-wholesale/docs/wholesale-perfumes-api.md`). Confirm MOQ / countries / VAT before any
+  future B2B live spend; keep `orders_dry_run=1` on this stack.
 
 ---
 
@@ -260,5 +260,5 @@ Read these before touching the related code; each one cost real time to establis
   reference material.
 - Matching Google's consumer prices. Not implementable as stated without price scraping; the markup
   tiers are the agreed approximation.
-- B2B portal / separate higher-MOQ lane. **Decided out of scope:** same sell path as BF/BTS +
-  per-vendor MOQ; `/b2b-wholesale/` is the WPF listing (main shop excludes WPF).
+- B2B on this WordPress. **Decided:** separate future site (`b2b-wholesale/`); this shop is
+  BF/BTS retail only.

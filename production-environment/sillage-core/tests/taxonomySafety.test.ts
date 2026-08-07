@@ -27,7 +27,8 @@ describe("rewrite-only taxonomy safety", () => {
     expect(runSrc).toContain("loadCategoryMapsFromDb");
     expect(runSrc).toContain("loadFlatTermMapFromDb");
     expect(runSrc).toContain("purgeVendorProductCatLanes");
-    expect(runSrc).toContain("ensureB2bShopPage");
+    expect(runSrc).toContain("parkWholesalePerfumesFromMainStorefront");
+    expect(runSrc).not.toContain("ensureB2bShopPage");
   });
 
   test("rewrite-only does not construct empty categoryMaps inline", () => {

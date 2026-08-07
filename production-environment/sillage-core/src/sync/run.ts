@@ -2,7 +2,7 @@ import { env, sil } from "../config/env.ts";
 import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
 import { formatDuration, logger } from "../lib/log.ts";
-import { createConnector } from "../vendors/registry.ts";
+import { createConnector, isParkedB2bVendor } from "../vendors/registry.ts";
 import type { FeedSource, NormalizedProduct } from "../vendors/types.ts";
 import {
   applyPriceStockDelta,
@@ -15,7 +15,7 @@ import { finalizeWordPress } from "./finalize.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
-  ensureB2bShopPage,
+  parkWholesalePerfumesFromMainStorefront,
   purgeVendorProductCatLanes,
   purgeWholesalePerfumesBrandProductCats,
   loadCategoryMapsFromDb,
@@ -37,7 +37,10 @@ const log = logger("sync");
 export interface SyncOptions {
   mode: WriteMode;
   source: FeedSource;
-  /** Vendor slugs to include. Empty means every active vendor. */
+  /**
+   * Vendor slugs to include. Empty means every active *retail* vendor
+   * (`--vendor=all` skips parked B2B slugs — see `PARKED_B2B_VENDOR_SLUGS`).
+   */
   vendors?: string[];
   /** Fetch and diff but make no WooCommerce writes. */
   dryRun?: boolean;
@@ -177,9 +180,12 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
   const settings = await loadSettings();
   const allVendors = await loadVendors();
-  const selected = allVendors.filter(
-    (v) => v.active && (!options.vendors?.length || options.vendors.includes(v.slug)),
-  );
+  // Empty vendors = --vendor=all → retail only (parked B2B excluded). Explicit slug list
+  // may still name wholesale-perfumes for offline tests / a future B2B site.
+  const pool = options.vendors?.length
+    ? allVendors.filter((v) => options.vendors!.includes(v.slug))
+    : allVendors.filter((v) => !isParkedB2bVendor(v.slug));
+  const selected = pool.filter((v) => v.active);
   if (selected.length === 0) throw new Error("no active vendors selected");
 
   const runId = await startRun(options.mode, options.source, selected.length === 1 ? selected[0]!.id : null);
@@ -337,7 +343,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       if (!options.dryRun) {
         await purgeVendorProductCatLanes(allVendors, storefrontLabels);
         await purgeWholesalePerfumesBrandProductCats();
-        await ensureB2bShopPage();
+        await parkWholesalePerfumesFromMainStorefront();
       }
 
       await resolveProductIdentities(settings);
@@ -487,7 +493,7 @@ async function buildRewriteWriteContext(
   for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
   await purgeVendorProductCatLanes(allVendors, storefrontLabels);
   await purgeWholesalePerfumesBrandProductCats();
-  await ensureB2bShopPage();
+  await parkWholesalePerfumesFromMainStorefront();
   return buildWriteContext(settings, allVendors, categoryMaps, brandMap, attributeMaps);
 }
 
