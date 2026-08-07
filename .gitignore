@@ -38,3 +38,10 @@ vendor-sync-plan-claude.md
 
 # VPS deploy scratch (credentials, one-off notes)
 .deploy/
+
+# Offline image-enrichment fixtures (large vendor dumps). Code + generated overrides stay tracked.
+production-environment/python-analysis/beautyfort-enriched/products/
+production-environment/python-analysis/beautyfort-enriched/output/*.csv
+production-environment/python-analysis/beautyfort-enriched/output/image_overrides.json
+production-environment/python-analysis/beautyfort-enriched/__pycache__/
+
