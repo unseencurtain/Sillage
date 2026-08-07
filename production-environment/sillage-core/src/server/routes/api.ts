@@ -75,14 +75,26 @@ api.get("/overview", async (c) => {
 });
 
 api.get("/sync/runs", async (c) => {
-  const limit = Math.min(100, Number(c.req.query("limit") ?? 50));
-  const runs = await query<RowDataPacket>(
-    `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
-            prices_updated, products_vanished, errors, started_at, finished_at
-       FROM ${sil("sil_sync_runs")} ORDER BY id DESC LIMIT ?`,
-    [limit],
-  );
-  return c.json({ runs });
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 50)));
+  const offset = (page - 1) * limit;
+  const [totalRows, runs] = await Promise.all([
+    query<RowDataPacket & { total: number }>(
+      `SELECT COUNT(*) AS total FROM ${sil("sil_sync_runs")}`,
+    ),
+    query<RowDataPacket>(
+      `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
+              prices_updated, products_vanished, errors, started_at, finished_at
+         FROM ${sil("sil_sync_runs")} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [limit, offset],
+    ),
+  ]);
+  return c.json({
+    runs,
+    total: Number(totalRows[0]?.total ?? 0),
+    page,
+    limit,
+  });
 });
 
 api.post("/sync/run", async (c) => {
@@ -284,18 +296,37 @@ api.put("/vendors/:slug", async (c) => {
 
 api.get("/orders", async (c) => {
   const status = c.req.query("status");
-  const limit = Math.min(100, Number(c.req.query("limit") ?? 50));
-  const orders = await query<RowDataPacket>(
-    `SELECT v.id, v.wc_order_id, v.our_reference, v.status, v.items_cost, v.shipping_cost,
-            v.total_cost, v.revenue, v.destination_country, v.dry_run, v.vendor_order_number,
-            v.created_at, v.updated_at, ven.slug AS vendor
-       FROM ${sil("sil_vendor_orders")} v
-       JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
-      ${status ? "WHERE v.status = ?" : ""}
-      ORDER BY v.id DESC LIMIT ?`,
-    status ? [status, limit] : [limit],
-  );
-  return c.json({ orders });
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 50)));
+  const offset = (page - 1) * limit;
+  const where = status ? "WHERE v.status = ?" : "";
+  const filterParams: unknown[] = status ? [status] : [];
+
+  const [totalRows, orders] = await Promise.all([
+    query<RowDataPacket & { total: number }>(
+      `SELECT COUNT(*) AS total
+         FROM ${sil("sil_vendor_orders")} v
+         ${where}`,
+      filterParams,
+    ),
+    query<RowDataPacket>(
+      `SELECT v.id, v.wc_order_id, v.our_reference, v.status, v.items_cost, v.shipping_cost,
+              v.total_cost, v.revenue, v.destination_country, v.dry_run, v.vendor_order_number,
+              v.created_at, v.updated_at, ven.slug AS vendor
+         FROM ${sil("sil_vendor_orders")} v
+         JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
+         ${where}
+        ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+      [...filterParams, limit, offset],
+    ),
+  ]);
+
+  return c.json({
+    orders,
+    total: Number(totalRows[0]?.total ?? 0),
+    page,
+    limit,
+  });
 });
 
 api.get("/orders/:id", async (c) => {
@@ -661,7 +692,9 @@ api.put("/settings", async (c) => {
 api.get("/logs", async (c) => {
   const level = c.req.query("level");
   const scope = c.req.query("scope");
-  const limit = Math.min(200, Number(c.req.query("limit") ?? 100));
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(200, Math.max(1, Number(c.req.query("limit") ?? 50)));
+  const offset = (page - 1) * limit;
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (level) {
@@ -673,11 +706,24 @@ api.get("/logs", async (c) => {
     params.push(scope);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const events = await query<RowDataPacket>(
-    `SELECT id, level, scope, message, context, run_id, created_at
-       FROM ${sil("sil_events")} ${where}
-      ORDER BY id DESC LIMIT ?`,
-    [...params, limit],
-  );
-  return c.json({ events });
+
+  const [totalRows, events] = await Promise.all([
+    query<RowDataPacket & { total: number }>(
+      `SELECT COUNT(*) AS total FROM ${sil("sil_events")} ${where}`,
+      params,
+    ),
+    query<RowDataPacket>(
+      `SELECT id, level, scope, message, context, run_id, created_at
+         FROM ${sil("sil_events")} ${where}
+        ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    ),
+  ]);
+
+  return c.json({
+    events,
+    total: Number(totalRows[0]?.total ?? 0),
+    page,
+    limit,
+  });
 });

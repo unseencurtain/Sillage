@@ -10,6 +10,7 @@ import {
   type OrderAddress,
 } from "@/lib/api";
 import { ConfirmPanel } from "@/components/ConfirmPanel";
+import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { cn, eur, fmtDate } from "@/lib/utils";
@@ -53,6 +54,7 @@ function formatAddress(a: OrderAddress | null | undefined): string {
 export function Orders() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<number | null>(null);
   const [confirmLiveId, setConfirmLiveId] = useState<number | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
@@ -60,8 +62,8 @@ export function Orders() {
   const [billing, setBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
 
   const { data, isLoading } = useQuery({
-    queryKey: ["orders"],
-    queryFn: () => api.orders(),
+    queryKey: ["orders", page],
+    queryFn: () => api.orders(page),
     refetchInterval: 10_000,
   });
 
@@ -179,7 +181,8 @@ export function Orders() {
     setConfirmLiveId(id);
   };
 
-  const order = detail.data?.order;
+  const detailData = detail.data;
+  const order = detailData?.order;
   const showLiveConfirm = confirmLiveId !== null && confirmLiveId === selected;
   const currentStatus = String(order?.status ?? "");
   const stageIndex = STAGES.indexOf(currentStatus as (typeof STAGES)[number]);
@@ -188,99 +191,116 @@ export function Orders() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
-        <p className="text-sm text-muted">Per-vendor dispatch rows · dry-run is the default safety rail</p>
+        <p className="text-sm text-muted">
+          Per-vendor dispatch rows · dry-run is the default safety rail
+          {data ? ` · ${data.total.toLocaleString()} total` : ""}
+        </p>
       </header>
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-        <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-line bg-canvas/70 text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-3 py-3">ID</th>
-                <th className="px-3 py-3">WC</th>
-                <th className="px-3 py-3">Vendor</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Cost</th>
-                <th className="px-3 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
+        <div className="space-y-3">
+          <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-line bg-canvas/70 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-muted">
-                    Loading…
-                  </td>
+                  <th className="px-3 py-3">ID</th>
+                  <th className="px-3 py-3">WC</th>
+                  <th className="px-3 py-3">Vendor</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Cost</th>
+                  <th className="px-3 py-3">Actions</th>
                 </tr>
-              ) : (data?.orders ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-6 text-muted">
-                    No vendor orders yet
-                  </td>
-                </tr>
-              ) : (
-                (data?.orders ?? []).map((o) => {
-                  const rowBusy = pendingAction === o.id;
-                  return (
-                    <tr
-                      key={o.id}
-                      className={cn(
-                        "border-b border-line/70 last:border-0 transition-colors",
-                        selected === o.id ? "bg-teal-50/60" : "hover:bg-canvas/50",
-                      )}
-                    >
-                      <td className="px-3 py-3 font-mono">
-                        <button
-                          type="button"
-                          className="font-medium underline-offset-2 hover:text-accent hover:underline"
-                          onClick={() => {
-                            setSelected(o.id);
-                            setConfirmLiveId(null);
-                          }}
-                        >
-                          #{o.id}
-                        </button>
-                      </td>
-                      <td className="px-3 py-3 font-mono tabular-nums">{o.wc_order_id}</td>
-                      <td className="px-3 py-3">
-                        <span className="font-mono text-xs">{o.vendor}</span>
-                        {o.dry_run ? (
-                          <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-muted">
-                            dry
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-3">
-                        <StatusBadge status={o.status} />
-                      </td>
-                      <td className="px-3 py-3 font-mono tabular-nums">{eur(o.items_cost)}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          <ActionBtn
-                            label="Approve"
-                            disabled={rowBusy}
-                            pending={approve.isPending && approve.variables === o.id}
-                            onClick={() => approve.mutate(o.id)}
-                          />
-                          <ActionBtn
-                            label="Dry-run"
-                            disabled={rowBusy}
-                            pending={dispatch.isPending && dispatch.variables?.id === o.id && !dispatch.variables.live}
-                            onClick={() => dispatch.mutate({ id: o.id, live: false })}
-                          />
-                          <ActionBtn
-                            label="Live"
-                            danger
-                            disabled={rowBusy}
-                            onClick={() => startLiveConfirm(o.id)}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-muted">
+                      Loading…
+                    </td>
+                  </tr>
+                ) : (data?.orders ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-muted">
+                      No vendor orders yet
+                    </td>
+                  </tr>
+                ) : (
+                  (data?.orders ?? []).map((o) => {
+                    const rowBusy = pendingAction === o.id;
+                    return (
+                      <tr
+                        key={o.id}
+                        className={cn(
+                          "border-b border-line/70 last:border-0 transition-colors",
+                          selected === o.id ? "bg-teal-50/60" : "hover:bg-canvas/50",
+                        )}
+                      >
+                        <td className="px-3 py-3 font-mono">
+                          <button
+                            type="button"
+                            className="font-medium underline-offset-2 hover:text-accent hover:underline"
+                            onClick={() => {
+                              setSelected(o.id);
+                              setConfirmLiveId(null);
+                            }}
+                          >
+                            #{o.id}
+                          </button>
+                        </td>
+                        <td className="px-3 py-3 font-mono tabular-nums">{o.wc_order_id}</td>
+                        <td className="px-3 py-3">
+                          <span className="font-mono text-xs">{o.vendor}</span>
+                          {o.dry_run ? (
+                            <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-muted">
+                              dry
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-3">
+                          <StatusBadge status={o.status} />
+                        </td>
+                        <td className="px-3 py-3 font-mono tabular-nums">{eur(o.items_cost)}</td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            <ActionBtn
+                              label="Approve"
+                              disabled={rowBusy}
+                              pending={approve.isPending && approve.variables === o.id}
+                              onClick={() => approve.mutate(o.id)}
+                            />
+                            <ActionBtn
+                              label="Dry-run"
+                              disabled={rowBusy}
+                              pending={
+                                dispatch.isPending &&
+                                dispatch.variables?.id === o.id &&
+                                !dispatch.variables.live
+                              }
+                              onClick={() => dispatch.mutate({ id: o.id, live: false })}
+                            />
+                            <ActionBtn
+                              label="Live"
+                              danger
+                              disabled={rowBusy}
+                              onClick={() => startLiveConfirm(o.id)}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {data ? (
+            <Pagination
+              page={page}
+              limit={data.limit}
+              total={data.total}
+              onPageChange={setPage}
+            />
+          ) : null}
         </div>
 
         <aside className="flex max-h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
@@ -293,7 +313,7 @@ export function Orders() {
               <Loader2 size={16} className="animate-spin" />
               Loading order…
             </div>
-          ) : detail.isError || !order ? (
+          ) : detail.isError || !detailData || !order ? (
             <div className="p-5 text-sm text-danger">Failed to load order</div>
           ) : (
             <>
@@ -310,9 +330,9 @@ export function Orders() {
                       cost {eur(String(order.items_cost))} · revenue {eur(String(order.revenue))}
                       {order.shipping_cost ? ` · ship ${eur(String(order.shipping_cost))}` : ""}
                     </div>
-                    {detail.data.wpAdminUrl ? (
+                    {detailData.wpAdminUrl ? (
                       <a
-                        href={detail.data.wpAdminUrl}
+                        href={detailData.wpAdminUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-2 inline-flex items-center gap-1 text-xs text-accent hover:underline"
@@ -437,7 +457,7 @@ export function Orders() {
                     WooCommerce customer (read-only)
                   </h3>
                   <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-canvas/30 px-3 py-2 font-mono text-xs text-muted">
-                    {formatAddress(detail.data.wooAddress)}
+                    {formatAddress(detailData.wooAddress)}
                   </pre>
                 </section>
 
@@ -526,10 +546,10 @@ export function Orders() {
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Line items</h3>
                   <ul className="mt-2 space-y-2">
-                    {(detail.data.items ?? []).length === 0 ? (
+                    {(detailData.items ?? []).length === 0 ? (
                       <li className="text-xs text-muted">No line items</li>
                     ) : (
-                      detail.data.items.map((item) => (
+                      detailData.items.map((item) => (
                         <li key={item.id} className="rounded-lg border border-line bg-canvas/30 px-3 py-2">
                           <div className="truncate font-medium">{item.name}</div>
                           <div className="mt-0.5 font-mono text-xs text-muted">
@@ -543,11 +563,11 @@ export function Orders() {
 
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Tracking</h3>
-                  {(detail.data.tracking ?? []).length === 0 ? (
+                  {(detailData.tracking ?? []).length === 0 ? (
                     <p className="mt-2 text-xs text-muted">No parcels yet</p>
                   ) : (
                     <ul className="mt-2 space-y-2">
-                      {detail.data.tracking.map((t) => (
+                      {detailData.tracking.map((t) => (
                         <li key={t.id} className="rounded-lg border border-line px-3 py-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs">{t.tracking_code}</span>
@@ -575,10 +595,10 @@ export function Orders() {
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Event log</h3>
                   <ul className="mt-2 max-h-48 space-y-2 overflow-auto">
-                    {(detail.data.events ?? []).length === 0 ? (
+                    {(detailData.events ?? []).length === 0 ? (
                       <li className="text-xs text-muted">No events recorded</li>
                     ) : (
-                      detail.data.events.map((ev) => (
+                      detailData.events.map((ev) => (
                         <li key={ev.id} className="border-l-2 border-line pl-3 text-xs">
                           <div className="font-mono text-muted">{fmtDate(ev.created_at)}</div>
                           {ev.from_status || ev.to_status ? (

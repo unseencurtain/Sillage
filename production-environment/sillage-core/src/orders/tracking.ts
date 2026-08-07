@@ -9,10 +9,53 @@ import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, recordEvent } from "../db/settings.ts";
 import { signPayload } from "../lib/hmac.ts";
 import { logger } from "../lib/log.ts";
+import { BeautyfortError } from "../vendors/beautyfort/BeautyfortClient.ts";
 import type { TrackingParcel, VendorPollStatus } from "./adapter.ts";
 import { createOrderAdapter } from "./adapters/index.ts";
 
 const log = logger("tracking");
+
+/** Errors that will not clear on retry — park the row so the cron tick stops spamming. */
+export function isPermanentPollFailure(err: unknown): boolean {
+  if (err instanceof BeautyfortError && err.permanent) return true;
+  const msg = String(err);
+  return (
+    /no OrderReference/i.test(msg) ||
+    /order not found/i.test(msg) ||
+    /invalid vendor order number/i.test(msg) ||
+    /does not exist/i.test(msg)
+  );
+}
+
+async function touchLastPolled(id: number): Promise<void> {
+  await execute(`UPDATE ${sil("sil_vendor_orders")} SET last_polled_at = NOW() WHERE id = ?`, [id]);
+}
+
+/**
+ * Stop polling an order that the vendor will never resolve (missing/unknown reference).
+ * Leaves the row in needs_attention with a clear last_error for the operator.
+ */
+async function parkUnpollableOrder(id: number, fromStatus: string, reason: string): Promise<void> {
+  const result = await execute(
+    `UPDATE ${sil("sil_vendor_orders")}
+        SET status = 'needs_attention',
+            last_error = ?,
+            last_polled_at = NOW(),
+            updated_at = NOW()
+      WHERE id = ?
+        AND status IN ('submitted','confirmed','dispatched')`,
+    [reason.slice(0, 1000), id],
+  );
+  if (result.affectedRows === 0) {
+    await touchLastPolled(id);
+    return;
+  }
+  await execute(
+    `INSERT INTO ${sil("sil_order_events")} (vendor_order_id, from_status, to_status, message, context)
+     VALUES (?, ?, 'needs_attention', ?, ?)`,
+    [id, fromStatus, reason.slice(0, 1000), JSON.stringify({ rail: "tracking_poll" })],
+  );
+}
 
 interface PollRow extends RowDataPacket {
   id: number;
@@ -244,8 +287,34 @@ export async function pollDueOrders(limit = 50): Promise<number> {
         log.info(`order ${row.id}: ${result.parcels} new parcel(s), ${result.pushed} pushed to WC`);
       }
     } catch (err) {
-      log.error(`poll failed for vendor order ${row.id}`, String(err));
-      await recordEvent("error", "tracking", `poll failed for ${row.id}: ${String(err)}`);
+      const message = String(err);
+      // Always advance last_polled_at so a hard failure does not re-fire every cron tick.
+      // Permanent lookup failures are parked; transient ones retry after orders_poll_minutes.
+      try {
+        if (isPermanentPollFailure(err)) {
+          const [current] = await query<PollRow>(
+            `SELECT status FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
+            [row.id],
+          );
+          await parkUnpollableOrder(
+            row.id,
+            current?.status ?? "submitted",
+            `tracking poll stopped: ${message}`,
+          );
+          log.warn(`stopped polling vendor order ${row.id}: ${message}`);
+          await recordEvent(
+            "warn",
+            "tracking",
+            `stopped polling ${row.id}: ${message}`,
+          );
+        } else {
+          await touchLastPolled(row.id);
+          log.error(`poll failed for vendor order ${row.id}`, message);
+          await recordEvent("error", "tracking", `poll failed for ${row.id}: ${message}`);
+        }
+      } catch (parkErr) {
+        log.error(`failed to record poll error for ${row.id}`, String(parkErr));
+      }
     }
   }
   return n;
