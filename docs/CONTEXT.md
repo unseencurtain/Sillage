@@ -44,10 +44,11 @@ cd production-environment && docker compose --env-file .env up -d
 Compose: `production-environment/compose.yaml`. Env template: `production-environment/.env.example`.
 Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
-**Staging VPS:** SSH host alias `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`).  
-App dir `~/sillage/`; data stays at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
-WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. Do not treat `ovh` (production) as the
-default deploy target until staging is proven.
+**Live VPS:** SSH `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`) — shop
+`cosmetic.slilverbelt.xyz`, dashboard `sillage.slilverbelt.xyz`, images `images.slilverbelt.xyz`.
+App dir `~/sillage/`; data at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
+WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. SSH `ovh` (`51.79.255.226`) is empty/unused.
+Resume context: [`HANDOFF.md`](HANDOFF.md).
 
 One image, one role per container. `sillage-core` runs supercronic; the dashboard service overrides
 `command` to run the API instead. A full sync must never be able to stall the dashboard, and either
@@ -238,7 +239,7 @@ This is a closed list. If a task seems to require adding write logic here, it be
    [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
    WPF on this install is parked via `product_visibility` from sillage-core.
 
-**The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
+**The plugin must not depend on the active theme.** Blocksy today; target **Kadence**. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
 
 All configuration lives in the sillage-core dashboard, not in wp-admin.
@@ -275,6 +276,8 @@ attribute mapping, or the taxonomy a term lives in.
 ---
 
 ## 6. Vendors
+
+Operator roadmap and live-host facts: [`HANDOFF.md`](HANDOFF.md).
 
 ### Vendors versus image sources — read this before adding anything
 

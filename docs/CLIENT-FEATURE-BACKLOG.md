@@ -15,11 +15,11 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | P2 | Cart minimum / small-order surcharge | **Done:** global `cart_min_*` = optional Foodpanda-style fee; per-vendor `min_order_value_eur` = hard block + storefront-label shortfall on cart/checkout (independent of fee toggle). |
 | P3 | ~~B2B portal on this shop~~ | **Superseded.** B2B gets its own website later (`b2b-wholesale/`). This shop is BF/BTS retail only. Never reintroduce LPS* as `product_cat`. |
 
-## Staging / deploy notes (Aug 2026)
+## Deploy notes (Aug 2026)
 
 | Fact | Value |
 |---|---|
-| Staging SSH | `ovhe` only — never deploy to production `ovh` without explicit approval |
+| Live SSH | `ovhe` (`139.99.61.71`) — retail shop + dashboard. `ovh` (`51.79.255.226`) unused |
 | Wholesaler / B2B site | Separate future project — scaffold in `b2b-wholesale/` (not on this WP) |
 | Storefront labels | LPS01 = BTS, LPS02 = BeautyFort (LPS03 parked; `_sillage_vendor` + `storefront_label` for ops/MOQ; never `product_cat` or visible `pa_vendor`) |
 | Image CDN | `sil_settings.image_cdn_base_url` / `LPS_MEDIA_BASE_URL` → `https://images.<domain>/…` via `lps-media` |

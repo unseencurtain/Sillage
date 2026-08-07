@@ -4,10 +4,11 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 (**BeautyFort + BTS** retail; wholesale-perfumes B2B lives in
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)).
 
+**Read [`docs/HANDOFF.md`](docs/HANDOFF.md)** for live host, roadmap, and resume-after-a-gap context.
 **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet: container
 names, database credentials, WooCommerce schema quirks, and the complete list of tables we write
 to. Then read only the one spec under `docs/specs/` that covers your task. Do not go exploring —
-everything you need is in those two files.
+everything you need is in those files.
 
 **Operator dashboard:** every Settings / Vendors / Sync / Orders control for this retail shop is
 documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
@@ -63,6 +64,6 @@ cp production-environment/.env.example production-environment/.env   # fill vend
   --host ovhe --shop … --dash … --images … --skip-build   # or omit --skip-build to push
 ```
 
-Full recipe: `docs/VPS-DEPLOY.md`. Staging SSH alias `ovhe`; do not treat `ovh` as
-default until staging is proven. Split `ecom_sites/.env` / `sillage-core/.env` are
+Full recipe: `docs/VPS-DEPLOY.md`. Live shop: SSH `ovhe` (`139.99.61.71`). SSH `ovh`
+(`51.79.255.226`) is empty/unused. Split `ecom_sites/.env` / `sillage-core/.env` are
 local-dev / migration leftovers only.

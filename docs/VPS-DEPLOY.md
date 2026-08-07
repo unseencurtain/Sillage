@@ -241,10 +241,10 @@ Canonical product facts: [`CONTEXT.md`](CONTEXT.md).
 
 ---
 
-## Production (`ovh`) cutover — commands only
+## Alternate host deploy — commands only
 
-Do **not** run these until staging (`ovhe`) is green and the operator explicitly
-asks to cut over. Exact laptop commands (adjust domains/IP):
+Live retail shop runs on **`ovhe`** today. SSH **`ovh`** (`51.79.255.226`) is empty/unused.
+To deploy to a different VPS (adjust host alias, domains, IP):
 
 ```bash
 # 1) Ensure laptop production-environment/.env has all vendor + Hub keys

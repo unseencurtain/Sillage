@@ -1,6 +1,6 @@
 # Operator dashboard — BeautyFort + BTS
 
-Live UI: `https://sillage.slilverbelt.xyz` (staging `ovhe`). This retail shop syncs **BeautyFort**
+Live UI: `https://sillage.slilverbelt.xyz` (VPS `ovhe`). This retail shop syncs **BeautyFort**
 and **BTS** only. wholesale-perfumes is parked for
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — inactive, excluded from
 `--vendor=all`, not editable here.
