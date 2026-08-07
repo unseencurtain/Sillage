@@ -41,7 +41,7 @@ services:
     volumes:
       - ./data/wp:/var/www/html
       - ./config/php.ini:/usr/local/etc/php/conf.d/conf.ini:ro
-      # Product images scraped/watermarked by tools/brasty-images (never under data/wp/).
+      # Product images scraped/watermarked by tools/images/brasty (never under data/wp/).
       - ./data/media:/var/www/lps-media:ro
       - ./config/apache-lps-media.conf:/etc/apache2/conf-enabled/lps-media.conf:ro
     environment:

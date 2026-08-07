@@ -261,7 +261,7 @@ can illustrate any vendor's product.
 | Image source | Where | Notes |
 |---|---|---|
 | oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
-| Brasty | `tools/brasty-images/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
+| Brasty | `tools/images/brasty/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
 | Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export |
 | Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
 | wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |

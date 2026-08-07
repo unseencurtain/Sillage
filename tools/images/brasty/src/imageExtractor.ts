@@ -131,7 +131,7 @@ export const pendingInvestigationStrategy: ExtractionStrategy = {
         [
           "Image extraction strategy is still pending investigation.",
           "Run: npm run investigate",
-          "Review tools/brasty-images/findings/investigate-report.md (+ .json),",
+          "Review tools/images/brasty/findings/investigate-report.md (+ .json),",
           "then implement a concrete ExtractionStrategy in imageExtractor.ts",
           "and register it via setExtractionStrategy().",
           `EAN=${ctx.ean} domCandidates=${dom.length} networkCandidates=${net.length}`,

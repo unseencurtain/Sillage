@@ -20,7 +20,7 @@ run the investigation harness first.
 ## Install (including a fresh headless VPS)
 
 ```bash
-cd tools/brasty-images
+cd tools/images/brasty
 cp .env.example .env
 # edit .env — set BRASTY_EMAIL, BRASTY_PASSWORD, CSV path, PUBLIC_URL_BASE, etc.
 
@@ -163,7 +163,7 @@ WooCommerce product images update. Overrides alone do not push pixels to the sho
 ## VPS end-to-end (headless)
 
 ```bash
-cd tools/brasty-images
+cd tools/images/brasty
 # one-time on a fresh box:
 npm install && npx playwright install --with-deps chromium
 cp .env.example .env   # set BRASTY_EMAIL, BRASTY_PASSWORD, paths, PUBLIC_URL_BASE
@@ -190,7 +190,7 @@ npm run build-overrides  # merge EAN→URL into image_overrides.json
 ## Layout
 
 ```
-tools/brasty-images/
+tools/images/brasty/
   package.json
   tsconfig.json
   .env.example
