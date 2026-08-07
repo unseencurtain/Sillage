@@ -44,6 +44,7 @@ final class Sillage_Catalog {
 		add_filter( 'woocommerce_product_categories_widget_dropdown_args', array( $this, 'filter_category_widget_args' ), 20 );
 		add_filter( 'wp_get_nav_menu_items', array( $this, 'hide_legacy_vendor_cats_from_nav' ), 20, 3 );
 		add_shortcode( 'sillage_shop_categories', array( $this, 'shortcode_shop_categories' ) );
+		add_shortcode( 'sillage_shop_brands', array( $this, 'shortcode_shop_brands' ) );
 	}
 
 	/**
@@ -59,10 +60,11 @@ final class Sillage_Catalog {
 			. '.woocommerce-page ul.products li.product img{'
 			. 'max-width:100%;height:auto;object-fit:contain;'
 			. '}'
-			. '.sillage-shop-cats{list-style:none;margin:0;padding:0;}'
-			. '.sillage-shop-cats li{margin:0 0 .4rem;}'
-			. '.sillage-shop-cats a{text-decoration:none;}'
-			. '.sillage-shop-cats .count{opacity:.7;margin-left:.25rem;}';
+			. '.sillage-shop-cats,.sillage-shop-brands{list-style:none;margin:0;padding:0;}'
+			. '.sillage-shop-cats li,.sillage-shop-brands li{margin:0 0 .4rem;}'
+			. '.sillage-shop-cats a,.sillage-shop-brands a{text-decoration:none;}'
+			. '.sillage-shop-cats .count,.sillage-shop-brands .count{opacity:.7;margin-left:.25rem;}'
+			. '.sillage-shop-brands{max-height:22rem;overflow:auto;}';
 		wp_register_style( 'sillage-bridge-images', false, array(), SILLAGE_BRIDGE_VERSION );
 		wp_enqueue_style( 'sillage-bridge-images' );
 		wp_add_inline_style( 'sillage-bridge-images', $css );
@@ -112,6 +114,53 @@ final class Sillage_Catalog {
 			$term_id = (int) ( $row['term_id'] ?? 0 );
 			$count   = (int) ( $row['count'] ?? 0 );
 			$url     = $term_id > 0 ? get_term_link( $term_id, 'product_cat' ) : '';
+			$url     = is_wp_error( $url ) ? '' : (string) $url;
+			$html   .= '<li><a href="' . esc_url( $url ) . '">' . esc_html( $name )
+				. '<span class="count">(' . esc_html( (string) $count ) . ')</span></a></li>';
+		}
+		$html .= '</ul>';
+		return $html;
+	}
+
+	/**
+	 * Brand browse list for the retail shop sidebar (names + counts).
+	 *
+	 * Replaces Blocksy's logo-mode Ajax brand filter, which rendered empty checkboxes
+	 * when `showLabel` was false and no brand logos existed. Reads `wp_term_taxonomy.count`
+	 * directly so WooCommerce's `wc_change_term_counts` cannot blank the list.
+	 *
+	 * @param array|string $atts Shortcode attributes (unused).
+	 */
+	public function shortcode_shop_brands( $atts = array() ): string {
+		unset( $atts );
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$rows = $wpdb->get_results(
+			"SELECT t.term_id, t.name, t.slug, tt.count
+			FROM {$wpdb->terms} t
+			INNER JOIN {$wpdb->term_taxonomy} tt
+				ON tt.term_id = t.term_id AND tt.taxonomy = 'product_brand'
+			WHERE tt.count > 0
+			  AND t.name <> ''
+			ORDER BY t.name ASC",
+			ARRAY_A
+		);
+
+		if ( ! is_array( $rows ) || array() === $rows ) {
+			return '';
+		}
+
+		$html = '<ul class="sillage-shop-brands">';
+		foreach ( $rows as $row ) {
+			$name = (string) ( $row['name'] ?? '' );
+			$slug = (string) ( $row['slug'] ?? '' );
+			if ( '' === $name || '' === $slug ) {
+				continue;
+			}
+			$term_id = (int) ( $row['term_id'] ?? 0 );
+			$count   = (int) ( $row['count'] ?? 0 );
+			$url     = $term_id > 0 ? get_term_link( $term_id, 'product_brand' ) : '';
 			$url     = is_wp_error( $url ) ? '' : (string) $url;
 			$html   .= '<li><a href="' . esc_url( $url ) . '">' . esc_html( $name )
 				. '<span class="count">(' . esc_html( (string) $count ) . ')</span></a></li>';

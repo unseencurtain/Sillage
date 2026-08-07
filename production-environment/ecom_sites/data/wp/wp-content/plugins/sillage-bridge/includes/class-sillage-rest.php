@@ -138,6 +138,12 @@ final class Sillage_Rest {
 			$done[] = 'shop_category_browse';
 		}
 
+		// Blocksy's brand widget ships as logo-mode (showLabel=false, product_brands plural) and
+		// renders empty checkboxes without logos. Swap for [sillage_shop_brands] (names+counts).
+		if ( $this->ensure_shop_brand_browse_widgets() ) {
+			$done[] = 'shop_brand_browse';
+		}
+
 		/**
 		 * Fires after Sillage has invalidated WooCommerce's caches following a bulk import.
 		 *
@@ -276,7 +282,8 @@ final class Sillage_Rest {
 	/**
 	 * Replace Blocksy product_cat Ajax filters with [sillage_shop_categories].
 	 *
-	 * Leaves attribute filters (volume, etc.) and brand logo filters untouched.
+	 * Leaves attribute filters (volume, etc.) and brand widgets untouched (brands are handled
+	 * by {@see ensure_shop_brand_browse_widgets()}).
 	 */
 	private function ensure_shop_category_browse_widgets(): bool {
 		$widgets = get_option( 'widget_block', null );
@@ -309,15 +316,73 @@ final class Sillage_Rest {
 			if ( false === strpos( $content, 'wp:blocksy/woocommerce-filters' ) ) {
 				continue;
 			}
-			// Skip attribute / brand-logo filter widgets.
+			// Skip attribute / brand filter widgets.
 			if (
 				false !== strpos( $content, '"type":"attributes"' )
 				|| false !== strpos( $content, '"attribute"' )
 				|| false !== strpos( $content, '"taxonomy":"product_brand' )
+				|| false !== strpos( $content, 'Filter By Brand' )
 			) {
 				continue;
 			}
 			// Default Blocksy filter without type/taxonomy is product_cat.
+			$widgets[ $key ]['content'] = $replacement;
+			$changed                    = true;
+		}
+
+		if ( ! $changed ) {
+			return false;
+		}
+
+		update_option( 'widget_block', $widgets, false );
+		return true;
+	}
+
+	/**
+	 * Replace Blocksy logo-mode brand filters with [sillage_shop_brands].
+	 *
+	 * Starter Blocksy config uses taxonomy `product_brands` (plural, unregistered),
+	 * `showLabel:false`, and logo frames — so the storefront shows empty checkboxes.
+	 */
+	private function ensure_shop_brand_browse_widgets(): bool {
+		$widgets = get_option( 'widget_block', null );
+		if ( ! is_array( $widgets ) ) {
+			return false;
+		}
+
+		$replacement = '<!-- sillage-shop-brands -->'
+			. '<!-- wp:heading {"level":6,"className":"widget-title","style":{"spacing":{"margin":{"top":"0","bottom":"15px"}}}} -->'
+			. "\n"
+			. '<h6 class="wp-block-heading widget-title" id="brands" style="margin-top:0;margin-bottom:15px">Filter By Brand</h6>'
+			. "\n"
+			. '<!-- /wp:heading -->'
+			. "\n\n"
+			. '<!-- wp:shortcode -->'
+			. "\n"
+			. '[sillage_shop_brands]'
+			. "\n"
+			. '<!-- /wp:shortcode -->';
+
+		$changed = false;
+		foreach ( $widgets as $key => $widget ) {
+			if ( ! is_array( $widget ) || ! isset( $widget['content'] ) || ! is_string( $widget['content'] ) ) {
+				continue;
+			}
+			$content = $widget['content'];
+			if ( false !== strpos( $content, 'sillage-shop-brands' ) || false !== strpos( $content, '[sillage_shop_brands]' ) ) {
+				continue;
+			}
+			$is_brand_filter = (
+				false !== strpos( $content, '"taxonomy":"product_brand' )
+				|| false !== strpos( $content, 'Filter By Brand' )
+				|| (
+					false !== strpos( $content, 'wp:blocksy/woocommerce-filters' )
+					&& false !== strpos( $content, 'logoMaxW' )
+				)
+			);
+			if ( ! $is_brand_filter ) {
+				continue;
+			}
 			$widgets[ $key ]['content'] = $replacement;
 			$changed                    = true;
 		}
