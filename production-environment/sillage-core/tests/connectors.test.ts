@@ -196,23 +196,16 @@ describe("pricing", () => {
     expect(r.onSale).toBe(false);
   });
 
-  test("uses a credible RRP as the regular price and our price as the sale price", () => {
+  test("ignores vendor RRP entirely — price is always cost × multiplier", () => {
     const r = computePricing({ vendorPrice: 30, vendorRecommendedPrice: 110, stock: 5 }, DEFAULT_RULES);
-    expect(r.regularPrice).toBe(110);
-    expect(r.salePrice).toBe(30);
-    expect(r.effectivePrice).toBe(30);
-    expect(r.onSale).toBe(true);
-  });
-
-  test("rejects the absurd BTS RRP outliers", () => {
-    // The real feed's worst case: RRP 42,795 against a price of 30.
-    const r = computePricing({ vendorPrice: 30, vendorRecommendedPrice: 42795, stock: 5 }, DEFAULT_RULES);
     expect(r.regularPrice).toBe(30);
     expect(r.salePrice).toBeNull();
+    expect(r.effectivePrice).toBe(30);
+    expect(r.onSale).toBe(false);
   });
 
-  test("ignores an RRP below our price", () => {
-    const r = computePricing({ vendorPrice: 30, vendorRecommendedPrice: 20, stock: 5 }, DEFAULT_RULES);
+  test("absurd BTS RRP outliers never appear on the storefront", () => {
+    const r = computePricing({ vendorPrice: 30, vendorRecommendedPrice: 42795, stock: 5 }, DEFAULT_RULES);
     expect(r.regularPrice).toBe(30);
     expect(r.salePrice).toBeNull();
   });
