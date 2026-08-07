@@ -9,16 +9,21 @@
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import { loadConfig, assertStorageStateExists, type AppConfig } from "./config.js";
+import {
+  loadConfig,
+  redactSecrets,
+  type AppConfig,
+} from "./config.js";
 import { readProductsCsv } from "./csv.js";
 import { allocateOutputPath, downloadImage, DownloadError } from "./downloader.js";
 import { hoverProductImage } from "./hover.js";
 import { getExtractionStrategy } from "./imageExtractor.js";
+import { LoginError } from "./login.js";
 import { Logger } from "./logger.js";
 import { Manifest } from "./manifest.js";
 import { attachNetworkCapture } from "./networkCapture.js";
 import { searchByEan } from "./search.js";
-import { openAuthenticatedContext, SessionExpiredError } from "./session.js";
+import { ensureSession, SessionExpiredError } from "./session.js";
 import type { CsvProduct, LogCategory, ManifestStatus } from "./types.js";
 
 function politenessWait(ms: number): Promise<void> {
@@ -205,14 +210,21 @@ async function workerLoop(
       if (!product) break;
       try {
         if (!page || !context) {
-          context = await openAuthenticatedContext(browser, cfg);
+          context = await ensureSession(browser, cfg, log);
           page = await context.newPage();
           await page.goto(cfg.brastyBaseUrl, { waitUntil: "domcontentloaded" });
         }
         await processProduct(page, product, cfg, log, manifest, claimed);
       } catch (err) {
-        if (err instanceof SessionExpiredError) {
+        if (err instanceof LoginError) {
           throw err;
+        }
+        if (err instanceof SessionExpiredError) {
+          // Mid-run expiry: drop context and let ensureSession re-login next iteration.
+          log.warn(`${err.message} Refreshing session for worker ${id}…`);
+          await closeSession();
+          queue.unshift(product);
+          continue;
         }
         const msg = err instanceof Error ? err.message : String(err);
         log.category("unexpected_page_structure", `${product.ean}: ${msg}`, {
@@ -237,7 +249,6 @@ async function workerLoop(
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const log = new Logger(cfg.logPath);
-  assertStorageStateExists(cfg.storageStatePath);
   mkdirSync(cfg.outputDir, { recursive: true });
 
   const products = await readProductsCsv(cfg.brastyCsvPath);
@@ -265,10 +276,13 @@ async function main(): Promise<void> {
     `Queue ${queue.length} (skipping ${products.length - queue.length} already done)`,
   );
 
-  const browser = await chromium.launch({ headless: cfg.headless });
+  const browser = await chromium.launch({
+    headless: cfg.headless,
+    args: ["--disable-dev-shm-usage"],
+  });
   try {
-    // Validate session once before the pool starts.
-    const probe = await openAuthenticatedContext(browser, cfg);
+    // Validate / refresh session once before the pool starts.
+    const probe = await ensureSession(browser, cfg, log);
     await probe.close();
 
     const workers: Promise<void>[] = [];
@@ -277,9 +291,9 @@ async function main(): Promise<void> {
     }
     await Promise.all(workers);
   } catch (err) {
-    if (err instanceof SessionExpiredError) {
-      log.error(err.message);
-      process.exitCode = 2;
+    if (err instanceof LoginError) {
+      log.error(`[${err.kind}] ${redactSecrets(err.message, cfg.brastyPassword)}`);
+      process.exitCode = 1;
       return;
     }
     throw err;
@@ -291,6 +305,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.stack ?? err.message : err);
+  const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+  console.error(msg);
   process.exitCode = 1;
 });

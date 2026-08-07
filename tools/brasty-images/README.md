@@ -1,7 +1,14 @@
 # brasty-images
 
-Standalone **Node.js + TypeScript + Playwright** tool that downloads Brasty wholesale
-product images by EAN and feeds them into Sillage’s `image_overrides.json` map.
+Standalone **Node.js + TypeScript + Playwright** tool that downloads product
+photographs from Brasty wholesale by EAN and feeds them into Sillage’s
+`image_overrides.json` map.
+
+Brasty is an **image source only** — not a Sillage vendor. There is no catalogue
+sync, order API, or shipping integration. Photos are matched to shop products by
+**EAN alone**, so a Brasty photo can illustrate a BeautyFort or
+wholesale-perfumes.eu (Ocean) product and vice versa. The override map is
+vendor-agnostic.
 
 This package is intentionally **not** a dependency of `sillage-core`. Playwright /
 Chromium must not ship inside the Bun sync container.
@@ -10,31 +17,39 @@ Brasty has **no product detail pages**. Products exist only in a searchable list
 the large preview is triggered from the row. Do **not** guess how that preview works —
 run the investigation harness first.
 
-## Install
+## Install (including a fresh headless VPS)
 
 ```bash
 cd tools/brasty-images
 cp .env.example .env
-# edit .env — CSV path, PUBLIC_URL_BASE, optional LOGO_PATH, etc.
+# edit .env — set BRASTY_EMAIL, BRASTY_PASSWORD, CSV path, PUBLIC_URL_BASE, etc.
 
 npm install
-npx playwright install chromium
+# Fresh VPS / no display: install Chromium + OS deps (one-time):
+npx playwright install --with-deps chromium
 ```
 
 Never commit `.env`, `storageState.json`, downloaded images, or findings dumps.
 
-## 1. Login (once per session lifetime)
+The whole pipeline (login → investigate → download → watermark → build-overrides)
+runs **headless** with no X server. Default `CONCURRENCY=1` and Chromium’s
+`--disable-dev-shm-usage` keep memory use safe on a small VPS (~4 GB shared with
+WordPress, MariaDB, Valkey, and Bun). Do not raise concurrency on that box.
+
+## 1. Login (headless, credential-driven)
 
 ```bash
 npm run login
 ```
 
-Opens **headed** Chromium at `https://wholesale.brasty.com/`. Log in manually, then
-press Enter in the terminal. Playwright saves `storageState.json` (gitignored).
+Uses `BRASTY_EMAIL` / `BRASTY_PASSWORD` from `.env`, opens **headless** Chromium at
+`https://wholesale.brasty.com/`, dismisses the cookie-consent banner (prefers
+Reject all), discovers the login form via the header “Log in” link, submits, then
+asserts an authenticated session before saving `storageState.json` (gitignored).
 
-Every later command reuses that file and **must not** force a re-login. If the session
-expires, commands fail with a clear `run npm run login again` message instead of
-scraping a logged-out page.
+Later commands call `ensureSession()`: they load that file, cheaply check it is
+still authenticated, and **transparently re-run headless login** if it has expired.
+A stale session alone never fails a run (wrong credentials / missing env still do).
 
 ## 2. Investigate (GATE — do this before download)
 
@@ -95,7 +110,7 @@ Behaviour:
 - Missing products are logged and skipped (never fatal)  
 - Resume via append-only `logs/manifest.jsonl`  
 - Concurrency = pool of browser contexts (`CONCURRENCY`, default **1**) +
-  `POLITENESS_DELAY_MS` (default 1500) — keep low; CSV may reach 100k+ rows  
+  `POLITENESS_DELAY_MS` (default 1500) — keep at 1 on the VPS; CSV may reach 100k+ rows  
 - Retries with exponential backoff on download failures  
 
 Structured log categories: `downloaded`, `already_exists`, `missing_image`,
@@ -145,11 +160,27 @@ Recommended arrangement (describe-only — do **not** edit `compose.yaml` from t
 (`src/sync/images.ts`). After merging new URLs, run a **fast/rewrite sync** so
 WooCommerce product images update. Overrides alone do not push pixels to the shop.
 
+## VPS end-to-end (headless)
+
+```bash
+cd tools/brasty-images
+# one-time on a fresh box:
+npm install && npx playwright install --with-deps chromium
+cp .env.example .env   # set BRASTY_EMAIL, BRASTY_PASSWORD, paths, PUBLIC_URL_BASE
+
+npm run login            # headless; writes storageState.json
+npm run investigate      # gate — register ExtractionStrategy from findings
+npm run download         # CONCURRENCY=1 by default; resume-safe
+npm run watermark        # optional LPS logo
+npm run build-overrides  # merge EAN→URL into image_overrides.json
+# then fast/rewrite sync in sillage-core so the shop picks up URLs
+```
+
 ## Scripts
 
 | Command | Purpose |
 |---|---|
-| `npm run login` | Manual headed login → `storageState.json` |
+| `npm run login` | Headless credential login → `storageState.json` |
 | `npm run investigate` | Evidence gate for image preview mechanism |
 | `npm run download` | Production CSV → `output/EAN.jpg` |
 | `npm run watermark` | LPS logo composite → `watermarked/` |
@@ -175,6 +206,7 @@ tools/brasty-images/
     downloader.ts
     logger.ts
     config.ts
+    session.ts           ← ensureSession() + auth checks
     watermark.ts
     build-overrides.ts
     …

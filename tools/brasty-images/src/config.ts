@@ -83,6 +83,10 @@ export interface AppConfig {
   headless: boolean;
   investigateEans: string[];
   brastyBaseUrl: string;
+  /** Wholesale account email — from BRASTY_EMAIL only. Never logged. */
+  brastyEmail: string;
+  /** Wholesale account password — from BRASTY_PASSWORD only. Never logged. */
+  brastyPassword: string;
 }
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -122,6 +126,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       .map((s) => s.trim())
       .filter(Boolean),
     brastyBaseUrl: envString("BRASTY_BASE_URL", "https://wholesale.brasty.com/"),
+    brastyEmail: envString("BRASTY_EMAIL", ""),
+    brastyPassword: envString("BRASTY_PASSWORD", ""),
     ...overrides,
   };
 
@@ -134,6 +140,19 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return cfg;
 }
 
+/** Require credentials for headless login. Never includes the password in the message. */
+export function assertBrastyCredentials(cfg: AppConfig): void {
+  const missing: string[] = [];
+  if (!cfg.brastyEmail) missing.push("BRASTY_EMAIL");
+  if (!cfg.brastyPassword) missing.push("BRASTY_PASSWORD");
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing ${missing.join(" and ")} in environment / .env. ` +
+        `Set them as plain env vars (never commit real values).`,
+    );
+  }
+}
+
 /** Fail fast when a saved session is required but missing. */
 export function assertStorageStateExists(path: string): void {
   if (!existsSync(path)) {
@@ -141,6 +160,18 @@ export function assertStorageStateExists(path: string): void {
       `Missing Playwright session at ${path}. Run: npm run login`,
     );
   }
+}
+
+/**
+ * Strip password-like substrings from error text before logging / rethrowing.
+ * Never logs BRASTY_PASSWORD.
+ */
+export function redactSecrets(text: string, password?: string): string {
+  let out = text;
+  if (password && password.length > 0) {
+    out = out.split(password).join("[REDACTED]");
+  }
+  return out;
 }
 
 export { PKG_ROOT };

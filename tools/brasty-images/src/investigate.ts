@@ -19,12 +19,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Locator, type Page } from "playwright";
-import { assertStorageStateExists, loadConfig } from "./config.js";
+import { loadConfig, redactSecrets } from "./config.js";
 import { hoverProductImage, PENDING_HOVER_SELECTORS } from "./hover.js";
+import { LoginError } from "./login.js";
 import { Logger } from "./logger.js";
 import { attachNetworkCapture } from "./networkCapture.js";
 import { PENDING_SEARCH_SELECTORS, searchByEan } from "./search.js";
-import { openAuthenticatedContext, SessionExpiredError } from "./session.js";
+import { ensureSession } from "./session.js";
 import type { InvestigateFindings, InvestigateQuestion } from "./types.js";
 
 interface DomSnapshot {
@@ -462,7 +463,6 @@ function toMarkdown(findings: InvestigateFindings): string {
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const log = new Logger(cfg.logPath);
-  assertStorageStateExists(cfg.storageStatePath);
 
   const eans = [...cfg.investigateEans];
   // Also accept CLI args: npm run investigate -- 4011… 4012…
@@ -479,12 +479,15 @@ async function main(): Promise<void> {
 
   mkdirSync(cfg.findingsDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: cfg.headless });
+  const browser = await chromium.launch({
+    headless: cfg.headless,
+    args: ["--disable-dev-shm-usage"],
+  });
   let sessionValid = false;
   const results: Awaited<ReturnType<typeof investigateOneEan>>[] = [];
 
   try {
-    const context = await openAuthenticatedContext(browser, cfg);
+    const context = await ensureSession(browser, cfg, log);
     sessionValid = true;
     const page = await context.newPage();
     await page.goto(cfg.brastyBaseUrl, { waitUntil: "domcontentloaded" });
@@ -498,9 +501,9 @@ async function main(): Promise<void> {
 
     await context.close();
   } catch (err) {
-    if (err instanceof SessionExpiredError) {
-      log.error(err.message);
-      process.exitCode = 2;
+    if (err instanceof LoginError) {
+      log.error(`[${err.kind}] ${redactSecrets(err.message, cfg.brastyPassword)}`);
+      process.exitCode = 1;
       return;
     }
     throw err;
