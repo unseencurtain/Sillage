@@ -82,7 +82,7 @@ Images are watermarked on the site; optional LPS logo overlay via the tool below
 Acquisition is a **Playwright** scrape (search by EAN on the product list — no PDP
 pages). Spec: `beastly-image.md` (operator notes, not in repo).
 
-### Brasty image tool (`tools/brasty-images/`)
+### Brasty image tool (`tools/images/brasty/`)
 
 Standalone Node/Playwright package (not a sillage-core dependency). Runs headless
 on a VPS (no X server). Operator flow:
@@ -125,5 +125,5 @@ gitignored.
 2. Done: wholesale-perfumes catalogue connector + cart order adapter (inactive until operator enable).
 3. Countries seeded from shipping-payment page (in migration 013). Confirm MOQ / VAT /
    cart `code` before enabling.
-4. Brasty Playwright in `tools/brasty-images/` **or** bulk image download inside
+4. Brasty Playwright in `tools/images/brasty/` **or** bulk image download inside
    `python-analysis/` — whichever is faster for filling missing photos.

@@ -7,6 +7,9 @@ sessions that produced Stage 3. Everything needed is here or in the two document
 instincts about WordPress and WooCommerce — several things in this install are not the default.
 Then read only the task below that you were asked to do.
 
+For **product images**, read [S3-images.md](S3-images.md) first — it is the ordered playbook
+(WPF XML → oceanfragrances CSV → Brasty → cross-vendor fill).
+
 ---
 
 ## 0. Naming and environments — do not assume
@@ -48,7 +51,7 @@ advance — use `git log origin/cursor/client-features-stage3 --oneline`):
 | Commit | What landed |
 |---|---|
 | `45a59bb` | Cost-band markup tiers, LPS01/LPS02 storefront labels, hide-products-without-image |
-| `90dc296` | `tools/brasty-images/` scraper scaffold behind an investigation gate |
+| `90dc296` | `tools/images/brasty/` scraper scaffold behind an investigation gate |
 | `3372207` | Small-order cart fee in the PHP bridge |
 | `bcfc783` | wholesale-perfumes.eu as a third supplier, seeded inactive |
 | `725667f` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
@@ -102,11 +105,13 @@ bun test                   # 65 passing at the time of writing; never fewer
 ```
 
 For PHP: `php -l` on each modified file. For the scraper: `npm run typecheck` in
-`tools/brasty-images`.
+`tools/images/brasty`.
 
 ---
 
 ## 3. Task 1 — finish the Brasty image scraper
+
+See also [S3-images.md](S3-images.md) §3 for the Brasty rules and tool layout.
 
 **Why it matters.** The client's loudest complaint is products showing a placeholder instead of a
 photo, and he will not sell them. Brasty is *only* a photo source — not a supplier. There is no
@@ -115,7 +120,7 @@ by EAN alone, so an image scraped from Brasty can illustrate a BeautyFort or who
 product; the override map is vendor-agnostic by design.
 
 **Prerequisite the agent cannot satisfy.** `BRASTY_EMAIL` and `BRASTY_PASSWORD` must exist in the
-gitignored `tools/brasty-images/.env`. Email is often the same as the wholesale-perfumes shop login; the password
+gitignored `tools/images/brasty/.env`. Email is often the same as the wholesale-perfumes shop login; the password
 is the Brasty wholesale portal password (not the wholesale-perfumes API token). If either is absent, stop and
 say so rather than proceeding.
 
@@ -126,7 +131,7 @@ preview is triggered from the row. **How that preview loads is genuinely unknown
 deliberately built to refuse guessing: `imageExtractor.ts` ships a `pending-investigation` strategy
 that throws even when it can see plausible candidate URLs.
 
-Read `tools/brasty-images/README.md` for the exact script names, then run the login followed by the
+Read `tools/images/brasty/README.md` for the exact script names, then run the login followed by the
 investigation. One verified obstacle: a cookie-consent overlay intercepts clicks — clicking the
 header "Log in" link while the banner is up does nothing at all. The login flow is supposed to
 dismiss it; if the investigation reports zero candidates, suspect the banner before suspecting the
@@ -135,7 +140,7 @@ selectors.
 The investigation answers seven questions with evidence: whether the large image is already in the
 DOM, in a `data-*` attribute, injected on hover, a CSS background, fetched over the network after
 hover, served by a JSON endpoint, or derivable from the thumbnail URL by a predictable rewrite. It
-writes a markdown report and a JSON file under `tools/brasty-images/findings/`.
+writes a markdown report and a JSON file under `tools/images/brasty/findings/`.
 
 ### 1b. Implement the real extraction strategy
 
@@ -153,13 +158,13 @@ scaling up. Do not launch a full run on first success.
 Files land as `EAN.jpg`. Three steps turn them into storefront images:
 
 1. The watermark pass composites the client's logo, which is already committed at
-   `tools/brasty-images/assets/lps-logo.png`. Originals are never overwritten.
+   `tools/images/brasty/assets/lps-logo.png`. Originals are never overwritten.
 2. The images need a public URL, because this store never creates WordPress attachments — every
    product image is an external URL rendered by a plugin filter. Host directory
    `production-environment/ecom_sites/data/media/` is bind-mounted read-only into `ecom` at
    `/var/www/lps-media` and served at `/lps-media/` via Apache (`config/apache-lps-media.conf`).
    On VPS, Caddy also `handle_path /lps-media/*` from that same host directory. Set
-   `PUBLIC_URL_BASE` in `tools/brasty-images/.env` to `https://<shop>/lps-media` (or
+   `PUBLIC_URL_BASE` in `tools/images/brasty/.env` to `https://<shop>/lps-media` (or
    `http://localhost/lps-media` locally).
 3. The merge script writes an EAN → URL map into `production-environment/sillage-core/data/image_overrides.json`,
    merging rather than overwriting, because the Python enricher already owns thousands of keys there

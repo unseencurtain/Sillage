@@ -5,7 +5,7 @@
  * Never clobber existing entries (BeautyFort / wholesale-perfumes enricher owns many keys).
  * Backs up the target file before writing.
  *
- * This is the only allowed write outside tools/brasty-images/, and only at
+ * This is the only allowed write outside tools/images/brasty/, and only at
  * runtime — do not hand-edit image_overrides.json from this package's scaffold.
  */
 import {
