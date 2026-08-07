@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { env } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, query, waitForDatabase } from "../db/pool.ts";
 import { logger, setLogLevel } from "../lib/log.ts";
 import { api } from "./routes/api.ts";
@@ -17,6 +18,11 @@ import { webhooks } from "./routes/webhooks.ts";
 
 setLogLevel(env.logLevel);
 const log = logger("server");
+
+const secretsBoot = loadSecretsOverlay();
+if (secretsBoot.applied > 0) {
+  log.info(`applied ${secretsBoot.applied} secret(s) from ${secretsBoot.path}`);
+}
 
 export const app = new Hono();
 

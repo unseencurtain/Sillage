@@ -155,7 +155,7 @@ fi
   "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
   "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
-"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media"
+"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
 log_step "Minimal rsync done"
 
 if [[ -n "$CLONE_FROM" ]]; then
@@ -213,6 +213,7 @@ DATA_DIR=/home/ubuntu/ecom_sites/data
 FEEDSCRATCH_DIR=/home/ubuntu/Sillage/.feedscratch
 SILLAGE_LOGS_DIR=/home/ubuntu/${REMOTE_DIR}/sillage-core/logs
 IMAGE_OVERRIDES_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/image_overrides.json
+SILLAGE_SECRETS_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env
 MARIADB_CNF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/mariadb.vps.cnf
 LPS_MEDIA_NGINX_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/nginx-lps-media.conf
 PHP_INI=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/php.ini
@@ -391,9 +392,12 @@ fi
 
 mkdir -p "$DATA_DIR/media" "$DATA_DIR/wp" "$DATA_DIR/wp-db" \
   "$HOME/sillage/sillage-core/logs" "$HOME/Sillage/.feedscratch"
-# Ensure image overrides file exists for the bind mount.
+# Ensure image overrides + secrets overlay files exist for bind mounts (file, not directory).
 [[ -f "$HOME/sillage/sillage-core/data/image_overrides.json" ]] \
   || echo '{}' > "$HOME/sillage/sillage-core/data/image_overrides.json"
+[[ -f "$HOME/sillage/sillage-core/data/secrets.overlay.env" ]] \
+  || : > "$HOME/sillage/sillage-core/data/secrets.overlay.env"
+chmod 600 "$HOME/sillage/sillage-core/data/secrets.overlay.env" 2>/dev/null || true
 
 docker compose --env-file .env pull
 docker compose --env-file .env up -d ecom-db valkey

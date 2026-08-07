@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Square } from "lucide-react";
+import { Loader2, Play, RefreshCw, Square } from "lucide-react";
 import { api, type SyncRun } from "@/lib/api";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -23,6 +23,8 @@ export function Sync() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [page, setPage] = useState(1);
+  const watchingRunId = useRef<number | null>(null);
+
   // Always keep page 1 warm so the running banner stays accurate while browsing history.
   const latest = useQuery({
     queryKey: ["sync-runs", 1],
@@ -51,11 +53,20 @@ export function Sync() {
   const syncRunning = isRunActive(newest);
 
   const run = useMutation({
-    mutationFn: (mode: "fast" | "full") => api.runSync(mode),
-    onSuccess: () => {
+    mutationFn: (opts: { mode: "fast" | "full"; demo?: boolean }) =>
+      api.runSync(opts.mode, opts.demo ? { vendors: ["beautyfort", "bts"] } : undefined),
+    onSuccess: (_res, vars) => {
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
-      toast("Sync queued (live downloads still rate-limited)", "info");
+      qc.invalidateQueries({ queryKey: ["overview"] });
+      toast(
+        vars.demo
+          ? "Sync started — BeautyFort + BTS. Watch progress below."
+          : "Sync queued (live downloads still rate-limited)",
+        "ok",
+      );
+      // Capture the next newest run id once it appears so we can toast completion.
+      watchingRunId.current = -1;
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
@@ -63,12 +74,35 @@ export function Sync() {
   const stop = useMutation({
     mutationFn: () => api.stopSync(),
     onSuccess: (res) => {
+      watchingRunId.current = null;
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
       toast(res.detail ?? "Sync stopped — enable Sync or press Run to start fresh", "info");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
+
+  // Toast when a watched run finishes (success / failure).
+  useEffect(() => {
+    if (watchingRunId.current === -1 && newest && isRunActive(newest)) {
+      watchingRunId.current = newest.id;
+      return;
+    }
+    if (watchingRunId.current == null || watchingRunId.current < 0) return;
+    if (!newest || newest.id !== watchingRunId.current) return;
+    if (!isRunFinished(newest)) return;
+
+    const id = watchingRunId.current;
+    watchingRunId.current = null;
+    if (newest.status === "success" || newest.status === "partial") {
+      toast(
+        `Sync #${id} finished (${newest.status}) — fetched ${newest.products_fetched}, wrote +${newest.posts_created}/~${newest.posts_updated}`,
+        "ok",
+      );
+    } else {
+      toast(`Sync #${id} failed (${newest.status})`, "error");
+    }
+  }, [newest, toast]);
 
   const lastRunSummary = useMemo(() => {
     if (!newest) return null;
@@ -80,6 +114,8 @@ export function Sync() {
       finished: isRunFinished(newest),
     };
   }, [newest]);
+
+  const runBusy = run.isPending || syncRunning;
 
   return (
     <div className="space-y-6">
@@ -105,21 +141,46 @@ export function Sync() {
           <button
             type="button"
             className="rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:opacity-50"
-            disabled={run.isPending || syncRunning}
-            onClick={() => run.mutate("fast")}
+            disabled={runBusy}
+            onClick={() => run.mutate({ mode: "fast" })}
           >
             Run fast sync
           </button>
           <button
             type="button"
-            className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink disabled:opacity-50"
-            disabled={run.isPending || syncRunning}
-            onClick={() => run.mutate("full")}
+            className="rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:opacity-50"
+            disabled={runBusy}
+            onClick={() => run.mutate({ mode: "full" })}
           >
             Run full sync
           </button>
         </div>
       </header>
+
+      <section className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50 to-panel px-5 py-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="max-w-xl">
+            <h2 className="text-lg font-semibold tracking-tight text-ink">Run sync now</h2>
+            <p className="mt-1 text-sm text-muted">
+              Starts a live catalogue sync for BeautyFort + BTS (not orders). Progress appears in
+              the banner and runs table. Double-click is disabled while a run is active.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-3 text-base font-semibold text-accent-ink shadow-sm hover:opacity-95 disabled:opacity-50"
+            disabled={runBusy}
+            onClick={() => run.mutate({ mode: "fast", demo: true })}
+          >
+            {run.isPending || syncRunning ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Play size={18} />
+            )}
+            {syncRunning ? "Sync running…" : run.isPending ? "Starting…" : "Run sync now"}
+          </button>
+        </div>
+      </section>
 
       {live.data ? (
         <div className="grid gap-3 sm:grid-cols-2">

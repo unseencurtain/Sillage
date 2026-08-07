@@ -18,6 +18,7 @@ dashboard (or SQL). Auth is HTTP session cookies against `DASHBOARD_USER` / `DAS
 | Client API | `web/src/lib/api.ts` |
 | Server routes | `src/server/routes/api.ts` |
 | Settings load | `src/db/settings.ts` → `loadSettings()` / `loadVendors()` |
+| Secrets overlay | `src/config/secrets.ts` → `loadSecretsOverlay()` / `setSecret` / `clearSecret` |
 | Scheduler | `src/sync/schedule.ts` + container `crontab` (`*/5`) |
 | Orders | `src/orders/{dispatch,rails,tracking,ingest,addresses}.ts` |
 | Shop cart fee / MOQ | `sillage-bridge` → `class-sillage-cart-fee.php` |
@@ -48,11 +49,12 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 
 | Nav label | Route | Page |
 |---|---|---|
-| Overview | `/` | Health snapshot |
-| Sync | `/sync` | Manual runs + BF/BTS live gates |
+| Overview | `/` | Health snapshot + **Run sync now** |
+| Sync | `/sync` | **Run sync now** + manual runs + BF/BTS live gates |
 | Products | `/products` | Catalogue search (read-only) |
 | Vendors | `/vendors` | BeautyFort + BTS editors; WPF parked notice |
 | Orders | `/orders` | Per-vendor order dispatch |
+| Secrets | `/secrets` | Vendor API credentials (set / clear; never echoed) |
 | Settings | `/settings` | Schedule, pricing, cart fee, order rails, billing |
 | Logs | `/logs` | Event log |
 | Sign out | — | `POST /api/auth/logout` |
@@ -71,20 +73,21 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 
 ## Overview
 
-Read-only. Polls `GET /api/overview` every 15s.
+Polls `GET /api/overview` every 15s.
 
 | UI | Meaning |
 |---|---|
+| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` — demo CTA; disabled while a run is active |
 | Visible in shop | WP publish ∩ not `exclude-from-catalog` |
 | Published in WP | Includes catalog-hidden products |
 | Sillage products | `COUNT(sil_products)` |
 | Sync on/off · orders dry-run/LIVE | Snapshot of rails (edit on Settings) |
 | Catalogue visibility stats | Hidden no-image vs stock threshold |
-| Last sync | Latest `sil_sync_runs` |
+| Last sync | Latest `sil_sync_runs` (+ link to Sync) |
 | Vendor orders by status | Counts only |
 | Syncs · last 7 days | Activity chart |
 
-No buttons. No writes.
+Catalogue sync only — never places vendor orders. Order spend still requires Orders → Live.
 
 ---
 
@@ -92,7 +95,8 @@ No buttons. No writes.
 
 | Control | API | Effect |
 |---|---|---|
-| Run fast sync | `POST /api/sync/run` `{mode:"fast"}` | Clears abort; re-enables `sync_enabled` if off; price/stock-oriented sync |
+| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary demo button; toast on start + finish; polls runs every 2s while active |
+| Run fast sync | same, `mode:"fast"` (all active retail vendors) | Clears abort; re-enables `sync_enabled` if off; price/stock-oriented sync |
 | Run full sync | same, `mode:"full"` | Full catalogue path (taxonomy, vanish, park WPF, etc.) |
 | Stop all sync | `POST /api/sync/stop` | Cooperative abort; **`sync_enabled=0`** until Sync enabled or Run |
 | Live API cards (BF / BTS) | `GET /api/sync/live-status` | Read-only gate status for the two retail vendors |
@@ -162,12 +166,37 @@ rewrite-only sync when multiplier/VAT changes. Confirmation required when changi
 | Live downloads / day | `live_max_per_day` | Catalogue live-fetch daily cap |
 | Active | `active` | Inactive = skipped by sync / cannot dispatch |
 
-Not editable: `slug`, `sku_prefix`, `currency`, API credentials (env).
+Not editable here: `slug`, `sku_prefix`, `currency`. API credentials → **Secrets**.
 
 ### Parked: wholesale-perfumes
 
 Shown as a **read-only** dashed card: parked for the separate [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) site. No store-feed knobs, no
 Active toggle, no Save. Sync forces `active=0` every run. Do not activate on this shop.
+
+---
+
+## Secrets
+
+Vendor API credentials for BeautyFort + BTS. Stored in a **gitignored overlay file** bind-mounted
+into `sillage-core` / `sillage-cron` (not `sil_settings` — secrets must not land in MariaDB).
+
+| Path | Role |
+|---|---|
+| Host | `~/sillage/sillage-core/data/secrets.overlay.env` (VPS) or `production-environment/sillage-core/data/secrets.overlay.env` |
+| Container | `/app/data/secrets.overlay.env` (`SILLAGE_SECRETS_FILE`) |
+| Compose `.env` | Still injects base `BEAUTYFORT_*` / `BTS_*` at container start; **overlay wins** when set |
+
+| Control | API | Effect |
+|---|---|---|
+| Status rows (masked `••••••••` / empty) | `GET /api/secrets` | Which keys are set + source (`overlay` \| `env` \| `unset`). **Never returns values.** |
+| Set | `PUT /api/secrets` `{key,value}` | Writes overlay, updates `process.env` + in-memory `env` immediately |
+| Clear | `DELETE /api/secrets/:key` | Removes from overlay + runtime |
+
+Allow-listed keys only: `BEAUTYFORT_USER`, `BEAUTYFORT_SECRET`, `BTS_JWT_TOKEN`.
+
+**Hot-reload:** no container recreate needed for BF/BTS credentials. Overlay is applied on API
+boot and again at the start of every `runSync` (so cron picks up dashboard changes). Touch an
+empty overlay file before first `compose up` so Docker mounts a file, not a directory.
 
 ---
 
@@ -258,13 +287,14 @@ Read by PHP bridge from `sil_settings` (fail-open). Independent of per-vendor MO
 |---|---|
 | `DASHBOARD_USER` / `DASHBOARD_PASSWORD` / `SESSION_SECRET` | Dashboard auth |
 | `SILLAGE_SHARED_SECRET` | HMAC between Bun ↔ bridge |
-| `BEAUTYFORT_*` / `BTS_*` | Vendor API credentials (retail) |
+| `BEAUTYFORT_*` / `BTS_*` | Vendor API credentials — also editable via **Secrets** overlay |
 | `WHOLESALE_PERFUMES_*` | Parked B2B only — unused while WPF inactive |
 | `WP_BASE_URL` / `WORDPRESS_INTERNAL_URL` | Shop URLs |
 | `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` / `IMAGE_HOST_BASE_URL` | Image tooling defaults |
 | `DB_*` / `SILLAGE_DB_*` / `REDIS_URL` | Infrastructure |
 | `FIXTURES_DIR` | Local/fixture sync root |
 | `BEAUTYFORT_TEST_MODE` | BeautyFort SOAP test flag |
+| `SILLAGE_SECRETS_FILE` | Host path to secrets overlay (compose bind-mount) |
 
 Internal runtime keys (not operator UI): `sync_abort`, `last_live_fetch_*`, `live_fetch_count_*_*`.
 
@@ -272,9 +302,11 @@ Internal runtime keys (not operator UI): `sync_abort`, `last_live_fetch_*`, `liv
 
 ## Quick operator recipes
 
-1. **Pause catalogue sync** — Settings → Sync enabled off, or Sync → Stop all sync.
-2. **Resume** — Sync enabled on, or press Run fast/full (re-enables).
-3. **Change retail markup** — Settings tiers/multiplier and/or Vendors multiplier → wait for auto rewrite toast, or Sync → fast.
-4. **Safe order test** — keep dry-run on; Orders → Dry-run; inspect payload/events.
-5. **First live order** — prefer auto **off**, then Live with confirm on one row. Never flip dry-run off while auto-dispatch is on unless you mean it.
-6. **CDN / image hostname** — set tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE`; regenerate `image_overrides.json`; sync `--rewrite-all`. There is no Settings CDN field.
+1. **Demo sync to a client** — Secrets → confirm BF/BTS show set → Sync → **Run sync now** → watch banner + runs table + success toast. Catalogue only; orders stay dry-run.
+2. **Set vendor API keys** — Secrets → paste → Set (hot-reload). Or put them in `~/sillage/.env` and recreate containers.
+3. **Pause catalogue sync** — Settings → Sync enabled off, or Sync → Stop all sync.
+4. **Resume** — Sync enabled on, or press Run sync now / Run fast/full (re-enables).
+5. **Change retail markup** — Settings tiers/multiplier and/or Vendors multiplier → wait for auto rewrite toast, or Sync → fast.
+6. **Safe order test** — keep dry-run on; Orders → Dry-run; inspect payload/events.
+7. **First live order** — prefer auto **off**, then Live with confirm on one row. Never flip dry-run off while auto-dispatch is on unless you mean it.
+8. **CDN / image hostname** — set tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE`; regenerate `image_overrides.json`; sync `--rewrite-all`. There is no Settings CDN field.
