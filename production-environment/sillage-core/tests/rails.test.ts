@@ -20,6 +20,7 @@ const settings = (patch: Partial<GlobalSettings> = {}): GlobalSettings => ({
   fullSyncHour: 3,
   syncSource: "live",
   hideProductsWithoutImage: true,
+  imageCdnBaseUrl: "https://images.slilverbelt.xyz",
   cartMinEnabled: false,
   cartMinSubtotalEur: 50,
   cartMinFeeEur: 5,

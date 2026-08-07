@@ -161,10 +161,10 @@ Files land as `EAN.jpg`. Three steps turn them into storefront images:
    `tools/images/brasty/assets/lps-logo.png`. Originals are never overwritten.
 2. The images need a public URL, because this store never creates WordPress attachments — every
    product image is an external URL rendered by a plugin filter. Host directory
-   `production-environment/ecom_sites/data/media/` is bind-mounted read-only into `ecom` at
-   `/var/www/lps-media` and served at `/lps-media/` via Apache (`config/apache-lps-media.conf`).
-   On VPS, Caddy also `handle_path /lps-media/*` from that same host directory. Set
-   `PUBLIC_URL_BASE` in `tools/images/brasty/.env` to `https://<shop>/lps-media` (or
+   `production-environment/ecom_sites/data/media/` is bind-mounted read-only into the dedicated
+   `lps-media` nginx container (not a named volume; not under `data/wp/`). Edge proxy keeps the
+   public path at `/lps-media/` (`shop-gateway` locally, host Caddy on VPS → port 105). Set
+   `LPS_MEDIA_BASE_URL` in `tools/images/brasty/.env` to `https://images.slilverbelt.xyz` (or
    `http://localhost/lps-media` locally).
 3. The merge script writes an EAN → URL map into `production-environment/sillage-core/data/image_overrides.json`,
    merging rather than overwriting, because the Python enricher already owns thousands of keys there

@@ -1,0 +1,188 @@
+# S3 — product image playbook
+
+Ordered guide for filling missing product photos. Read `../CONTEXT.md` §6 ("Vendors versus image
+sources") and `S3-remaining-work.md` §0 (naming + VPS rules) first.
+
+**Vendors vs image sources.** Only three vendors exist (`bts`, `beautyfort`, `wholesale-perfumes`).
+Everything else in this document is an *image source*: EAN → URL, no stock, no prices, no orders.
+**"Ocean" means `oceanfragrances.csv` only** — never wholesale-perfumes.eu.
+
+**VPS hosts.**
+
+| SSH host | Role | What you may do |
+|---|---|---|
+| `ovhe` (`ovh-experi`) | Staging | Deploy, migrate, sync, run image tools freely. Caddy owns `:80`; ecom is `127.0.0.1:104→80` |
+| `ovh` | **Production** | Read-only inspection unless the operator explicitly approves writes |
+
+---
+
+## Resolution order (how the shop picks a photo)
+
+At sync time, `sillage-core/src/sync/images.ts` resolves each product's image URL in this order:
+
+| Priority | Source | Where it lives |
+|---|---|---|
+| 1 | **Curated overrides** | `production-environment/sillage-core/data/image_overrides.json` |
+| 2 | **Cross-vendor EAN fill** | Another vendor's offer image for the same EAN in `sil_offers` |
+
+The override file is built *offline* by the steps below. Populate it in source priority order so
+earlier, higher-quality sources win when keys collide (merge scripts never clobber existing keys).
+
+---
+
+## Step 1 — wholesale-perfumes.eu catalog XML (`flask_front`)
+
+The wholesaler is vendor `wholesale-perfumes` (SKU prefix `WPF`). Its catalog XML includes
+`pictures/flask_front` URLs — use these as the first-choice image source for WPF products and for
+any EAN that appears in the feed.
+
+1. Fetch or replay the catalog (live token auth or local fixture — see vendor connector / `fetch_wholesale_perfumes.py`).
+2. Extract EAN → `flask_front` URL pairs (`enrich.py --fetch-wholesale-perfumes`).
+3. **Host on the images CDN** — `host_override_images.py --host images.elsvc.net` downloads override CDN URLs into `ecom_sites/data/media/` and rewrites keys to `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (see [Hosting](#hosting-lps-media--images-cdn)).
+4. Merge EAN → public URL into `image_overrides.json` (do not overwrite existing keys).
+
+The Python enricher under `production-environment/python-analysis/` already owns much of this path
+for BeautyFort rows; follow the same merge → sync loop.
+
+---
+
+## Step 2 — oceanfragrances CSV
+
+**"Ocean" = this CSV only:** `python-analysis/.../products/oceanfragrances.csv`.
+
+Image-only index: EAN → external image URL. Not a vendor, not wholesale-perfumes.eu.
+
+1. Read the CSV (EAN + image URL columns).
+2. Download or link URLs as needed; prefer hosting copies on the images CDN when URLs are fragile.
+3. Merge into `image_overrides.json` (skip keys already set by step 1).
+
+---
+
+## Step 3 — Brasty (Playwright scrape)
+
+Brasty is an **image source only** — no vendor row, no catalogue sync, no orders. Photos match
+products by **EAN alone** and can illustrate any vendor's product.
+
+Tool location after reorg: **`tools/images/brasty/`** (standalone Node + Playwright; not a
+`sillage-core` dependency).
+
+### Site constraints
+
+- **No product detail pages.** Products exist only in a searchable logged-in list.
+- **Hover for the large image**, not the row thumbnail. The preview mechanism must be verified —
+  do not guess selectors.
+- Always download the **original largest file** from its URL (HTTP GET). Never screenshot or crop
+  the preview element.
+
+### Operator flow
+
+```bash
+cd tools/images/brasty
+cp .env.example .env          # BRASTY_EMAIL, BRASTY_PASSWORD, paths — never commit
+npm install
+npx playwright install --with-deps chromium   # once per host
+
+npm run login                 # headless → storageState.json (gitignored)
+npm run investigate           # evidence gate — see findings/
+# implement ExtractionStrategy in src/imageExtractor.ts from findings
+npm run download              # trial 10–20 EANs first; then scale on ovhe
+npm run watermark             # optional LPS logo → watermarked/
+npm run build-overrides       # merge into sillage-core/data/image_overrides.json
+```
+
+### Brasty rules (non-negotiable)
+
+| Rule | Detail |
+|---|---|
+| Login | `BRASTY_EMAIL` / `BRASTY_PASSWORD` in gitignored `.env` |
+| Session | `npm run login` writes `storageState.json`; `ensureSession()` re-logins headlessly on expiry |
+| Scope | **List rows only** — search by EAN, match exactly one row, verify row EAN before save |
+| Extraction | **Hover → large preview URL** — not the thumbnail; strategy must come from `investigate` findings |
+| Rate limits | Default `CONCURRENCY=1`, `POLITENESS_DELAY_MS=1500`; do not raise on VPS — blocked account > slow crawl |
+| Resume | Append-only `logs/manifest.jsonl`; safe to restart |
+| Output | `output/EAN.jpg` → optional watermark → **`build-overrides` → `image_overrides.json`** |
+| Cookie banner | Dismiss before clicking "Log in" — banner intercepts clicks if ignored |
+
+Full script reference: `tools/images/brasty/README.md`. Deep implementation task:
+`S3-remaining-work.md` §3 Task 1.
+
+---
+
+## Step 4 — cross-vendor EAN fill (automatic at sync)
+
+No manual step. During every full and fast sync, `buildImageLookup()` in
+`sillage-core/src/sync/images.ts` fills a missing, placeholder, or weak vendor thumb from **another
+vendor's offer** with the same EAN in `sil_offers`.
+
+This runs after overrides are loaded. It cannot beat a curated override URL but covers gaps when
+only one vendor ships a real photo.
+
+---
+
+## Hosting (`lps-media` / images CDN)
+
+Product images are **external URLs** — WordPress never creates attachments. Host scraped or
+watermarked files outside `data/wp/`:
+
+1. **Host directory** (bind-mount, not a Docker named volume):
+   `production-environment/ecom_sites/data/media/`
+2. Dedicated **`lps-media`** container (`nginx:alpine`) mounts that path read-only as its
+   document root (`/usr/share/nginx/html`). No PHP, no DB, no WooCommerce.
+3. **Preferred public URLs:** `https://images.<domain>/<file>` (root of the media container).
+   - VPS: host Caddy site `images.slilverbelt.xyz` → `127.0.0.1:105` (`lps-media`)
+   - Deploy with `--images images.example.com` (optional Porkbun A via `--dns`)
+4. **Fallback path** (unchanged): `https://<shop>/lps-media/<file>`
+   - Local compose: `shop-gateway` (Caddy) `handle_path /lps-media/*` → `lps-media`
+   - VPS: shop site still has `handle_path /lps-media/*` → `:105`
+5. `ecom` does **not** mount or Alias media — Apache never serves product images.
+6. **Configurable base URL** (no code change to flip hosts later):
+   - Dashboard / `sil_settings.image_cdn_base_url` (default `https://images.slilverbelt.xyz`)
+   - Tool env (first match): `LPS_MEDIA_BASE_URL` → `IMAGE_HOST_BASE_URL` → `PUBLIC_URL_BASE`
+   - Host scripts (`host_override_images.py`, Brasty `build-overrides`) write absolute URLs like
+     `https://images.slilverbelt.xyz/<EAN>.jpg`
+   - Changing the base does **not** rewrite WooCommerce rows by itself: update
+     `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
+     `bun run sync -- --rewrite-all`
+
+Drop new files onto the host `data/media/` path; nginx serves them immediately (read-only mount).
+
+Brasty watermark asset: `tools/images/brasty/assets/lps-logo.png`.
+
+---
+
+## After overrides change
+
+1. Copy/host any new files under `data/media/` if using self-hosted URLs.
+2. Run sync so WooCommerce picks up URLs — **`bun run sync -- --rewrite-all`** when image rules
+   or override keys changed materially (hashes cover vendor data only).
+3. Check sync summary `hiddenNoImage` if `hide_products_without_image` is on (default).
+
+---
+
+## Tool layout (`tools/images/`)
+
+| Path | Purpose |
+|---|---|
+| `tools/images/brasty/` | Brasty Playwright scrape (this playbook §3) |
+| `production-environment/python-analysis/` | Bulk download, oceanfragrances, enricher sandbox |
+| `production-environment/sillage-core/data/image_overrides.json` | Canonical EAN → URL map consumed at sync |
+| `production-environment/sillage-core/src/sync/images.ts` | Override load + cross-vendor fill |
+
+Do **not** move or duplicate sync-time image logic out of `sillage-core`; tools only feed
+`image_overrides.json`.
+
+---
+
+## Verification
+
+```bash
+cd production-environment/sillage-core
+bun run typecheck
+bun test
+
+cd ../../tools/images/brasty
+npm run typecheck
+```
+
+For Brasty work: trial-run 10–20 EANs, inspect output URLs, then scale on **`ovhe`** — not
+production **`ovh`** unless read-only inspection.

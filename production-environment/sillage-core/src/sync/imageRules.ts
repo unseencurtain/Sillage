@@ -19,7 +19,13 @@ export function isWeakVendorThumb(url: string | null | undefined): boolean {
   if (!url) return true;
   if (isPlaceholderImage(url)) return true;
   const low = url.toLowerCase();
-  return low.includes("beautyfort.com/pic/");
+  // Encoded `/pic/<token>` thumbs (often URL-encoded `=` → `%3D`) and any beautyfort.com/pic/ path.
+  return low.includes("beautyfort.com/pic/") || /beautyfort\.com\/pic\b/.test(low);
+}
+
+/** Empty, placeholder, or known-weak vendor thumb — not fit for the storefront. */
+export function isUnusableImage(url: string | null | undefined): boolean {
+  return isPlaceholderImage(url) || isWeakVendorThumb(url);
 }
 
 /** True when the setting is on and the finally-resolved image is still unusable. */
@@ -27,5 +33,5 @@ export function shouldHideForMissingImage(
   imageUrl: string | null | undefined,
   hideEnabled: boolean,
 ): boolean {
-  return hideEnabled && isPlaceholderImage(imageUrl);
+  return hideEnabled && isUnusableImage(imageUrl);
 }
