@@ -224,14 +224,14 @@ This is a closed list. If a task seems to require adding write logic here, it be
 8. Apply the small-order cart fee (global `cart_min_*`) and hard-block cart/checkout when a
    vendor subtotal is below that vendor's `order_config.min_order_value_eur` (storefront-label
    shortfall message). Same cart/checkout path as BF/BTS plus MOQ; no B2B portal extras.
-9. Catalog helpers: exclude wholesale-perfumes from main shop / search / category archives via a
-   fast `NOT EXISTS` on `_sillage_vendor` (never a WP `meta_query` — that shape hangs ~60k
-   products). Singular product URLs stay reachable. `/b2b-wholesale/` (`_sillage_b2b_shop`) is
-   the only WPF listing; its sidebar shows top-level WPF *type* `product_cat` terms (not brands —
-   brands are `product_brand`). Vendor lanes are never `product_cat` — use `_sillage_vendor` +
-   `pa_vendor`. Also enforce catalog visibility, strip legacy LPS* cats from widgets/`get_terms`/
-   nav, hide empty feed cats, and rebuild Blocksy's taxonomy lookup via SQL on finalize (the
-   theme's `wc_get_products(-1)` regen OOMs on this catalogue). Optional image-safety CSS.
+9. Catalog helpers: main `/shop` is BeautyFort + BTS only — exclude wholesale-perfumes from shop /
+   search / category archives via a fast `NOT EXISTS` on `_sillage_vendor` (never a WP
+   `meta_query` — that shape hangs ~60k products). Vendor lanes are never `product_cat` — use
+   `_sillage_vendor` + `pa_vendor` (never LPS*). Enforce catalog visibility, strip legacy LPS*
+   cats from widgets/`get_terms`/nav, hide empty feed cats, rebuild Blocksy's taxonomy lookup via
+   SQL on finalize, and force Blocksy category filters to hierarchical so the shop sidebar shows
+   feed browse roots (Makeup, Hair, …) not a flat brand A–Z or starter-site demos. Optional
+   image-safety CSS. (Wholesaler/B2B storefront is a separate site — not this shop.)
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
