@@ -17,6 +17,7 @@ import { logger } from "../lib/log.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
+import { inHalfHourSlot } from "../vendors/liveGate.ts";
 import { runSync, type SyncSummary } from "./run.ts";
 
 const log = logger("schedule");
@@ -107,6 +108,17 @@ export async function decideSchedule(settings: GlobalSettings): Promise<Schedule
   if (!settings.syncEnabled) {
     return { action: "skip", reason: "sync_enabled is off" };
   }
+
+  // Catalogue syncs only open on the :00 and :30 walls (cron ticks every 5 minutes).
+  // Combined with live_feed_min_minutes (default 60) this caps live downloads to ~1/hour.
+  const [clock] = await query<RowDataPacket & { m: number }>(`SELECT MINUTE(NOW()) AS m`);
+  if (!inHalfHourSlot(Number(clock?.m ?? 99))) {
+    return {
+      action: "skip",
+      reason: `outside :00/:30 sync window (minute=${clock?.m})`,
+    };
+  }
+
   return decide(settings, await loadTiming(normaliseHour(settings.fullSyncHour)));
 }
 
