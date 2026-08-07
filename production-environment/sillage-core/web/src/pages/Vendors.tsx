@@ -157,9 +157,17 @@ function ParkedVendorCard({ vendor }: { vendor: Vendor }) {
         </span>
       </div>
       <p className="mt-3 text-sm text-muted">
-        Parked for the separate <code className="font-mono text-xs">b2b-wholesale/</code> site. Forced
-        inactive, excluded from <code className="font-mono text-xs">--vendor=all</code>, and not editable
-        on this retail shop. Connector remains in sillage-core for history and a future B2B deploy.
+        Parked for the separate{" "}
+        <a
+          className="font-medium text-ink underline decoration-line underline-offset-2"
+          href="https://github.com/unseencurtain/sillage-b2b"
+          target="_blank"
+          rel="noreferrer"
+        >
+          unseencurtain/sillage-b2b
+        </a>{" "}
+        repo. Forced inactive, excluded from <code className="font-mono text-xs">--vendor=all</code>,
+        and not editable on this retail shop.
       </p>
     </article>
   );

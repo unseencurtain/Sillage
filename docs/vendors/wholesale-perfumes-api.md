@@ -1,7 +1,7 @@
 # Moved
 
-Wholesale-perfumes B2B API notes now live with the parked B2B project:
+Wholesale-perfumes B2B API notes:
 
-→ [`../../b2b-wholesale/docs/wholesale-perfumes-api.md`](../../b2b-wholesale/docs/wholesale-perfumes-api.md)
+→ [unseencurtain/sillage-b2b — docs/wholesale-perfumes-api.md](https://github.com/unseencurtain/sillage-b2b/blob/main/docs/wholesale-perfumes-api.md)
 
-The main LPS storefront is BeautyFort + BTS only. See `b2b-wholesale/README.md`.
+Retail LPS storefront is BeautyFort + BTS only. Pointer: `b2b-wholesale/README.md`.
