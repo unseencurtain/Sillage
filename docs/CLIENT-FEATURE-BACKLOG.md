@@ -21,7 +21,7 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 |---|---|
 | Staging SSH | `ovhe` only — never deploy to production `ovh` without explicit approval |
 | Wholesaler / B2B site | Separate future project — scaffold in `b2b-wholesale/` (not on this WP) |
-| Storefront labels | LPS01 = BTS, LPS02 = BeautyFort (LPS03 parked; `pa_vendor` / `storefront_label`; never `product_cat`) |
+| Storefront labels | LPS01 = BTS, LPS02 = BeautyFort (LPS03 parked; `_sillage_vendor` + `storefront_label` for ops/MOQ; never `product_cat` or visible `pa_vendor`) |
 | Image CDN | `sil_settings.image_cdn_base_url` / `LPS_MEDIA_BASE_URL` → `https://images.<domain>/…` via `lps-media` |
 | Unified deploy | `production-environment/compose.yaml` + `scripts/deploy-vps.sh` (build/push Hub tags, rsync plugin + overrides, remote `compose pull && up`) — see `docs/VPS-DEPLOY.md` |
 

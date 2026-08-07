@@ -84,7 +84,7 @@ add_action(
 			return;
 		}
 
-		// Ensure new attributes (pa_vendor, …) exist without requiring a manual reactivation.
+		// Ensure new attributes (pa_gender, …) exist without requiring a manual reactivation.
 		Sillage_Activator::ensure_attributes();
 
 		( new Sillage_Images() )->register();

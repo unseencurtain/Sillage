@@ -12,11 +12,12 @@ import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
+  LEGACY_VENDOR_ATTRIBUTE_TAXONOMY,
   loadProductTypeTerm,
   loadVisibilityTerms,
   type TermRef,
 } from "./taxonomy.ts";
-import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
+import { normalizeVolume } from "./volume.ts";
 
 const log = logger("writer");
 
@@ -77,6 +78,8 @@ const OWNED_TAXONOMIES = [
   BRAND_TAXONOMY,
   "product_visibility",
   ...Object.values(ATTRIBUTE_TAXONOMIES),
+  // Clear leftover LPS lane terms; never re-assigned (see purgeVendorProductAttributes).
+  LEGACY_VENDOR_ATTRIBUTE_TAXONOMY,
 ];
 
 export type WriteMode = "full" | "fast";
@@ -424,10 +427,8 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   if (volume) attributes["volume"] = volume;
   else delete attributes["volume"];
 
-  attributes["vendor"] = vendorStorefrontLabel(vendor);
-
-  // Feed browse categories only — never vendor lanes (LPS*) as product_cat.
-  // Vendor identity is `_sillage_vendor` meta + `pa_vendor` (storefront_label).
+  // Feed browse categories only — never vendor lanes (LPS*) as product_cat or pa_vendor.
+  // Vendor identity is `_sillage_vendor` postmeta only (not customer-facing).
   const categoryMap = ctx.categoryMaps.get(row.vendor_id);
   const categoryTtIds: number[] = [];
   for (const ref of categoryRefs) {

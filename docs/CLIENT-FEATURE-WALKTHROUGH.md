@@ -102,21 +102,17 @@ Higher conversion from usable product photography without hosting a local media 
 
 ---
 
-## 7. Vendor browse sections
+## 7. Vendor identity (ops only)
 
 **What it does**  
-Every product is assigned to a shop category:
-- **BeautyFort**
-- **BTS Wholesaler**  
-
-Also filterable via the **Vendor** attribute (`pa_vendor`).
+Each product carries `_sillage_vendor` postmeta (`bts` / `beautyfort`) for cart rules, MOQ, and dispatch. Storefront labels (LPS01/LPS02) live in `sil_vendors.storefront_label` for operator/MOQ copy — they are **not** product categories and **not** shown on the product page Additional information table.
 
 **How to navigate**
-1. Storefront → product categories (or menu link to BeautyFort / BTS Wholesaler).
-2. Or use the layered **Vendor** filter in the shop.
+1. Ops: Vendors page in the dashboard (labels, MOQ, multipliers).
+2. Storefront browse uses feed categories and brands only — no LPS vendor lane in the category tree.
 
 **Value to the client**  
-Customers can shop one wholesaler’s range at a time; ops can reason about catalogue share by vendor.
+Wholesaler lanes stay invisible to shoppers and marketplace category maps; ops still know which supplier owns each SKU.
 
 ---
 

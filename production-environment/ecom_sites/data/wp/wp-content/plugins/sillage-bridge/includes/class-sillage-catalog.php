@@ -14,9 +14,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Theme-agnostic WooCommerce query filters.
  *
- * Vendor identity lives on `_sillage_vendor` postmeta (and the `pa_vendor` attribute for
- * storefront facets) — never on `product_cat`. Marketplace connectors treat product categories
- * as browse taxonomy; LPS01/LPS02/LPS03 must not appear there.
+ * Vendor identity lives on `_sillage_vendor` postmeta only — never on `product_cat` and never as
+ * a visible `pa_vendor` product attribute (LPS labels must not appear in Additional information).
+ * Marketplace connectors treat product categories as browse taxonomy; LPS01/LPS02/LPS03 must not
+ * appear there.
  *
  * Dual-catalog / B2B wholesale UI lived here briefly and was removed: wholesale-perfumes is
  * parked for a separate site (`b2b-wholesale/` in the repo). WPF products are hidden via

@@ -32,7 +32,8 @@ final class Sillage_Activator {
 		'gender'    => 'Gender',
 		'item-type' => 'Product Type',
 		'volume'    => 'Volume',
-		'vendor'    => 'Vendor',
+		// vendor / pa_vendor intentionally omitted — LPS labels must not appear on product pages.
+		// Retail vendor identity is `_sillage_vendor` postmeta (sillage-core).
 	);
 
 	/** Option holding the last activation's failures, surfaced on the status page. */

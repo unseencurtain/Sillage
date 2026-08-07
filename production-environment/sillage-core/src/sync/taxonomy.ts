@@ -18,9 +18,16 @@ export const ATTRIBUTE_TAXONOMIES: Record<string, string> = {
   // wc_create_attribute() rejects it and the attribute never gets registered at all.
   type: "pa_item-type",
   volume: "pa_volume",
-  /** Storefront browse filter: BeautyFort vs BTS. */
-  vendor: "pa_vendor",
+  // vendor / pa_vendor is intentionally absent — LPS labels must not appear on the product page.
+  // Retail vendor identity is `_sillage_vendor` postmeta only (see Decision 28).
 };
+
+/**
+ * Legacy global attribute formerly used for storefront vendor facets (LPS01/LPS02).
+ * Kept as a named constant so the writer can clear leftover assignments and sync can purge them.
+ * Never assign new product terms to this taxonomy.
+ */
+export const LEGACY_VENDOR_ATTRIBUTE_TAXONOMY = "pa_vendor";
 
 /**
  * Singular. WooCommerce registers `product_brand` — see `get_taxonomy( 'product_brand' )` in
@@ -218,8 +225,94 @@ export async function syncCategories(
 }
 
 /**
+ * Strip legacy `pa_vendor` (LPS01/LPS02) from every product so Additional information and layered
+ * nav never show storefront vendor labels. Retail code uses `_sillage_vendor` postmeta only.
+ *
+ * Safe to run repeatedly. Does not remove the WooCommerce attribute definition (PHP-owned).
+ */
+export async function purgeVendorProductAttributes(): Promise<{
+  metaUpdated: number;
+  relationshipsDeleted: number;
+  termsDeleted: number;
+}> {
+  const { serialize, unserialize } = await import("php-serialize");
+  const taxonomy = LEGACY_VENDOR_ATTRIBUTE_TAXONOMY;
+
+  // 1. Strip pa_vendor from PHP-serialized `_product_attributes` (drives Additional information).
+  const metaRows = await query<RowDataPacket & { meta_id: number; meta_value: string }>(
+    `SELECT meta_id, meta_value FROM ${wp("postmeta")}
+      WHERE meta_key = '_product_attributes' AND meta_value LIKE ?`,
+    [`%${taxonomy}%`],
+  );
+  let metaUpdated = 0;
+  for (const row of metaRows) {
+    let attrs: Record<string, unknown>;
+    try {
+      attrs = unserialize(row.meta_value) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (!attrs || typeof attrs !== "object" || !(taxonomy in attrs)) continue;
+    delete attrs[taxonomy];
+    // Re-pack positions so WooCommerce's attribute UI stays contiguous.
+    let position = 0;
+    for (const key of Object.keys(attrs)) {
+      const entry = attrs[key];
+      if (entry && typeof entry === "object" && "position" in entry) {
+        (entry as { position: number }).position = position++;
+      }
+    }
+    await execute(`UPDATE ${wp("postmeta")} SET meta_value = ? WHERE meta_id = ?`, [
+      serialize(attrs),
+      row.meta_id,
+    ]);
+    metaUpdated++;
+  }
+
+  // 2. Drop term relationships + layered-nav lookup rows.
+  const relResult = await execute(
+    `DELETE FROM ${wp("term_relationships")}
+      WHERE term_taxonomy_id IN (
+            SELECT term_taxonomy_id FROM ${wp("term_taxonomy")} WHERE taxonomy = ?
+          )`,
+    [taxonomy],
+  );
+  await execute(`DELETE FROM ${wp("wc_product_attributes_lookup")} WHERE taxonomy = ?`, [taxonomy]);
+
+  // 3. Remove the LPS* attribute terms themselves (and our map rows).
+  const termRows = await query<RowDataPacket & { term_id: number }>(
+    `SELECT term_id FROM ${wp("term_taxonomy")} WHERE taxonomy = ?`,
+    [taxonomy],
+  );
+  const termIds = termRows.map((r) => r.term_id);
+  if (termIds.length > 0) {
+    const idPh = termIds.map(() => "?").join(",");
+    await execute(`DELETE FROM ${wp("termmeta")} WHERE term_id IN (${idPh})`, termIds);
+    await execute(`DELETE FROM ${wp("term_taxonomy")} WHERE taxonomy = ? AND term_id IN (${idPh})`, [
+      taxonomy,
+      ...termIds,
+    ]);
+    await execute(`DELETE FROM ${wp("terms")} WHERE term_id IN (${idPh})`, termIds);
+  }
+  await execute(`DELETE FROM ${sil("sil_term_map")} WHERE taxonomy = ?`, [taxonomy]);
+
+  const out = {
+    metaUpdated,
+    relationshipsDeleted: relResult.affectedRows,
+    termsDeleted: termIds.length,
+  };
+  if (out.metaUpdated > 0 || out.relationshipsDeleted > 0 || out.termsDeleted > 0) {
+    log.info(
+      `purged pa_vendor: meta=${out.metaUpdated} rels=${out.relationshipsDeleted} terms=${out.termsDeleted}`,
+    );
+  }
+  return out;
+}
+
+/**
  * Vendor lanes (LPS01 / LPS02 / LPS03) must NOT live in `product_cat` — marketplaces treat that
- * taxonomy as browse categories. Vendor identity is `_sillage_vendor` meta + `pa_vendor`.
+ * taxonomy as browse categories. Vendor identity is `_sillage_vendor` postmeta only (never
+ * customer-facing `pa_vendor` / LPS labels on the product page).
  *
  * This removes any leftover vendor `product_cat` terms (and their sil_term_map rows) from earlier
  * mistaken lane wiring. Feed browse categories are left alone.
