@@ -21,6 +21,7 @@ import {
   syncFlatTerms,
   type TermRef,
 } from "./taxonomy.ts";
+import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
 
 const log = logger("sync");
@@ -51,6 +52,18 @@ export async function markAllProductsDirty(): Promise<number> {
     `UPDATE ${sil("sil_products")}
         SET needs_content_write = 1, needs_price_write = 1,
             applied_content_hash = NULL, applied_price_hash = NULL, last_error = NULL`,
+  );
+  return result.affectedRows;
+}
+
+/**
+ * Force a price rewrite. Price hashes cover vendor cost only — changing the multiplier, FX rate,
+ * or stock threshold leaves every applied_price_hash looking "current" until this runs.
+ */
+export async function markAllPricesDirty(): Promise<number> {
+  const result = await execute(
+    `UPDATE ${sil("sil_products")}
+        SET needs_price_write = 1, applied_price_hash = NULL, last_error = NULL`,
   );
   return result.affectedRows;
 }
@@ -234,7 +247,22 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
             bucket = new Set();
             attributeValues.set(taxonomy, bucket);
           }
-          bucket.add(value);
+          if (key === "volume") {
+            const normalized = normalizeVolume(value, settings.volumeFilterMode);
+            if (normalized) bucket.add(normalized);
+          } else {
+            bucket.add(value);
+          }
+        }
+        // Vendor facet is derived from the connector, not the feed attributes.
+        const vendorTax = ATTRIBUTE_TAXONOMIES.vendor;
+        if (vendorTax) {
+          let bucket = attributeValues.get(vendorTax);
+          if (!bucket) {
+            bucket = new Set();
+            attributeValues.set(vendorTax, bucket);
+          }
+          bucket.add(VENDOR_LABELS[vendor.slug] ?? vendor.name);
         }
       }
     }

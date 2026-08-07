@@ -7,7 +7,14 @@
  * and lookup-table updates. Nothing here writes to WordPress.
  */
 import { sil, wp } from "../config/env.ts";
-import { query, transaction, type PoolConnection, type ResultSetHeader, type RowDataPacket } from "../db/pool.ts";
+import {
+  execute,
+  query,
+  transaction,
+  type PoolConnection,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from "../db/pool.ts";
 import { loadVendors, recordEvent } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
 import type { IngestResult, OrderAddress, VendorLine, WooOrder, WooOrderLine } from "./types.ts";
@@ -139,6 +146,47 @@ export async function readWooOrder(orderId: number): Promise<WooOrder | null> {
  */
 export function destinationAddress(order: WooOrder): OrderAddress {
   return order.shipping.address1 !== "" && order.shipping.country !== "" ? order.shipping : order.billing;
+}
+
+/** Upsert the HPOS shipping address used at dispatch time. */
+export async function updateWooShippingAddress(orderId: number, address: OrderAddress): Promise<void> {
+  const existing = await query<AddressRow>(
+    `SELECT * FROM ${wp("wc_order_addresses")} WHERE order_id = ? AND address_type = 'shipping'`,
+    [orderId],
+  );
+
+  const fields = [
+    address.firstName,
+    address.lastName,
+    address.company,
+    address.address1,
+    address.address2,
+    address.city,
+    address.state,
+    address.postcode,
+    address.country.toUpperCase(),
+    address.email,
+    address.phone,
+  ];
+
+  if (existing.length > 0) {
+    await execute(
+      `UPDATE ${wp("wc_order_addresses")}
+          SET first_name=?, last_name=?, company=?, address_1=?, address_2=?,
+              city=?, state=?, postcode=?, country=?, email=?, phone=?
+        WHERE order_id = ? AND address_type = 'shipping'`,
+      [...fields, orderId],
+    );
+    return;
+  }
+
+  await execute(
+    `INSERT INTO ${wp("wc_order_addresses")}
+       (order_id, address_type, first_name, last_name, company, address_1, address_2,
+        city, state, postcode, country, email, phone)
+     VALUES (?, 'shipping', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [orderId, ...fields],
+  );
 }
 
 interface OfferRow extends RowDataPacket {
