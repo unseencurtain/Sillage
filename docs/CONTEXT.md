@@ -31,8 +31,9 @@ Networks are **external** and must exist before `docker compose up`:
 `shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
 Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). New image
 URLs come from tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default
-`https://images.slilverbelt.xyz`). `sil_settings.image_cdn_base_url` may still exist in the DB but
-is not read by sync and is not on the Settings UI.
+`https://images.slilverbelt.xyz`). Settings `image_cdn_base_url` is on the dashboard and
+hot-applied into Bun runtime via `applyRuntimeUrls`; it does **not** by itself rewrite URLs
+already written on products — use overrides + a content rewrite.
 
 ```bash
 docker network create ecom_network
@@ -269,9 +270,12 @@ Rules, all evaluated by the database so no clock skew is possible:
 - Overlap is handled by the `GET_LOCK` advisory lock in `runSync`, not by the scheduler.
 
 Manual escape hatches on `bun run sync`: `--redrive` re-marks products a previous run errored on,
-and `--rewrite-all` clears the applied hashes so every product is rewritten. The hashes cover vendor
-data only, so `--rewrite-all` is the only way to pick up a change to the description template, the
-attribute mapping, or the taxonomy a term lives in.
+and `--rewrite-all` clears the applied hashes so every product is rewritten. Offer hashes cover
+vendor feed data only — a multiplier/tier change would look like “nothing changed” without an
+explicit dirty mark. Dashboard Settings/Vendors Save marks dirty and kicks rewrite-only (prices)
+or full/cache (description/volume). CLI: `--mode=fast --source=cache --rewrite-only`. Advisory
+lock must use one dedicated pool connection (`GET_LOCK` is connection-scoped); see
+[`HANDOFF.md`](HANDOFF.md) 2026-08 notes if Save queues forever.
 
 ---
 
