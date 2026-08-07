@@ -39,9 +39,10 @@ Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
   `vendorPrice × fxRate × (1 + vat_rate)` before markup tiers.
 - Orders: cart is account-global — submit runs under `GET_LOCK('sillage:wholesale-perfumes-cart')`.
   Dry-run performs **no** remote mutation (not even `DELETE /cart`). No idempotency key → same
-  needs_attention rails as BTS (decision 25).
-- Cart line `code` is assumed to be the catalog `id` (`wholesalePerfumesCartCode` in the order
-  adapter) — **verify with a real dry-run before going live.**
+  needs_attention rails as BTS (decision 25). Submit sends optional `note` = our `SIL-*`
+  reference. JSON bodies use application-level `error` codes (0 = OK) even on HTTP 200.
+- Cart line `code` = catalog product `id` (not EAN), per the vendor B2B API doc
+  (`docs/vendors/wholesale-perfumes-api.md`). Isolated in `wholesalePerfumesCartCode()`.
 
 ### Operator-confirmable seed guesses (migration 013)
 
@@ -56,7 +57,8 @@ Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
 
 Package rules from that page: max **25 kg** / box, ~60 perfume bottles per box, EU delivery typically 3–5 working days; payment is proforma / advance (COD only CZ/SK/PL).
 
-Docs: https://www.wholesale-perfumes.eu/api/docs/ · https://www.wholesale-perfumes.eu/xml-export/
+Docs: https://www.wholesale-perfumes.eu/api/docs/ · https://www.wholesale-perfumes.eu/xml-export/  
+Sanitized cart/order notes (no secrets): [`wholesale-perfumes-api.md`](wholesale-perfumes-api.md).
 
 Env placeholders: `WHOLESALE_PERFUMES_USER`, `WHOLESALE_PERFUMES_TOKEN`,
 `WHOLESALE_PERFUMES_CATALOG_URL`, `WHOLESALE_PERFUMES_STOCK_URL`,
@@ -126,7 +128,7 @@ gitignored.
 
 1. Done: wholesale-perfumes XML → BeautyFort `image_overrides.json`.
 2. Done: wholesale-perfumes catalogue connector + cart order adapter (inactive until operator enable).
-3. Countries seeded from shipping-payment page (in migration 013). Confirm MOQ / VAT /
-   cart `code` before enabling.
+3. Countries seeded from shipping-payment page (in migration 013). Cart `code` confirmed as
+   catalog id by the B2B API doc; still confirm MOQ / VAT / serviceable countries before enabling.
 4. Brasty Playwright in `tools/images/brasty/` **or** bulk image download inside
    `python-analysis/` — whichever is faster for filling missing photos.

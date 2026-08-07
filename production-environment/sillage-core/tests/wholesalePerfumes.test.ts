@@ -2,13 +2,27 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  mapWholesalePerfumesPollStatus,
+  wholesalePerfumesCartCode,
+} from "../src/orders/adapters/wholesale-perfumes.ts";
+import type { OrderItem } from "../src/orders/adapter.ts";
+import {
   composeWholesalePerfumesName,
   formatWholesalePerfumesVolume,
   joinCatalogAndStore,
   mapWholesalePerfumesGender,
   WholesalePerfumesConnector,
 } from "../src/vendors/wholesale-perfumes/connector.ts";
-import { parseCatalogXml, parseStoreXml } from "../src/vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
+import {
+  assertApiOk,
+  extractOrderNumber,
+  parseCatalogXml,
+  parseOrderGetResponse,
+  parseStoreXml,
+  readApiErrorCode,
+  WHOLESALE_PERFUMES_API,
+  WholesalePerfumesApiError,
+} from "../src/vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
 
 const fixtures = join(import.meta.dir, "fixtures");
 
@@ -92,5 +106,109 @@ describe("wholesale-perfumes XML parse + normalize", () => {
       .filter((p) => p !== null);
     expect(normalized.length).toBe(4);
     expect(normalized.every((p) => p.sku.startsWith("WPF-"))).toBe(true);
+  });
+});
+
+describe("wholesale-perfumes cart/order API helpers", () => {
+  test("cart code is catalog product id (vendorProductId), not EAN", () => {
+    const item = {
+      vendorProductId: "3",
+      ean: "0123456789012",
+      sku: "WPF-3",
+      quantity: 2,
+      unitCost: 10,
+    } as OrderItem;
+    expect(wholesalePerfumesCartCode(item)).toBe("3");
+  });
+
+  test("assertApiOk accepts error 0 / missing error and rejects documented codes", () => {
+    expect(() => assertApiOk({ error: 0, message: "OK" }, "GET /cart")).not.toThrow();
+    expect(() => assertApiOk({ message: "OK", items: [] }, "GET /cart")).not.toThrow();
+    expect(() => assertApiOk(null, "GET /cart")).not.toThrow();
+
+    expect(readApiErrorCode({ error: "8" })).toBe(8);
+
+    try {
+      assertApiOk(
+        {
+          error: WHOLESALE_PERFUMES_API.OPERATION_FAILED,
+          message: "Operation failed",
+          items: {
+            "1": {
+              error: 3,
+              message: "Not enough pieces in stock. In store is 4 pcs",
+              id_product: "1",
+              available_quantity: "3",
+            },
+          },
+        },
+        "POST /cart/submit",
+      );
+      expect.unreachable("expected WholesalePerfumesApiError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(WholesalePerfumesApiError);
+      const api = err as WholesalePerfumesApiError;
+      expect(api.apiError).toBe(8);
+      expect(api.isClearReject).toBe(true);
+      expect(api.message).toContain("Operation failed");
+    }
+
+    expect(() =>
+      assertApiOk({ error: WHOLESALE_PERFUMES_API.CART_EMPTY, message: "Cart is empty" }, "submit"),
+    ).toThrow(/1012/);
+  });
+
+  test("extractOrderNumber reads submit success body", () => {
+    expect(
+      extractOrderNumber({
+        error: 0,
+        message: "Order was created",
+        order_number: "3416985071",
+        items: [],
+      }),
+    ).toBe("3416985071");
+    expect(extractOrderNumber({ error: 0, message: "OK" })).toBeNull();
+  });
+
+  test("parseOrderGetResponse reads nested result.items[0] status fields", () => {
+    const view = parseOrderGetResponse({
+      result: {
+        items: [
+          {
+            order_number: 3416985071,
+            currency: "EUR",
+            status_code: 2,
+            status_msg: "Processing",
+            order_items: [
+              {
+                id_product: 123,
+                name: "Pretty item xy",
+                pieces: 10,
+                vat: 21,
+                piece_price_without_vat: 10,
+                total_price: 100,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(view.orderNumber).toBe("3416985071");
+    expect(view.statusCode).toBe(2);
+    expect(view.statusMsg).toBe("Processing");
+    expect(view.orderItems).toHaveLength(1);
+
+    const mapped = mapWholesalePerfumesPollStatus(view);
+    expect(mapped.status).toBe("confirmed");
+    expect(mapped.rawStatus).toBe("Processing");
+
+    // Numeric-only sample from the vendor doc → unknown (codes undocumented)
+    const numericOnly = mapWholesalePerfumesPollStatus(
+      parseOrderGetResponse({
+        result: { items: [{ order_number: 1, status_code: 2, status_msg: 2, order_items: [] }] },
+      }),
+    );
+    expect(numericOnly.status).toBe("unknown");
+    expect(numericOnly.rawStatus).toBe("2");
   });
 });

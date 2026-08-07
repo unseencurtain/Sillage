@@ -4,7 +4,9 @@
  * Feeds: catalog XML (daily) and store XML (hourly price/stock).
  * Order API: account-global cart → submit. There is no sandbox — callers must honour dry-run.
  *
- * Never call this against the live host from tests. Use parseCatalogXml / parseStoreXml on fixtures.
+ * Cart/order JSON uses an application-level `error` field (0 = OK) on HTTP 200 — see
+ * docs/vendors/wholesale-perfumes-api.md. Never call the live host from tests; use the
+ * parse helpers + fixtures.
  */
 import { XMLParser } from "fast-xml-parser";
 
@@ -18,6 +20,38 @@ export interface WholesalePerfumesClientConfig {
   /** Base for cart/order API, e.g. https://www.wholesale-perfumes.eu/api/v1 */
   apiBaseUrl: string;
   timeout?: number;
+}
+
+/** Documented cart/submit application codes (HTTP status is often still 200). */
+export const WHOLESALE_PERFUMES_API = {
+  OK: 0,
+  NOT_ENOUGH_STOCK: 3,
+  OPERATION_FAILED: 8,
+  DELIVERY_TYPE_NOT_CHOSEN: 1005,
+  CART_EMPTY: 1012,
+  DELIVERY_COUNTRY_UNSUPPORTED: 1018,
+  ITEM_OUT_OF_STOCK: 1030,
+  VARIATION_NOT_CHOSEN: 1031,
+} as const;
+
+/** Clear rejections — order was not created. Safe to mark failed (not ambiguous). */
+export const WHOLESALE_PERFUMES_CLEAR_REJECT_CODES = new Set<number>([
+  WHOLESALE_PERFUMES_API.NOT_ENOUGH_STOCK,
+  WHOLESALE_PERFUMES_API.OPERATION_FAILED,
+  WHOLESALE_PERFUMES_API.DELIVERY_TYPE_NOT_CHOSEN,
+  WHOLESALE_PERFUMES_API.CART_EMPTY,
+  WHOLESALE_PERFUMES_API.DELIVERY_COUNTRY_UNSUPPORTED,
+  WHOLESALE_PERFUMES_API.ITEM_OUT_OF_STOCK,
+  WHOLESALE_PERFUMES_API.VARIATION_NOT_CHOSEN,
+]);
+
+export interface WholesalePerfumesOrderView {
+  orderNumber: string | null;
+  statusCode: string | number | null;
+  statusMsg: string | number | null;
+  currency: string | null;
+  orderItems: unknown[];
+  raw: unknown;
 }
 
 export interface WholesalePerfumesCatalogProduct {
@@ -65,6 +99,114 @@ export class WholesalePerfumesRequestError extends Error {
     super(message);
     this.name = "WholesalePerfumesRequestError";
   }
+}
+
+/** JSON body reported `error != 0` (often still HTTP 200). */
+export class WholesalePerfumesApiError extends WholesalePerfumesRequestError {
+  constructor(
+    message: string,
+    public readonly apiError: number,
+    details?: unknown,
+  ) {
+    super(message, undefined, details);
+    this.name = "WholesalePerfumesApiError";
+  }
+
+  get isClearReject(): boolean {
+    return WHOLESALE_PERFUMES_CLEAR_REJECT_CODES.has(this.apiError);
+  }
+}
+
+export function readApiErrorCode(json: unknown): number | null {
+  if (!json || typeof json !== "object") return null;
+  const err = (json as Record<string, unknown>).error;
+  if (err === undefined || err === null) return null;
+  const n = typeof err === "number" ? err : Number(String(err).trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+export function assertApiOk(json: unknown, action: string): void {
+  const code = readApiErrorCode(json);
+  if (code === null || code === WHOLESALE_PERFUMES_API.OK) return;
+  const message =
+    json && typeof json === "object" && "message" in json
+      ? String((json as { message?: unknown }).message ?? "").trim()
+      : "";
+  throw new WholesalePerfumesApiError(
+    message
+      ? `wholesale-perfumes ${action}: error ${code} — ${message}`
+      : `wholesale-perfumes ${action}: error ${code}`,
+    code,
+    json,
+  );
+}
+
+/** Pull `order_number` from a cart/submit or POST /order success body. */
+export function extractOrderNumber(response: unknown): string | null {
+  if (response === null || response === undefined) return null;
+  if (typeof response === "string" || typeof response === "number") {
+    const s = String(response).trim();
+    return s || null;
+  }
+  if (typeof response === "object") {
+    const obj = response as Record<string, unknown>;
+    for (const key of ["order_number", "orderNumber", "number", "id", "order_id"]) {
+      const v = obj[key];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse GET /order/{order_number}. Vendor sample nests under `result.items[0]`
+ * with `status_code` / `status_msg` (types in the sample are loose).
+ */
+export function parseOrderGetResponse(json: unknown): WholesalePerfumesOrderView {
+  const empty: WholesalePerfumesOrderView = {
+    orderNumber: null,
+    statusCode: null,
+    statusMsg: null,
+    currency: null,
+    orderItems: [],
+    raw: json,
+  };
+  if (!json || typeof json !== "object") return empty;
+
+  const root = json as Record<string, unknown>;
+  const result = root.result;
+  let item: Record<string, unknown> | null = null;
+
+  if (result && typeof result === "object") {
+    const items = (result as { items?: unknown }).items;
+    if (Array.isArray(items) && items[0] && typeof items[0] === "object") {
+      item = items[0] as Record<string, unknown>;
+    } else if (items && typeof items === "object" && !Array.isArray(items)) {
+      item = items as Record<string, unknown>;
+    }
+  }
+  if (!item) {
+    // Tolerate a flatter shape if the vendor ever returns one.
+    if ("order_number" in root || "status_code" in root || "order_items" in root) {
+      item = root;
+    }
+  }
+  if (!item) return empty;
+
+  const orderItemsRaw = item.order_items;
+  const orderItems = Array.isArray(orderItemsRaw) ? orderItemsRaw : orderItemsRaw ? [orderItemsRaw] : [];
+
+  return {
+    orderNumber:
+      item.order_number !== undefined && item.order_number !== null
+        ? String(item.order_number).trim()
+        : null,
+    statusCode: item.status_code !== undefined && item.status_code !== null ? (item.status_code as string | number) : null,
+    statusMsg: item.status_msg !== undefined && item.status_msg !== null ? (item.status_msg as string | number) : null,
+    currency: item.currency !== undefined && item.currency !== null ? String(item.currency) : null,
+    orderItems,
+    raw: json,
+  };
 }
 
 const xmlParser = new XMLParser({
@@ -294,33 +436,47 @@ export class WholesalePerfumesClient {
   /** Empty the account-global cart. Mutates shared vendor state. */
   async clearCart(): Promise<unknown> {
     const { json, text } = await this.request("DELETE", `${this.apiBaseUrl}/cart`);
+    assertApiOk(json, "DELETE /cart");
     return json ?? text;
   }
 
   /**
    * Replace-style insert: POST /cart takes the full line list (`[{ code, quantity }, ...]`)
    * and is all-or-nothing. Callers must clear first when building a fresh cart.
+   * `code` = catalog product id (not EAN).
    */
   async addToCart(lines: WholesalePerfumesCartLine[]): Promise<unknown> {
     const { json, text } = await this.request("POST", `${this.apiBaseUrl}/cart`, lines);
+    assertApiOk(json, "POST /cart");
     return json ?? text;
   }
 
   async getCart(): Promise<unknown> {
     const { json, text } = await this.request("GET", `${this.apiBaseUrl}/cart`);
+    assertApiOk(json, "GET /cart");
     return json ?? text;
   }
 
-  async submitCart(): Promise<unknown> {
-    const { json, text } = await this.request("POST", `${this.apiBaseUrl}/cart/submit`);
+  /** Optional `note` is written onto the vendor order (e.g. our SIL-* reference). */
+  async submitCart(options?: { note?: string }): Promise<unknown> {
+    const body =
+      options?.note !== undefined && options.note !== ""
+        ? { note: options.note }
+        : undefined;
+    const { json, text } = await this.request("POST", `${this.apiBaseUrl}/cart/submit`, body);
+    assertApiOk(json, "POST /cart/submit");
     return json ?? text;
   }
 
-  async getOrder(orderNumber: string): Promise<unknown> {
+  async getOrder(orderNumber: string): Promise<WholesalePerfumesOrderView> {
     const { json, text } = await this.request(
       "GET",
       `${this.apiBaseUrl}/order/${encodeURIComponent(orderNumber)}`,
     );
-    return json ?? text;
+    // Order GET uses a `result` envelope; only assert when an `error` field is present.
+    if (readApiErrorCode(json) !== null) {
+      assertApiOk(json, `GET /order/${orderNumber}`);
+    }
+    return parseOrderGetResponse(json ?? text);
   }
 }

@@ -217,12 +217,12 @@ None of these are engineering decisions. Get the values from the operator; do no
 - **Small-order fee.** Currently disabled, with placeholder defaults of a €50 minimum and a €5 fee.
   The fee applies once per cart, never stacks, and is non-taxable. Per-vendor minimums live on the
   vendor row and are now editable on the Vendors page.
-- **wholesale-perfumes go-live.** Four things must be confirmed before the vendor is activated, all of them
-  currently guesses flagged in migration `013`: the real minimum order value, the real shipping
-  country list, the VAT rate (stored as a **fraction** — 21% is `0.21`, not `21`), and the meaning
-  of the cart `code` field. The last one is isolated in `wholesalePerfumesCartCode()` in
-  `src/orders/adapters/wholesale-perfumes.ts` and must be verified by a dry-run before any live order. The API
-  token that appeared in the client chat should be treated as compromised and rotated.
+- **wholesale-perfumes go-live.** Three things must still be confirmed before the vendor is activated
+  (migration `013` guesses): the real minimum order value, the shipping country list, and the VAT
+  rate (stored as a **fraction** — 21% is `0.21`, not `21`). Cart `code` = catalog product `id` is
+  confirmed by the vendor B2B API doc (`docs/vendors/wholesale-perfumes-api.md`); still prefer a
+  staging cart round-trip before first live spend. The API token that appeared in the client chat
+  should be treated as compromised and rotated.
 
 ---
 

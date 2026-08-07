@@ -337,6 +337,9 @@ bug-fixed versions live in `sillage-core/src/vendors/`.
   `primary_ean`.
 - **BeautyFort has no stock-check endpoint.** Stock is verified against `sil_offers`, which the
   30-minute sync keeps fresh.
+- **wholesale-perfumes cart `code` is the catalog product `id`** (not EAN). Cart is account-global;
+  dry-run must not touch it. JSON responses use application-level `error` (0 = OK) on HTTP 200;
+  see `docs/vendors/wholesale-perfumes-api.md`.
 - **Neither vendor has a sandbox.** `orders_dry_run` defaults to `1` and `orders_auto_dispatch` to
   `0`. A live submit requires both an explicit `--live` (or setting change) and `--force` / auto-dispatch.
 
