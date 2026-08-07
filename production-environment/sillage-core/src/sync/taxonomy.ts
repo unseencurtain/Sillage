@@ -215,141 +215,93 @@ export async function syncCategories(
 }
 
 /**
- * Top-level shop categories so customers can browse LPS01 / LPS02 (etc.) as normal WooCommerce
- * category pages. Mapped under a stable `vendor:{slug}` source_key so renaming the storefront
- * label updates `wp_terms.name` / `slug` in place and keeps the same term_id.
+ * Vendor lanes (LPS01 / LPS02 / LPS03) must NOT live in `product_cat` — marketplaces treat that
+ * taxonomy as browse categories. Vendor identity is `_sillage_vendor` meta + `pa_vendor`.
+ *
+ * This removes any leftover vendor `product_cat` terms (and their sil_term_map rows) from earlier
+ * mistaken lane wiring. Feed browse categories are left alone.
  */
-export async function ensureVendorShopCategories(
+export async function purgeVendorProductCatLanes(
   vendors: Array<{ slug: string; name: string; storefrontLabel?: string }>,
   labels: Record<string, string>,
-): Promise<{ bySlug: Map<string, TermRef>; created: number }> {
-  const bySlug = new Map<string, TermRef>();
-  let created = 0;
+): Promise<{ deleted: number }> {
+  const termIds = new Set<number>();
 
-  const mapped = new Map<string, { ref: TermRef; label: string }>();
-  for (const row of await query<SimpleMapRow & { label: string }>(
-    `SELECT source_key, wp_term_id, wp_term_taxonomy_id, label FROM ${sil("sil_term_map")}
+  for (const row of await query<SimpleMapRow>(
+    `SELECT source_key, wp_term_id, wp_term_taxonomy_id FROM ${sil("sil_term_map")}
       WHERE taxonomy = ? AND source_key LIKE 'vendor:%'`,
     [CATEGORY_TAXONOMY],
   )) {
-    mapped.set(row.source_key, {
-      ref: { termId: row.wp_term_id, ttId: row.wp_term_taxonomy_id },
-      label: row.label,
-    });
+    termIds.add(row.wp_term_id);
   }
 
-  // Legacy rows keyed by foldKey(old label) from before storefront_label existed.
-  const legacyByFold = new Map<string, TermRef>();
-  for (const row of await query<SimpleMapRow>(
-    `SELECT source_key, wp_term_id, wp_term_taxonomy_id FROM ${sil("sil_term_map")}
-      WHERE taxonomy = ? AND source_key NOT LIKE 'vendor:%'`,
-    [CATEGORY_TAXONOMY],
-  )) {
-    legacyByFold.set(row.source_key, { termId: row.wp_term_id, ttId: row.wp_term_taxonomy_id });
-  }
-
-  const existingByFold = new Map<string, TermRow>();
-  const existingBySlug = new Map<string, TermRow>();
-  for (const row of await query<TermRow>(
-    `SELECT t.term_id, tt.term_taxonomy_id, t.slug, t.name, tt.parent
-       FROM ${wp("terms")} t
-       JOIN ${wp("term_taxonomy")} tt ON tt.term_id = t.term_id
-      WHERE tt.taxonomy = ? AND tt.parent = 0`,
-    [CATEGORY_TAXONOMY],
-  )) {
-    existingBySlug.set(row.slug, row);
-    const folded = foldKey(row.name);
-    if (!existingByFold.has(folded)) existingByFold.set(folded, row);
-  }
-
-  const takenSlugs = await loadTakenSlugs();
-
+  const nameGuesses = new Set<string>(["LPS01", "LPS02", "LPS03", "lps01", "lps02", "lps03"]);
   for (const v of vendors) {
-    const label = (labels[v.slug] ?? v.storefrontLabel ?? v.name).trim();
-    if (!label) continue;
-    const mapKey = `vendor:${v.slug}`;
-    let ref = mapped.get(mapKey)?.ref;
-
-    if (!ref) {
-      // Adopt: current label, vendor.name, or any prior hardcoded storefront names.
-      const adoptCandidates = [label, v.name, labels[v.slug]].filter(Boolean) as string[];
-      for (const candidate of adoptCandidates) {
-        const folded = foldKey(candidate);
-        const hit =
-          legacyByFold.get(folded) ??
-          (existingByFold.get(folded)
-            ? { termId: existingByFold.get(folded)!.term_id, ttId: existingByFold.get(folded)!.term_taxonomy_id }
-            : undefined) ??
-          (existingBySlug.get(slugify(candidate))
-            ? {
-                termId: existingBySlug.get(slugify(candidate))!.term_id,
-                ttId: existingBySlug.get(slugify(candidate))!.term_taxonomy_id,
-              }
-            : undefined);
-        if (hit) {
-          ref = hit;
-          break;
-        }
-      }
-    }
-
-    if (!ref) {
-      const slug = uniqueTermSlug(label, takenSlugs, `vendor-${v.slug}`);
-      ref = await transaction(async (conn) => insertTerm(conn, label, slug, CATEGORY_TAXONOMY, 0));
-      created++;
-      existingBySlug.set(slug, {
-        term_id: ref.termId,
-        term_taxonomy_id: ref.ttId,
-        slug,
-        name: label,
-        parent: 0,
-      } as TermRow);
-    } else {
-      // Rename in place when the storefront label changed — keep term_id.
-      const current = await query<TermRow>(
-        `SELECT t.term_id, tt.term_taxonomy_id, t.slug, t.name, tt.parent
-           FROM ${wp("terms")} t
-           JOIN ${wp("term_taxonomy")} tt ON tt.term_id = t.term_id
-          WHERE t.term_id = ? AND tt.taxonomy = ?`,
-        [ref.termId, CATEGORY_TAXONOMY],
-      );
-      const row = current[0];
-      if (row && row.name !== label) {
-        takenSlugs.delete(row.slug);
-        const desired = slugify(label) || `vendor-${v.slug}`;
-        let newSlug = row.slug;
-        if (row.slug !== desired) {
-          if (!takenSlugs.has(desired) || existingBySlug.get(desired)?.term_id === row.term_id) {
-            newSlug = desired;
-            takenSlugs.add(desired);
-          } else {
-            newSlug = uniqueTermSlug(label, takenSlugs, `vendor-${v.slug}`);
-          }
-        }
-        await execute(`UPDATE ${wp("terms")} SET name = ?, slug = ? WHERE term_id = ?`, [
-          label.slice(0, 200),
-          newSlug.slice(0, 200),
-          row.term_id,
-        ]);
-        log.info(`renamed product_cat term ${row.term_id}: "${row.name}" → "${label}"`);
-      }
-    }
-
-    await execute(
-      `INSERT INTO ${sil("sil_term_map")}
-         (taxonomy, source_key, wp_term_id, wp_term_taxonomy_id, label)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         wp_term_id = VALUES(wp_term_id),
-         wp_term_taxonomy_id = VALUES(wp_term_taxonomy_id),
-         label = VALUES(label)`,
-      [CATEGORY_TAXONOMY, mapKey, ref.termId, ref.ttId, label.slice(0, 200)],
-    );
-    bySlug.set(v.slug, ref);
+    const label = (labels[v.slug] ?? v.storefrontLabel ?? "").trim();
+    if (label) nameGuesses.add(label);
+    nameGuesses.add(v.name);
   }
 
-  if (created > 0) log.info(`vendor shop categories: ${created} product_cat terms created`);
-  return { bySlug, created };
+  const placeholders = [...nameGuesses].map(() => "?").join(",");
+  if (placeholders) {
+    for (const row of await query<TermRow>(
+      `SELECT t.term_id, tt.term_taxonomy_id, t.slug, t.name, tt.parent
+         FROM ${wp("terms")} t
+         JOIN ${wp("term_taxonomy")} tt ON tt.term_id = t.term_id
+        WHERE tt.taxonomy = ?
+          AND (t.slug IN (${placeholders}) OR t.name IN (${placeholders}))`,
+      [CATEGORY_TAXONOMY, ...nameGuesses, ...nameGuesses],
+    )) {
+      // Only purge top-level LPS-style lanes — never a nested feed category that happens to share a name.
+      if (row.parent === 0 || /^lps0[123]$/i.test(row.slug) || /^lps0[123]$/i.test(row.name)) {
+        termIds.add(row.term_id);
+      }
+    }
+  }
+
+  if (termIds.size === 0) {
+    await execute(
+      `DELETE FROM ${sil("sil_term_map")} WHERE taxonomy = ? AND source_key LIKE 'vendor:%'`,
+      [CATEGORY_TAXONOMY],
+    );
+    return { deleted: 0 };
+  }
+
+  const ids = [...termIds];
+  const idPh = ids.map(() => "?").join(",");
+
+  // Subquery form — multi-table DELETE aliases break when the pool has no default schema.
+  await execute(
+    `DELETE FROM ${wp("term_relationships")}
+      WHERE term_taxonomy_id IN (
+            SELECT term_taxonomy_id FROM ${wp("term_taxonomy")}
+             WHERE taxonomy = ? AND term_id IN (${idPh})
+          )`,
+    [CATEGORY_TAXONOMY, ...ids],
+  );
+  await execute(`DELETE FROM ${wp("termmeta")} WHERE term_id IN (${idPh})`, ids);
+  await execute(
+    `DELETE FROM ${wp("term_taxonomy")} WHERE taxonomy = ? AND term_id IN (${idPh})`,
+    [CATEGORY_TAXONOMY, ...ids],
+  );
+  await execute(
+    `DELETE t FROM ${wp("terms")} t
+      WHERE t.term_id IN (${idPh})
+        AND NOT EXISTS (SELECT 1 FROM ${wp("term_taxonomy")} tt WHERE tt.term_id = t.term_id)`,
+    ids,
+  );
+  await execute(
+    `DELETE FROM ${sil("sil_term_map")} WHERE taxonomy = ? AND source_key LIKE 'vendor:%'`,
+    [CATEGORY_TAXONOMY],
+  );
+  await execute(
+    `DELETE FROM ${wp("wc_category_lookup")}
+      WHERE category_tree_id IN (${idPh}) OR category_id IN (${idPh})`,
+    [...ids, ...ids],
+  );
+
+  log.info(`purged ${ids.length} vendor product_cat lane term(s)`);
+  return { deleted: ids.length };
 }
 
 /**
@@ -392,29 +344,22 @@ const B2B_VENDOR_SLUG = "wholesale-perfumes";
 const B2B_PAGE_SLUG = "b2b-wholesale";
 
 /**
- * Ensure a published WordPress page that lists only the B2B wholesaler (LPS03) category.
- * Main-shop exclusion of that category is enforced by the PHP bridge at query time.
+ * Ensure a published WordPress page that lists only the B2B wholesaler.
+ * The bridge filters `[products]` on this page by `_sillage_vendor=wholesale-perfumes`
+ * (not by a product_cat lane — vendor identity must stay off product categories).
  */
-export async function ensureB2bShopPage(
-  vendorShopCategories: Map<string, TermRef>,
-): Promise<{ pageId: number; created: boolean } | null> {
-  const ref = vendorShopCategories.get(B2B_VENDOR_SLUG);
-  if (!ref) return null;
-
-  const termRows = await query<TermRow>(
-    `SELECT t.term_id, tt.term_taxonomy_id, t.slug, t.name, tt.parent
-       FROM ${wp("terms")} t
-       JOIN ${wp("term_taxonomy")} tt ON tt.term_id = t.term_id
-      WHERE t.term_id = ? AND tt.taxonomy = ?`,
-    [ref.termId, CATEGORY_TAXONOMY],
+export async function ensureB2bShopPage(): Promise<{ pageId: number; created: boolean } | null> {
+  // Presence check: do not create a B2B page when the vendor row is missing entirely.
+  const vendorRows = await query<RowDataPacket>(
+    `SELECT 1 FROM ${sil("sil_vendors")} WHERE slug = ? LIMIT 1`,
+    [B2B_VENDOR_SLUG],
   );
-  const term = termRows[0];
-  if (!term) return null;
+  if (vendorRows.length === 0) return null;
 
-  const shortcode = `[products limit="24" columns="4" paginate="true" category="${term.slug}"]`;
+  const shortcode = `[products limit="24" columns="4" paginate="true"]`;
   const title = "B2B Wholesale";
-  const content =
-    `<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
+  const content = `<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
+  const marker = "sillage-b2b-products";
 
   const existing = await query<RowDataPacket & { ID: number; post_content: string }>(
     `SELECT ID, post_content FROM ${wp("posts")}
@@ -425,18 +370,36 @@ export async function ensureB2bShopPage(
 
   if (existing[0]) {
     const pageId = existing[0].ID;
-    if (!existing[0].post_content.includes(`category="${term.slug}"`)) {
+    const stale =
+      existing[0].post_content.includes('category="') ||
+      !existing[0].post_content.includes("[products");
+    if (stale || !existing[0].post_content.includes(marker)) {
+      // Embed an HTML comment marker so we can detect the vendor-meta-based page content.
+      const stamped =
+        `<!-- ${marker} -->\n<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
       await execute(
         `UPDATE ${wp("posts")}
             SET post_content = ?, post_title = ?, post_status = 'publish',
                 post_modified = NOW(), post_modified_gmt = UTC_TIMESTAMP()
           WHERE ID = ?`,
-        [content, title, pageId],
+        [stamped, title, pageId],
+      );
+    }
+    const meta = await query<RowDataPacket>(
+      `SELECT meta_id FROM ${wp("postmeta")} WHERE post_id = ? AND meta_key = '_sillage_b2b_shop' LIMIT 1`,
+      [pageId],
+    );
+    if (meta.length === 0) {
+      await execute(
+        `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value) VALUES (?, '_sillage_b2b_shop', '1')`,
+        [pageId],
       );
     }
     return { pageId, created: false };
   }
 
+  const stamped =
+    `<!-- ${marker} -->\n<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
   const result = await execute(
     `INSERT INTO ${wp("posts")}
        (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt,
@@ -448,19 +411,18 @@ export async function ensureB2bShopPage(
         'publish', 'closed', 'closed', '', ?,
         '', '', NOW(), UTC_TIMESTAMP(), '',
         0, '', 0, 'page', '', 0)`,
-    [content, title, B2B_PAGE_SLUG],
+    [stamped, title, B2B_PAGE_SLUG],
   );
   const pageId = result.insertId;
   await execute(`UPDATE ${wp("posts")} SET guid = CONCAT(?, '/?page_id=', ID) WHERE ID = ?`, [
     env.wordpress.baseUrl.replace(/\/$/, ""),
     pageId,
   ]);
-  // Flag the bridge can read without querying sillage tables.
   await execute(
     `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value) VALUES (?, '_sillage_b2b_shop', '1')`,
     [pageId],
   );
-  log.info(`created B2B shop page id=${pageId} slug=${B2B_PAGE_SLUG} category=${term.slug}`);
+  log.info(`created B2B shop page id=${pageId} slug=${B2B_PAGE_SLUG} (vendor meta filter)`);
   return { pageId, created: true };
 }
 

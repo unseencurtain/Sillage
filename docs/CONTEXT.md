@@ -222,12 +222,14 @@ This is a closed list. If a task seems to require adding write logic here, it be
 6. On activation: register `pa_gender` / `pa_item-type` / `pa_volume` via `wc_create_attribute()`
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
-9. Exclude the B2B wholesaler (`wholesale-perfumes` / LPS03) `product_cat` from the main shop,
+9. Exclude B2B wholesaler products (`_sillage_vendor=wholesale-perfumes`) from the main shop,
    search (including Blocksy REST live search via `rest_post_search_query`), and other product
-   queries; allow it only on that category archive and the dedicated B2B page
-   (`_sillage_b2b_shop` postmeta). When that term has zero products, also hide it from category
-   widgets, `get_terms` lists, and nav menus (auto-shows once count > 0). Optional safety CSS so
-   external thumbs cannot stretch product cards.
+   queries; allow them only on the dedicated B2B page (`_sillage_b2b_shop` postmeta), where
+   `[products]` is scoped to that vendor meta. Vendor lanes are never `product_cat` — use
+   `_sillage_vendor` + `pa_vendor` instead. Also enforce catalog visibility (hide
+   `exclude-from-catalog`) on product listing/search queries, strip legacy LPS* product_cat
+   terms from category widgets/`get_terms`/nav, and hide empty feed categories. Optional safety
+   CSS so external thumbs cannot stretch product cards.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.

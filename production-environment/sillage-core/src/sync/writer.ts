@@ -87,8 +87,6 @@ export interface WriteContext {
   categoryMaps: Map<number, Map<string, TermRef>>;
   brandMap: Map<string, TermRef>;
   attributeMaps: Map<string, Map<string, TermRef>>;
-  /** product_cat term per vendor slug — storefront labels (LPS01 / LPS02). */
-  vendorShopCategories: Map<string, TermRef>;
   visibility: Record<string, TermRef>;
   productType: TermRef;
   /** Global attribute taxonomies the plugin has actually registered in WooCommerce. */
@@ -240,7 +238,6 @@ export async function buildWriteContext(
   categoryMaps: Map<number, Map<string, TermRef>>,
   brandMap: Map<string, TermRef>,
   attributeMaps: Map<string, Map<string, TermRef>>,
-  vendorShopCategories: Map<string, TermRef> = new Map(),
 ): Promise<WriteContext> {
   const active = new Set<string>();
   for (const row of await query<RowDataPacket & { attribute_name: string }>(
@@ -255,7 +252,6 @@ export async function buildWriteContext(
     categoryMaps,
     brandMap,
     attributeMaps,
-    vendorShopCategories,
     visibility: await loadVisibilityTerms(),
     productType: await loadProductTypeTerm("simple"),
     activeAttributeTaxonomies: active,
@@ -430,16 +426,14 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
 
   attributes["vendor"] = vendorStorefrontLabel(vendor);
 
+  // Feed browse categories only — never vendor lanes (LPS*) as product_cat.
+  // Vendor identity is `_sillage_vendor` meta + `pa_vendor` (storefront_label).
   const categoryMap = ctx.categoryMaps.get(row.vendor_id);
   const categoryTtIds: number[] = [];
   for (const ref of categoryRefs) {
     // Leaf terms only. WooCommerce walks ancestors itself for archives and counts.
     const term = categoryMap?.get(ref);
     if (term) categoryTtIds.push(term.ttId);
-  }
-  const vendorShop = ctx.vendorShopCategories.get(vendor.slug);
-  if (vendorShop && !categoryTtIds.includes(vendorShop.ttId)) {
-    categoryTtIds.push(vendorShop.ttId);
   }
 
   const attributeTerms: PreparedProduct["attributeTerms"] = [];

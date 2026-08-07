@@ -15,46 +15,39 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Theme-agnostic WooCommerce query filters.
  *
- * LPS03 (wholesale-perfumes) products must only appear on their own category archive and the
- * dedicated B2B page created by sillage-core. Everything else — shop, search, related products,
- * other category archives — excludes that term.
+ * Vendor identity lives on `_sillage_vendor` postmeta (and the `pa_vendor` attribute for
+ * storefront facets) — never on `product_cat`. Marketplace connectors treat product categories
+ * as browse taxonomy; LPS01/LPS02/LPS03 must not appear there.
  *
- * When LPS03 has zero assigned products (vendor inactive / not yet synced), the empty term is
- * also dropped from category widgets, `get_terms` lists, and nav menus. As soon as `tt.count`
- * becomes > 0 after sync, those surfaces show it again — no operator toggle.
+ * wholesale-perfumes (B2B) products appear only on the dedicated B2B page
+ * (`_sillage_b2b_shop` postmeta). Main shop, search, category archives, and related loops
+ * exclude them via meta_query.
  *
- * Resolution uses `sil_vendors.storefront_label` (lime has SELECT) plus the WordPress
- * `product_cat` term — not `sil_term_map`, which the WordPress DB user cannot read.
+ * Legacy LPS* `product_cat` terms (from an earlier mistaken lane) are stripped from category
+ * widgets / `get_terms` / nav if they still exist. Empty feed categories are hidden too.
  */
 final class Sillage_Catalog {
 
 	private const B2B_VENDOR_SLUG = 'wholesale-perfumes';
 	private const B2B_PAGE_META   = '_sillage_b2b_shop';
+	private const VENDOR_META     = '_sillage_vendor';
 
-	/** @var int|null term_taxonomy_id for the B2B product_cat, or 0 when unknown. */
-	private ?int $b2b_tt_id = null;
-
-	/** @var int|null term_id for the B2B product_cat, or 0 when unknown. */
-	private ?int $b2b_term_id = null;
-
-	/** @var string|null product_cat slug for the B2B term. */
-	private ?string $b2b_slug = null;
-
-	/** @var int|null Cached product count for the B2B term (−1 = unresolved). */
-	private ?int $b2b_count = null;
+	/** @var string[] Legacy product_cat slugs that must never appear in browse UI. */
+	private const LEGACY_VENDOR_CAT_SLUGS = array( 'lps01', 'lps02', 'lps03' );
 
 	public function register(): void {
 		add_action( 'pre_get_posts', array( $this, 'exclude_b2b_from_main_catalog' ), 20 );
 		add_action( 'woocommerce_product_query', array( $this, 'exclude_b2b_from_wc_query' ), 20 );
 		// Blocksy live search uses WP REST /wp/v2/search (not the main query). After Blocksy's
 		// rest_post_search_query (priority 999) so we keep its visibility/tax patches and still
-		// exclude LPS03 the same way the search results page does.
+		// exclude B2B the same way the search results page does.
 		add_filter( 'rest_post_search_query', array( $this, 'exclude_b2b_from_rest_search' ), 1000, 2 );
+		add_filter( 'woocommerce_shortcode_products_query', array( $this, 'filter_b2b_shortcode_products' ), 20, 3 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_image_safety_css' ), 30 );
-		add_filter( 'get_terms', array( $this, 'hide_empty_b2b_from_term_lists' ), 20, 3 );
-		add_filter( 'woocommerce_product_categories_widget_args', array( $this, 'exclude_empty_b2b_from_category_widget' ), 20 );
-		add_filter( 'woocommerce_product_categories_widget_dropdown_args', array( $this, 'exclude_empty_b2b_from_category_widget' ), 20 );
-		add_filter( 'wp_get_nav_menu_items', array( $this, 'hide_empty_b2b_from_nav_menus' ), 20, 3 );
+		add_filter( 'get_terms', array( $this, 'filter_product_cat_term_lists' ), 20, 3 );
+		add_filter( 'woocommerce_product_categories_widget_args', array( $this, 'filter_category_widget_args' ), 20 );
+		add_filter( 'woocommerce_product_categories_widget_dropdown_args', array( $this, 'filter_category_widget_args' ), 20 );
+		add_filter( 'wp_get_nav_menu_items', array( $this, 'hide_legacy_vendor_cats_from_nav' ), 20, 3 );
 	}
 
 	/**
@@ -85,7 +78,8 @@ final class Sillage_Catalog {
 		if ( ! $this->is_product_listing_query( $query ) ) {
 			return;
 		}
-		if ( $this->should_allow_b2b( $query ) ) {
+		$this->ensure_catalog_visibility( $query );
+		if ( $this->should_allow_b2b() ) {
 			return;
 		}
 		$this->append_b2b_exclusion( $query );
@@ -100,17 +94,18 @@ final class Sillage_Catalog {
 		if ( is_admin() || ! $query instanceof WP_Query ) {
 			return;
 		}
-		if ( $this->should_allow_b2b( $query ) ) {
+		$this->ensure_catalog_visibility( $query );
+		if ( $this->should_allow_b2b() ) {
 			return;
 		}
 		$this->append_b2b_exclusion( $query );
 	}
 
 	/**
-	 * Exclude LPS03 from Blocksy/WP REST live search so dropdown matches /?s= results.
+	 * Exclude B2B from Blocksy/WP REST live search so dropdown matches /?s= results.
 	 *
-	 * @param array            $args    WP_Query args for the search.
-	 * @param WP_REST_Request  $request REST request.
+	 * @param array           $args    WP_Query args for the search.
+	 * @param WP_REST_Request $request REST request.
 	 * @return array
 	 */
 	public function exclude_b2b_from_rest_search( $args, $request ) {
@@ -118,41 +113,48 @@ final class Sillage_Catalog {
 			return $args;
 		}
 
-		$post_type = $args['post_type'] ?? '';
-		$includes_product = ( 'product' === $post_type )
+		$post_type         = $args['post_type'] ?? '';
+		$includes_product  = ( 'product' === $post_type )
 			|| ( is_array( $post_type ) && in_array( 'product', $post_type, true ) );
 		if ( ! $includes_product ) {
 			return $args;
 		}
 
 		unset( $request );
-		$slug = $this->b2b_category_slug();
-		if ( '' !== $slug && isset( $args['tax_query'] ) && is_array( $args['tax_query'] )
-			&& $this->tax_query_targets_b2b( $args['tax_query'], $slug ) ) {
-			return $args;
-		}
-		// Same Blocksy ?ct_tax_query=product_cat:{id} allow as the main search query.
-		if ( $this->request_targets_b2b_category() ) {
+		$args = $this->ensure_catalog_visibility_args( $args );
+
+		if ( $this->should_allow_b2b() ) {
 			return $args;
 		}
 
-		$tt_id = $this->b2b_term_taxonomy_id();
-		if ( $tt_id <= 0 ) {
-			return $args;
+		return $this->append_b2b_exclusion_args( $args );
+	}
+
+	/**
+	 * On the B2B page, `[products]` shortcodes list only wholesale-perfumes.
+	 *
+	 * @param array  $query_args Shortcode query args.
+	 * @param array  $attributes Shortcode attributes.
+	 * @param string $_type      Shortcode type (unused).
+	 * @return array
+	 */
+	public function filter_b2b_shortcode_products( $query_args, $attributes = array(), $_type = '' ) {
+		unset( $attributes, $_type );
+		if ( ! is_array( $query_args ) || ! $this->should_allow_b2b() ) {
+			return $query_args;
 		}
 
-		$tax_query = isset( $args['tax_query'] ) && is_array( $args['tax_query'] )
-			? $args['tax_query']
+		$meta_query = isset( $query_args['meta_query'] ) && is_array( $query_args['meta_query'] )
+			? $query_args['meta_query']
 			: array();
-		$tax_query[] = array(
-			'taxonomy' => 'product_cat',
-			'field'    => 'term_taxonomy_id',
-			'terms'    => array( $tt_id ),
-			'operator' => 'NOT IN',
+		$meta_query[] = array(
+			'key'     => self::VENDOR_META,
+			'value'   => self::B2B_VENDOR_SLUG,
+			'compare' => '=',
 		);
-		$args['tax_query'] = $tax_query;
+		$query_args['meta_query'] = $meta_query;
 
-		return $args;
+		return $query_args;
 	}
 
 	/**
@@ -175,115 +177,232 @@ final class Sillage_Catalog {
 		return false;
 	}
 
-	/**
-	 * Allow B2B products on their category archive, dedicated B2B page, and explicit
-	 * product_cat filters that target that term (Blocksy search `ct_tax_query`, etc.).
-	 *
-	 * @param WP_Query $query Query.
-	 */
-	private function should_allow_b2b( WP_Query $query ): bool {
-		$slug = $this->b2b_category_slug();
-		if ( '' === $slug ) {
-			return false;
-		}
-
-		if ( function_exists( 'is_product_category' ) && is_product_category( $slug ) ) {
-			return true;
-		}
-
-		// Blocksy search: ?ct_tax_query=product_cat:{term_id} (field=id, often nested).
-		if ( $this->request_targets_b2b_category() ) {
-			return true;
-		}
-
-		$tax_query = $query->get( 'tax_query' );
-		if ( is_array( $tax_query ) && $this->tax_query_targets_b2b( $tax_query, $slug ) ) {
-			return true;
-		}
-
+	/** True on the dedicated B2B wholesale page only. */
+	private function should_allow_b2b(): bool {
 		if ( function_exists( 'is_page' ) && is_page() ) {
 			$page_id = (int) get_queried_object_id();
 			if ( $page_id > 0 && '1' === (string) get_post_meta( $page_id, self::B2B_PAGE_META, true ) ) {
 				return true;
 			}
 		}
-
 		return false;
 	}
 
 	/**
-	 * True when the current request explicitly filters to the B2B product_cat.
+	 * Shop-truth visibility: hide `exclude-from-catalog` (Blocksy search often skips WC_Query).
+	 *
+	 * @param WP_Query $query Query to mutate.
 	 */
-	private function request_targets_b2b_category(): bool {
-		$term_id = $this->b2b_term_id();
-		$slug    = $this->b2b_category_slug();
-		if ( $term_id <= 0 && '' === $slug ) {
-			return false;
+	private function ensure_catalog_visibility( WP_Query $query ): void {
+		$args = array(
+			'tax_query' => $query->get( 'tax_query' ),
+		);
+		$args = $this->ensure_catalog_visibility_args( $args );
+		if ( isset( $args['tax_query'] ) ) {
+			$query->set( 'tax_query', $args['tax_query'] );
 		}
-
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only catalog routing.
-		$raw = isset( $_GET['ct_tax_query'] ) ? wp_unslash( (string) $_GET['ct_tax_query'] ) : '';
-		$raw = sanitize_text_field( $raw );
-		if ( '' === $raw ) {
-			return false;
-		}
-
-		$parts = explode( ':', $raw, 2 );
-		if ( 2 !== count( $parts ) || 'product_cat' !== $parts[0] ) {
-			return false;
-		}
-
-		$value = $parts[1];
-		if ( $term_id > 0 && (string) $term_id === $value ) {
-			return true;
-		}
-		if ( '' !== $slug && $slug === $value ) {
-			return true;
-		}
-
-		return false;
 	}
 
 	/**
-	 * @param array  $tax_query Tax query clauses.
-	 * @param string $slug      B2B category slug.
+	 * @param array $args Query args.
+	 * @return array
 	 */
-	private function tax_query_targets_b2b( array $tax_query, string $slug ): bool {
-		$term_id = $this->b2b_term_id();
-		$tt_id   = $this->b2b_term_taxonomy_id();
+	private function ensure_catalog_visibility_args( array $args ): array {
+		$term = get_term_by( 'slug', 'exclude-from-catalog', 'product_visibility' );
+		if ( ! ( $term instanceof WP_Term ) ) {
+			return $args;
+		}
+		$tt_id = (int) $term->term_taxonomy_id;
+		if ( $tt_id <= 0 ) {
+			return $args;
+		}
 
+		$tax_query = isset( $args['tax_query'] ) && is_array( $args['tax_query'] )
+			? $args['tax_query']
+			: array();
+		if ( $this->tax_query_already_excludes_tt( $tax_query, $tt_id ) ) {
+			return $args;
+		}
+
+		$tax_query[] = array(
+			'taxonomy' => 'product_visibility',
+			'field'    => 'term_taxonomy_id',
+			'terms'    => array( $tt_id ),
+			'operator' => 'NOT IN',
+		);
+		$args['tax_query'] = $tax_query;
+		return $args;
+	}
+
+	/**
+	 * @param array $tax_query Tax query.
+	 * @param int   $tt_id     term_taxonomy_id.
+	 */
+	private function tax_query_already_excludes_tt( array $tax_query, int $tt_id ): bool {
 		foreach ( $tax_query as $clause ) {
 			if ( ! is_array( $clause ) ) {
 				continue;
 			}
-			if ( isset( $clause['taxonomy'] ) && 'product_cat' === $clause['taxonomy'] ) {
-				$terms    = $clause['terms'] ?? null;
-				$field    = isset( $clause['field'] ) ? (string) $clause['field'] : 'term_id';
+			if ( isset( $clause['taxonomy'] ) && 'product_visibility' === $clause['taxonomy'] ) {
 				$operator = isset( $clause['operator'] ) ? strtoupper( (string) $clause['operator'] ) : 'IN';
-				if ( in_array( $operator, array( 'NOT IN', 'NOT EXISTS', 'NOT AND' ), true ) ) {
-					// Exclusion clauses are ours or unrelated — do not treat as allow.
-				} elseif ( 'slug' === $field ) {
-					if ( is_string( $terms ) && $terms === $slug ) {
-						return true;
-					}
-					if ( is_array( $terms ) && in_array( $slug, array_map( 'strval', $terms ), true ) ) {
-						return true;
-					}
-				} elseif ( in_array( $field, array( 'term_id', 'id', '' ), true ) ) {
-					if ( $term_id > 0 && $this->terms_include_id( $terms, $term_id ) ) {
-						return true;
-					}
-				} elseif ( 'term_taxonomy_id' === $field ) {
-					if ( $tt_id > 0 && $this->terms_include_id( $terms, $tt_id ) ) {
-						return true;
-					}
+				if ( 'NOT IN' === $operator && $this->terms_include_id( $clause['terms'] ?? null, $tt_id ) ) {
+					return true;
 				}
 			}
-			if ( $this->tax_query_targets_b2b( $clause, $slug ) ) {
+			if ( $this->tax_query_already_excludes_tt( $clause, $tt_id ) ) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * @param WP_Query $query Query to mutate.
+	 */
+	private function append_b2b_exclusion( WP_Query $query ): void {
+		$meta_query = $query->get( 'meta_query' );
+		if ( ! is_array( $meta_query ) ) {
+			$meta_query = array();
+		}
+		$meta_query[] = $this->b2b_exclusion_meta_clause();
+		$query->set( 'meta_query', $meta_query );
+	}
+
+	/**
+	 * @param array $args Query args.
+	 * @return array
+	 */
+	private function append_b2b_exclusion_args( array $args ): array {
+		$meta_query = isset( $args['meta_query'] ) && is_array( $args['meta_query'] )
+			? $args['meta_query']
+			: array();
+		$meta_query[] = $this->b2b_exclusion_meta_clause();
+		$args['meta_query'] = $meta_query;
+		return $args;
+	}
+
+	/** @return array<string, mixed> */
+	private function b2b_exclusion_meta_clause(): array {
+		return array(
+			'relation' => 'OR',
+			array(
+				'key'     => self::VENDOR_META,
+				'value'   => self::B2B_VENDOR_SLUG,
+				'compare' => '!=',
+			),
+			array(
+				'key'     => self::VENDOR_META,
+				'compare' => 'NOT EXISTS',
+			),
+		);
+	}
+
+	/**
+	 * Drop legacy LPS* product_cat terms and empty feed cats from front-end lists.
+	 *
+	 * @param array                $terms      Term results.
+	 * @param array|string         $taxonomies Taxonomies requested.
+	 * @param array|string|WP_Term $args       Query args.
+	 * @return array
+	 */
+	public function filter_product_cat_term_lists( $terms, $taxonomies = array(), $args = array() ) {
+		if ( is_admin() || is_wp_error( $terms ) || ! is_array( $terms ) ) {
+			return $terms;
+		}
+		$tax_list = is_array( $taxonomies ) ? $taxonomies : array( $taxonomies );
+		if ( ! in_array( 'product_cat', $tax_list, true ) ) {
+			return $terms;
+		}
+
+		$hide_empty = true;
+		if ( is_array( $args ) && array_key_exists( 'hide_empty', $args ) ) {
+			$hide_empty = (bool) $args['hide_empty'];
+		}
+
+		$legacy = self::LEGACY_VENDOR_CAT_SLUGS;
+
+		return array_values(
+			array_filter(
+				$terms,
+				static function ( $term ) use ( $legacy, $hide_empty ) {
+					if ( $term instanceof WP_Term ) {
+						if ( in_array( (string) $term->slug, $legacy, true ) ) {
+							return false;
+						}
+						if ( preg_match( '/^lps0[123]$/i', (string) $term->name ) ) {
+							return false;
+						}
+						if ( $hide_empty && (int) $term->count <= 0 ) {
+							return false;
+						}
+						return true;
+					}
+					if ( is_string( $term ) && in_array( $term, $legacy, true ) ) {
+						return false;
+					}
+					return true;
+				}
+			)
+		);
+	}
+
+	/**
+	 * @param array $args Widget args.
+	 * @return array
+	 */
+	public function filter_category_widget_args( array $args ): array {
+		$args['hide_empty'] = 1;
+		$exclude            = isset( $args['exclude'] ) ? (array) $args['exclude'] : array();
+		foreach ( self::LEGACY_VENDOR_CAT_SLUGS as $slug ) {
+			$term = get_term_by( 'slug', $slug, 'product_cat' );
+			if ( $term instanceof WP_Term ) {
+				$exclude[] = (int) $term->term_id;
+			}
+		}
+		$args['exclude'] = array_values( array_unique( array_map( 'intval', $exclude ) ) );
+		return $args;
+	}
+
+	/**
+	 * @param array         $items Menu items.
+	 * @param WP_Term|mixed $_menu Menu term (unused).
+	 * @param array         $_args Menu args (unused).
+	 * @return array
+	 */
+	public function hide_legacy_vendor_cats_from_nav( $items, $_menu = null, $_args = array() ) {
+		if ( is_admin() || ! is_array( $items ) ) {
+			return $items;
+		}
+		$legacy = self::LEGACY_VENDOR_CAT_SLUGS;
+
+		return array_values(
+			array_filter(
+				$items,
+				static function ( $item ) use ( $legacy ) {
+					if ( ! is_object( $item ) ) {
+						return true;
+					}
+					$object = isset( $item->object ) ? (string) $item->object : '';
+					if ( 'product_cat' !== $object ) {
+						return true;
+					}
+					$url = isset( $item->url ) ? (string) $item->url : '';
+					foreach ( $legacy as $slug ) {
+						if ( false !== strpos( $url, '/product-category/' . $slug ) ) {
+							return false;
+						}
+					}
+					$object_id = isset( $item->object_id ) ? (int) $item->object_id : 0;
+					if ( $object_id > 0 ) {
+						$term = get_term( $object_id, 'product_cat' );
+						if ( $term instanceof WP_Term && in_array( (string) $term->slug, $legacy, true ) ) {
+							return false;
+						}
+					}
+					return true;
+				}
+			)
+		);
 	}
 
 	/**
@@ -302,218 +421,5 @@ final class Sillage_Catalog {
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * @param WP_Query $query Query to mutate.
-	 */
-	private function append_b2b_exclusion( WP_Query $query ): void {
-		$tt_id = $this->b2b_term_taxonomy_id();
-		if ( $tt_id <= 0 ) {
-			return;
-		}
-
-		$tax_query = $query->get( 'tax_query' );
-		if ( ! is_array( $tax_query ) ) {
-			$tax_query = array();
-		}
-
-		$tax_query[] = array(
-			'taxonomy' => 'product_cat',
-			'field'    => 'term_taxonomy_id',
-			'terms'    => array( $tt_id ),
-			'operator' => 'NOT IN',
-		);
-		$query->set( 'tax_query', $tax_query );
-	}
-
-	/**
-	 * Drop the empty B2B product_cat from front-end term lists (widgets, Blocksy, etc.).
-	 *
-	 * @param array                 $terms      Term results.
-	 * @param array|string          $taxonomies Taxonomies requested.
-	 * @param array|string|WP_Term  $_args      Query args (unused).
-	 * @return array
-	 */
-	public function hide_empty_b2b_from_term_lists( $terms, $taxonomies = array(), $_args = array() ) {
-		if ( is_admin() || is_wp_error( $terms ) || ! is_array( $terms ) || ! $this->is_empty_b2b_category() ) {
-			return $terms;
-		}
-		$tax_list = is_array( $taxonomies ) ? $taxonomies : array( $taxonomies );
-		if ( ! in_array( 'product_cat', $tax_list, true ) ) {
-			return $terms;
-		}
-
-		$term_id = $this->b2b_term_id();
-		$tt_id   = $this->b2b_term_taxonomy_id();
-		$slug    = $this->b2b_category_slug();
-
-		return array_values(
-			array_filter(
-				$terms,
-				static function ( $term ) use ( $term_id, $tt_id, $slug ) {
-					if ( $term instanceof WP_Term ) {
-						return (int) $term->term_id !== $term_id
-							&& (int) $term->term_taxonomy_id !== $tt_id
-							&& (string) $term->slug !== $slug;
-					}
-					if ( is_numeric( $term ) ) {
-						return (int) $term !== $term_id;
-					}
-					if ( is_string( $term ) ) {
-						return $term !== $slug;
-					}
-					return true;
-				}
-			)
-		);
-	}
-
-	/**
-	 * @param array $args Widget args.
-	 * @return array
-	 */
-	public function exclude_empty_b2b_from_category_widget( array $args ): array {
-		if ( ! $this->is_empty_b2b_category() ) {
-			return $args;
-		}
-		$term_id = $this->b2b_term_id();
-		if ( $term_id <= 0 ) {
-			return $args;
-		}
-		$exclude = isset( $args['exclude'] ) ? (array) $args['exclude'] : array();
-		$exclude[] = $term_id;
-		$args['exclude'] = array_values( array_unique( array_map( 'intval', $exclude ) ) );
-		return $args;
-	}
-
-	/**
-	 * @param array         $items Menu items.
-	 * @param WP_Term|mixed $_menu Menu term (unused).
-	 * @param array         $_args Menu args (unused).
-	 * @return array
-	 */
-	public function hide_empty_b2b_from_nav_menus( $items, $_menu = null, $_args = array() ) {
-		if ( is_admin() || ! is_array( $items ) || ! $this->is_empty_b2b_category() ) {
-			return $items;
-		}
-		$term_id = $this->b2b_term_id();
-		$slug    = $this->b2b_category_slug();
-		if ( $term_id <= 0 && '' === $slug ) {
-			return $items;
-		}
-
-		return array_values(
-			array_filter(
-				$items,
-				static function ( $item ) use ( $term_id, $slug ) {
-					if ( ! is_object( $item ) ) {
-						return true;
-					}
-					$object = isset( $item->object ) ? (string) $item->object : '';
-					if ( 'product_cat' !== $object ) {
-						return true;
-					}
-					$object_id = isset( $item->object_id ) ? (int) $item->object_id : 0;
-					if ( $term_id > 0 && $object_id === $term_id ) {
-						return false;
-					}
-					$url = isset( $item->url ) ? (string) $item->url : '';
-					if ( '' !== $slug && false !== strpos( $url, '/product-category/' . $slug ) ) {
-						return false;
-					}
-					return true;
-				}
-			)
-		);
-	}
-
-	private function b2b_category_slug(): string {
-		$this->resolve_b2b_term();
-		return $this->b2b_slug ?? '';
-	}
-
-	private function b2b_term_taxonomy_id(): int {
-		$this->resolve_b2b_term();
-		return $this->b2b_tt_id ?? 0;
-	}
-
-	private function b2b_term_id(): int {
-		$this->resolve_b2b_term();
-		return $this->b2b_term_id ?? 0;
-	}
-
-	/** True when the B2B product_cat exists and currently has zero products. */
-	private function is_empty_b2b_category(): bool {
-		$this->resolve_b2b_term();
-		if ( ( $this->b2b_term_id ?? 0 ) <= 0 ) {
-			return false;
-		}
-		return ( $this->b2b_count ?? 0 ) <= 0;
-	}
-
-	/**
-	 * Resolve the B2B product_cat from sil_vendors.storefront_label → WP term slug/name.
-	 */
-	private function resolve_b2b_term(): void {
-		if ( null !== $this->b2b_tt_id ) {
-			return;
-		}
-		$this->b2b_tt_id   = 0;
-		$this->b2b_term_id = 0;
-		$this->b2b_slug    = '';
-		$this->b2b_count   = 0;
-
-		$label = $this->b2b_storefront_label();
-		$guesses = array_values(
-			array_unique(
-				array_filter(
-					array(
-						$label ? sanitize_title( $label ) : '',
-						'lps03',
-						'wholesale-perfumes-eu-soleluna',
-						'wholesale-perfumes',
-					)
-				)
-			)
-		);
-
-		foreach ( $guesses as $guess ) {
-			$term = get_term_by( 'slug', $guess, 'product_cat' );
-			if ( ! ( $term instanceof WP_Term ) && $label ) {
-				$term = get_term_by( 'name', $label, 'product_cat' );
-			}
-			if ( $term instanceof WP_Term ) {
-				$this->b2b_tt_id   = (int) $term->term_taxonomy_id;
-				$this->b2b_term_id = (int) $term->term_id;
-				$this->b2b_slug    = (string) $term->slug;
-				$this->b2b_count   = (int) $term->count;
-				return;
-			}
-		}
-	}
-
-	/** Customer-facing label from sil_vendors (LPS03), or empty when unreadable. */
-	private function b2b_storefront_label(): string {
-		$cached = wp_cache_get( 'b2b_storefront_label', 'sillage' );
-		if ( is_string( $cached ) ) {
-			return $cached;
-		}
-
-		global $wpdb;
-		$suppress = $wpdb->suppress_errors( true );
-		$table    = SILLAGE_DB . '.sil_vendors';
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table is a constant.
-		$label = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COALESCE(NULLIF(storefront_label, ''), name) FROM {$table} WHERE slug = %s LIMIT 1",
-				self::B2B_VENDOR_SLUG
-			)
-		);
-		$wpdb->suppress_errors( $suppress );
-
-		$out = is_string( $label ) ? trim( $label ) : '';
-		wp_cache_set( 'b2b_storefront_label', $out, 'sillage', 300 );
-		return $out;
 	}
 }
