@@ -42,6 +42,7 @@ if ( ! defined( 'SILLAGE_DB' ) ) {
 
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-settings.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-images.php';
+require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-catalog.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-search.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-rest.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-orders.php';
@@ -87,6 +88,7 @@ add_action(
 		Sillage_Activator::ensure_attributes();
 
 		( new Sillage_Images() )->register();
+		( new Sillage_Catalog() )->register();
 		( new Sillage_Search() )->register();
 		( new Sillage_Rest() )->register();
 		( new Sillage_Orders() )->register();

@@ -1,4 +1,4 @@
-import { sil, wp } from "../config/env.ts";
+import { env, sil, wp } from "../config/env.ts";
 import { execute, query, transaction, type PoolConnection, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, slugify, uniqueTermSlug } from "../lib/slugify.ts";
@@ -350,6 +350,118 @@ export async function ensureVendorShopCategories(
 
   if (created > 0) log.info(`vendor shop categories: ${created} product_cat terms created`);
   return { bySlug, created };
+}
+
+/**
+ * Reload vendor feed → product_cat maps from `sil_category_map` without fetching a feed.
+ * Used by rewrite-only syncs so content rewrites cannot wipe categories with empty maps.
+ */
+export async function loadCategoryMapsFromDb(
+  vendorIds: Iterable<number>,
+): Promise<Map<number, Map<string, TermRef>>> {
+  const out = new Map<number, Map<string, TermRef>>();
+  for (const vendorId of vendorIds) {
+    const map = new Map<string, TermRef>();
+    for (const row of await query<MapRow>(
+      `SELECT vendor_category_key, wp_term_id, wp_term_taxonomy_id
+         FROM ${sil("sil_category_map")} WHERE vendor_id = ?`,
+      [vendorId],
+    )) {
+      map.set(row.vendor_category_key, { termId: row.wp_term_id, ttId: row.wp_term_taxonomy_id });
+    }
+    out.set(vendorId, map);
+  }
+  return out;
+}
+
+/**
+ * Reload a flat taxonomy map (brands / pa_*) from `sil_term_map`, keyed by foldKey like syncFlatTerms.
+ */
+export async function loadFlatTermMapFromDb(taxonomy: string): Promise<Map<string, TermRef>> {
+  const map = new Map<string, TermRef>();
+  for (const row of await query<SimpleMapRow>(
+    `SELECT source_key, wp_term_id, wp_term_taxonomy_id FROM ${sil("sil_term_map")} WHERE taxonomy = ?`,
+    [taxonomy],
+  )) {
+    map.set(foldKey(row.source_key), { termId: row.wp_term_id, ttId: row.wp_term_taxonomy_id });
+  }
+  return map;
+}
+
+const B2B_VENDOR_SLUG = "wholesale-perfumes";
+const B2B_PAGE_SLUG = "b2b-wholesale";
+
+/**
+ * Ensure a published WordPress page that lists only the B2B wholesaler (LPS03) category.
+ * Main-shop exclusion of that category is enforced by the PHP bridge at query time.
+ */
+export async function ensureB2bShopPage(
+  vendorShopCategories: Map<string, TermRef>,
+): Promise<{ pageId: number; created: boolean } | null> {
+  const ref = vendorShopCategories.get(B2B_VENDOR_SLUG);
+  if (!ref) return null;
+
+  const termRows = await query<TermRow>(
+    `SELECT t.term_id, tt.term_taxonomy_id, t.slug, t.name, tt.parent
+       FROM ${wp("terms")} t
+       JOIN ${wp("term_taxonomy")} tt ON tt.term_id = t.term_id
+      WHERE t.term_id = ? AND tt.taxonomy = ?`,
+    [ref.termId, CATEGORY_TAXONOMY],
+  );
+  const term = termRows[0];
+  if (!term) return null;
+
+  const shortcode = `[products limit="24" columns="4" paginate="true" category="${term.slug}"]`;
+  const title = "B2B Wholesale";
+  const content =
+    `<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
+
+  const existing = await query<RowDataPacket & { ID: number; post_content: string }>(
+    `SELECT ID, post_content FROM ${wp("posts")}
+      WHERE post_type = 'page' AND post_name = ? AND post_status IN ('publish','draft','private')
+      LIMIT 1`,
+    [B2B_PAGE_SLUG],
+  );
+
+  if (existing[0]) {
+    const pageId = existing[0].ID;
+    if (!existing[0].post_content.includes(`category="${term.slug}"`)) {
+      await execute(
+        `UPDATE ${wp("posts")}
+            SET post_content = ?, post_title = ?, post_status = 'publish',
+                post_modified = NOW(), post_modified_gmt = UTC_TIMESTAMP()
+          WHERE ID = ?`,
+        [content, title, pageId],
+      );
+    }
+    return { pageId, created: false };
+  }
+
+  const result = await execute(
+    `INSERT INTO ${wp("posts")}
+       (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt,
+        post_status, comment_status, ping_status, post_password, post_name,
+        to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered,
+        post_parent, guid, menu_order, post_type, post_mime_type, comment_count)
+     VALUES
+       (1, NOW(), UTC_TIMESTAMP(), ?, ?, '',
+        'publish', 'closed', 'closed', '', ?,
+        '', '', NOW(), UTC_TIMESTAMP(), '',
+        0, '', 0, 'page', '', 0)`,
+    [content, title, B2B_PAGE_SLUG],
+  );
+  const pageId = result.insertId;
+  await execute(`UPDATE ${wp("posts")} SET guid = CONCAT(?, '/?page_id=', ID) WHERE ID = ?`, [
+    env.wordpress.baseUrl.replace(/\/$/, ""),
+    pageId,
+  ]);
+  // Flag the bridge can read without querying sillage tables.
+  await execute(
+    `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value) VALUES (?, '_sillage_b2b_shop', '1')`,
+    [pageId],
+  );
+  log.info(`created B2B shop page id=${pageId} slug=${B2B_PAGE_SLUG} category=${term.slug}`);
+  return { pageId, created: true };
 }
 
 /**
