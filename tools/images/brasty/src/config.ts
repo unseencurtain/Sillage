@@ -110,7 +110,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     imageOverridesPath: resolvePath(
       envString(
         "IMAGE_OVERRIDES_PATH",
-        "../../production-environment/sillage-core/data/image_overrides.json",
+        "../../../production-environment/sillage-core/data/image_overrides.json",
       ),
     ),
     manifestPath: resolvePath(envString("MANIFEST_PATH", "./logs/manifest.jsonl")),

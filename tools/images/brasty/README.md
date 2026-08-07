@@ -13,9 +13,10 @@ vendor-agnostic.
 This package is intentionally **not** a dependency of `sillage-core`. Playwright /
 Chromium must not ship inside the Bun sync container.
 
-Brasty has **no product detail pages**. Products exist only in a searchable listing;
-the large preview is triggered from the row. Do **not** guess how that preview works —
-run the investigation harness first.
+Brasty has **no product detail pages**. Products exist only as `.c-product` list rows.
+The list shows a small `/images/w60/` thumb; the real large image (`/images/w700/…`)
+appears **on hover** (also stored on `picture[data-image]`). Scraping the thumb `src`
+without hover is wrong. The registered strategy is `list-row-hover-large`.
 
 ## Install (including a fresh headless VPS)
 
@@ -80,18 +81,12 @@ Output (gitignored):
 - `findings/investigate-report.json` — machine-readable answers  
 - `findings/investigate-raw.json` — per-EAN DOM/network dumps  
 
-### Operator action after investigate
+### Hover extraction (implemented)
 
-1. Open the markdown report and confirm which of (a)–(g) is true.  
-2. Implement a concrete `ExtractionStrategy` in `src/imageExtractor.ts` from that
-   evidence (there is a `strategySkeletonFromFindings` stub).  
-3. Call `setExtractionStrategy(...)` so `getExtractionStrategy()` no longer returns
-   `pending-investigation`.  
-4. Refine `PENDING_SEARCH_SELECTORS` / `PENDING_HOVER_SELECTORS` if search/hover failed.  
-5. Only then run download on a **tiny** CSV slice.
-
-Until step 3, `npm run download` will refuse to invent selectors and log
-`unexpected_page_structure` for each product.
+`list-row-hover-large` is registered by default: search `.c-product` → hover
+`.c-product__img` → take the post-hover `/images/w700/` URL (network / DOM /
+`data-image`), never `/images/w60/`. Re-run `npm run investigate` only if markup
+changes.
 
 ## 3. Download
 

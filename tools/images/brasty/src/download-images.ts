@@ -5,7 +5,7 @@
  * extracts the largest image URL via the pluggable strategy → downloads bytes.
  *
  * Concurrency = pool of browser contexts (default 1). Resume via JSONL manifest.
- * Extraction strategy remains pending until investigate findings are applied.
+ * Uses list-row-hover-large strategy (w700 after hover; never w60 thumbs).
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
 
   if (getExtractionStrategy().name === "pending-investigation") {
     log.warn(
-      "Extraction strategy is still pending. Run npm run investigate first, paste findings into imageExtractor.ts, then re-run download.",
+      "Extraction strategy is still pending. Run npm run investigate, then register a concrete strategy in imageExtractor.ts.",
     );
   }
 
