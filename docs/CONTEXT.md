@@ -29,9 +29,10 @@ Networks are **external** and must exist before `docker compose up`:
 `https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
 `https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
 `shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
-Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). Base URL is
-configurable via `sil_settings.image_cdn_base_url` (dashboard) and tool env
-`LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default `https://images.slilverbelt.xyz`).
+Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). New image
+URLs come from tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default
+`https://images.slilverbelt.xyz`). `sil_settings.image_cdn_base_url` may still exist in the DB but
+is not read by sync and is not on the Settings UI.
 
 ```bash
 docker network create ecom_network

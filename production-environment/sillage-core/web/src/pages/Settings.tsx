@@ -22,7 +22,12 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   { key: "sync_enabled", label: "Sync enabled", hint: "Master switch for scheduled sync", type: "bool" },
   { key: "fast_sync_minutes", label: "Fast sync minutes", type: "number" },
   { key: "full_sync_enabled", label: "Full sync enabled", hint: "Nightly full catalogue rebuild", type: "bool" },
-  { key: "full_sync_hour", label: "Full sync hour (UTC)", type: "number" },
+  {
+    key: "full_sync_hour",
+    label: "Full sync hour (UTC)",
+    hint: "Database hour — UTC on this stack",
+    type: "number",
+  },
   { key: "sync_source", label: "Sync source", hint: "live | local", type: "text" },
   {
     key: "global_price_multiplier",
@@ -38,15 +43,9 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
     type: "bool",
   },
   {
-    key: "image_cdn_base_url",
-    label: "Image CDN base URL",
-    hint: "Public origin for self-hosted files (e.g. https://images.slilverbelt.xyz). Does not rewrite existing product URLs — update image_overrides.json / tool PUBLIC_URL_BASE, then sync with --rewrite-all.",
-    type: "text",
-  },
-  {
     key: "cart_min_enabled",
     label: "Small-order fee",
-    hint: "Optional Foodpanda-style fee when the cart subtotal is under the global minimum. Off by default. Does not replace per-vendor MOQ.",
+    hint: "Optional Foodpanda-style fee when the cart subtotal is under the global minimum. Off by default. Does not replace per-vendor MOQ (Vendors → Min order value).",
     type: "bool",
   },
   {
@@ -93,13 +92,13 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   {
     key: "description_mode",
     label: "Description mode",
-    hint: "none (title copy) | template",
+    hint: "none = title wrapped in <p>; template = brand/type/size blurb",
     type: "text",
   },
   {
     key: "live_feed_min_minutes",
     label: "Min minutes between live downloads",
-    hint: "Hard gate. Cache is used until this elapses (default 60). Per-vendor daily caps live on the Vendors page.",
+    hint: "Hard gate for BeautyFort + BTS. Cache is used until this elapses (default 60). Per-vendor daily caps live on the Vendors page.",
     type: "number",
   },
 ];
@@ -227,7 +226,10 @@ export function Settings() {
       <header className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted">Single source of truth — no wp-admin configuration</p>
+          <p className="text-sm text-muted">
+            Retail shop (BeautyFort + BTS) — schedule, pricing, cart fee, order rails. No wp-admin
+            configuration.
+          </p>
         </div>
         <button
           type="button"
@@ -276,9 +278,9 @@ export function Settings() {
             Empty list falls back to the global multiplier above.
           </p>
           <p className="mt-1 text-sm text-muted">
-            Changing tiers requires <code className="font-mono text-xs">bun run sync -- --rewrite-all</code> to
-            take effect, because sync hashes cover vendor data only and a settings change produces no hash
-            change.
+            Saving tiers / multiplier / hide-without-image starts a cache rewrite-only sync automatically.
+            CLI <code className="font-mono text-xs">bun run sync -- --rewrite-all</code> remains the escape
+            hatch if that fails.
           </p>
         </div>
         <div className="space-y-2">
