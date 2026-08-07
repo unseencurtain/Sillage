@@ -263,6 +263,8 @@ services:
     volumes:
       - ./data/wp:/var/www/html
       - ./config/php.ini:/usr/local/etc/php/conf.d/conf.ini:ro
+      - ./data/media:/var/www/lps-media:ro
+      - ./config/apache-lps-media.conf:/etc/apache2/conf-enabled/lps-media.conf:ro
     environment:
       WORDPRESS_DB_HOST: ecom-db
       WORDPRESS_DB_USER: \${MYSQL_USER}
@@ -307,8 +309,14 @@ networks:
     external: true
 EOF
 
+sudo mkdir -p /home/ubuntu/ecom_sites/data/media
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
+	# Watermarked Brasty/LPS images (host files; not inside WordPress uploads).
+	handle_path /lps-media/* {
+		root * /home/ubuntu/ecom_sites/data/media
+		file_server
+	}
 	reverse_proxy localhost:${WP_PORT}
 }
 ${DASH_DOMAIN} {

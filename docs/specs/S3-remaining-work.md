@@ -11,7 +11,8 @@ Then read only the task below that you were asked to do.
 
 ## 1. Where things stand
 
-All Stage 3 work lives on branch `cursor/client-features-stage3`, five commits on top of `main`:
+All Stage 3 work lives on branch `cursor/client-features-stage3` (commits below; tip may
+advance — use `git log origin/cursor/client-features-stage3 --oneline`):
 
 | Commit | What landed |
 |---|---|
@@ -20,12 +21,14 @@ All Stage 3 work lives on branch `cursor/client-features-stage3`, five commits o
 | `3372207` | Small-order cart fee in the PHP bridge |
 | `bcfc783` | wholesale-perfumes.eu ("ocean") as a third supplier, seeded inactive |
 | `725667f` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
+| `ca23d88` | This handoff spec (`docs/specs/S3-remaining-work.md`) |
+| `465c980` | Headless Brasty login (`BRASTY_EMAIL` / `BRASTY_PASSWORD` → `storageState.json`) |
 
 The branch history is **linear**: it sits on top of `cursor/ocean-image-overrides`, which sits on top
 of `cursor/bf-image-pipeline-theme`, which sits on `main`. Merging `cursor/client-features-stage3`
 into `main` therefore brings all three branches at once. Do not merge the older two separately.
 
-Green as of the last commit: `bun test` 65 passing, `bun run typecheck` clean, `php -l` clean.
+Green as of `465c980`: `bun test` 65 passing, `bun run typecheck` clean, `php -l` clean.
 
 ### Deliberately inert
 
@@ -80,7 +83,9 @@ by EAN alone, so an image scraped from Brasty can illustrate a BeautyFort or who
 product; the override map is vendor-agnostic by design.
 
 **Prerequisite the agent cannot satisfy.** `BRASTY_EMAIL` and `BRASTY_PASSWORD` must exist in the
-gitignored `tools/brasty-images/.env`. If they are absent, stop and say so rather than proceeding.
+gitignored `tools/brasty-images/.env`. Email is often the same as the Ocean shop login; the password
+is the Brasty wholesale portal password (not the Ocean API token). If either is absent, stop and
+say so rather than proceeding.
 
 ### 1a. Run the investigation
 
@@ -118,11 +123,12 @@ Files land as `EAN.jpg`. Three steps turn them into storefront images:
 1. The watermark pass composites the client's logo, which is already committed at
    `tools/brasty-images/assets/lps-logo.png`. Originals are never overwritten.
 2. The images need a public URL, because this store never creates WordPress attachments — every
-   product image is an external URL rendered by a plugin filter. The recommended arrangement is a
-   new host directory `production-environment/ecom_sites/data/media/` bind-mounted read-only into
-   the `ecom` container and served at `/lps-media/`. That path stays clear of the rule against
-   writing inside `data/wp/`. This compose change has **not** been made yet; make it as part of
-   this task.
+   product image is an external URL rendered by a plugin filter. Host directory
+   `production-environment/ecom_sites/data/media/` is bind-mounted read-only into `ecom` at
+   `/var/www/lps-media` and served at `/lps-media/` via Apache (`config/apache-lps-media.conf`).
+   On VPS, Caddy also `handle_path /lps-media/*` from that same host directory. Set
+   `PUBLIC_URL_BASE` in `tools/brasty-images/.env` to `https://<shop>/lps-media` (or
+   `http://localhost/lps-media` locally).
 3. The merge script writes an EAN → URL map into `production-environment/sillage-core/data/image_overrides.json`,
    merging rather than overwriting, because the Python enricher already owns thousands of keys there
    for BeautyFort and Ocean. It backs the file up first.
