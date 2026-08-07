@@ -1,5 +1,5 @@
 /**
- * Ocean (wholesale-perfumes.eu) HTTP Basic client.
+ * wholesale-perfumes.eu (SoleLuna) HTTP Basic client.
  *
  * Feeds: catalog XML (daily) and store XML (hourly price/stock).
  * Order API: account-global cart → submit. There is no sandbox — callers must honour dry-run.
@@ -8,7 +8,7 @@
  */
 import { XMLParser } from "fast-xml-parser";
 
-export interface OceanClientConfig {
+export interface WholesalePerfumesClientConfig {
   /** E-shop login email. */
   user: string;
   /** API token from user settings (not the shop password). */
@@ -20,7 +20,7 @@ export interface OceanClientConfig {
   timeout?: number;
 }
 
-export interface OceanCatalogProduct {
+export interface WholesalePerfumesCatalogProduct {
   id: string;
   ean: string;
   allEans: string[];
@@ -45,25 +45,25 @@ export interface OceanCatalogProduct {
   quantity?: number;
 }
 
-export interface OceanStoreProduct {
+export interface WholesalePerfumesStoreProduct {
   id: string;
   priceNoVat: number;
   quantity: number;
 }
 
-export interface OceanCartLine {
+export interface WholesalePerfumesCartLine {
   code: string | number;
   quantity: number;
 }
 
-export class OceanRequestError extends Error {
+export class WholesalePerfumesRequestError extends Error {
   constructor(
     message: string,
     public readonly statusCode?: number,
     public readonly details?: unknown,
   ) {
     super(message);
-    this.name = "OceanRequestError";
+    this.name = "WholesalePerfumesRequestError";
   }
 }
 
@@ -118,7 +118,7 @@ function firstPicture(pictures: unknown): { flaskFront: string | null; urls: str
   return { flaskFront, urls };
 }
 
-function parseScents(raw: unknown): OceanCatalogProduct["scents"] {
+function parseScents(raw: unknown): WholesalePerfumesCatalogProduct["scents"] {
   const empty = { top: [] as string[], middle: [] as string[], base: [] as string[] };
   if (!raw || typeof raw !== "object") return empty;
   const obj = raw as Record<string, unknown>;
@@ -143,11 +143,11 @@ function parseParams(raw: unknown): Record<string, string[]> {
   return out;
 }
 
-export function parseCatalogXml(xml: string): OceanCatalogProduct[] {
+export function parseCatalogXml(xml: string): WholesalePerfumesCatalogProduct[] {
   const doc = xmlParser.parse(xml) as { catalog?: { product?: unknown } };
   const products = doc?.catalog?.product;
   const list = Array.isArray(products) ? products : products ? [products] : [];
-  const out: OceanCatalogProduct[] = [];
+  const out: WholesalePerfumesCatalogProduct[] = [];
 
   for (const raw of list) {
     if (!raw || typeof raw !== "object") continue;
@@ -191,11 +191,11 @@ export function parseCatalogXml(xml: string): OceanCatalogProduct[] {
   return out;
 }
 
-export function parseStoreXml(xml: string): OceanStoreProduct[] {
+export function parseStoreXml(xml: string): WholesalePerfumesStoreProduct[] {
   const doc = xmlParser.parse(xml) as { store?: { product?: unknown } };
   const products = doc?.store?.product;
   const list = Array.isArray(products) ? products : products ? [products] : [];
-  const out: OceanStoreProduct[] = [];
+  const out: WholesalePerfumesStoreProduct[] = [];
 
   for (const raw of list) {
     if (!raw || typeof raw !== "object") continue;
@@ -213,7 +213,7 @@ export function parseStoreXml(xml: string): OceanStoreProduct[] {
   return out;
 }
 
-export class OceanClient {
+export class WholesalePerfumesClient {
   private readonly user: string;
   private readonly token: string;
   private readonly catalogUrl: string;
@@ -221,9 +221,9 @@ export class OceanClient {
   private readonly apiBaseUrl: string;
   private readonly timeout: number;
 
-  constructor(config: OceanClientConfig) {
+  constructor(config: WholesalePerfumesClientConfig) {
     if (!config.user || !config.token) {
-      throw new OceanRequestError("OCEAN_USER and OCEAN_TOKEN are required for live Ocean calls");
+      throw new WholesalePerfumesRequestError("WHOLESALE_PERFUMES_USER and WHOLESALE_PERFUMES_TOKEN are required for live wholesale-perfumes calls");
     }
     this.user = config.user;
     this.token = config.token;
@@ -265,7 +265,7 @@ export class OceanClient {
         }
       }
       if (!res.ok) {
-        throw new OceanRequestError(`Ocean ${method} ${url} failed: HTTP ${res.status}`, res.status, json ?? text);
+        throw new WholesalePerfumesRequestError(`wholesale-perfumes ${method} ${url} failed: HTTP ${res.status}`, res.status, json ?? text);
       }
       return { status: res.status, text, json };
     } finally {
@@ -283,11 +283,11 @@ export class OceanClient {
     return text;
   }
 
-  async fetchCatalog(): Promise<OceanCatalogProduct[]> {
+  async fetchCatalog(): Promise<WholesalePerfumesCatalogProduct[]> {
     return parseCatalogXml(await this.fetchCatalogXml());
   }
 
-  async fetchStore(): Promise<OceanStoreProduct[]> {
+  async fetchStore(): Promise<WholesalePerfumesStoreProduct[]> {
     return parseStoreXml(await this.fetchStoreXml());
   }
 
@@ -298,7 +298,7 @@ export class OceanClient {
   }
 
   /** Insert lines into the account-global cart. */
-  async addToCart(lines: OceanCartLine[]): Promise<unknown> {
+  async addToCart(lines: WholesalePerfumesCartLine[]): Promise<unknown> {
     const { json, text } = await this.request("POST", `${this.apiBaseUrl}/cart`, lines);
     return json ?? text;
   }

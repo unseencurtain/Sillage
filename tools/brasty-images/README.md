@@ -7,7 +7,7 @@ photographs from Brasty wholesale by EAN and feeds them into Sillage’s
 Brasty is an **image source only** — not a Sillage vendor. There is no catalogue
 sync, order API, or shipping integration. Photos are matched to shop products by
 **EAN alone**, so a Brasty photo can illustrate a BeautyFort or
-wholesale-perfumes.eu (Ocean) product and vice versa. The override map is
+wholesale-perfumes.eu product and vice versa. The override map is
 vendor-agnostic.
 
 This package is intentionally **not** a dependency of `sillage-core`. Playwright /
@@ -139,7 +139,7 @@ npm run build-overrides
 
 Builds an EAN → public URL map from `watermarked/` (or `output/` if empty) and
 **merges** into `production-environment/sillage-core/data/image_overrides.json`
-without clobbering existing BeautyFort/Ocean keys. Backs up the file first.
+without clobbering existing BeautyFort/wholesale-perfumes keys. Backs up the file first.
 
 ## 6. Hosting recommendation (`/lps-media/`)
 

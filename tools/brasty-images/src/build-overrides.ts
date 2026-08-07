@@ -2,7 +2,7 @@
  * Turn an image output directory into an EAN → public URL map and MERGE it
  * into production-environment/sillage-core/data/image_overrides.json.
  *
- * Never clobber existing entries (BeautyFort / Ocean enricher owns many keys).
+ * Never clobber existing entries (BeautyFort / wholesale-perfumes enricher owns many keys).
  * Backs up the target file before writing.
  *
  * This is the only allowed write outside tools/brasty-images/, and only at

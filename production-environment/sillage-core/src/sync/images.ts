@@ -2,7 +2,7 @@
  * Resolve better product images when a vendor (especially BeautyFort) ships placeholders.
  *
  * Priority for a given EAN:
- *   1. data/image_overrides.json (hand-curated + ocean/shopify matches from the prior enricher)
+ *   1. data/image_overrides.json (hand-curated + wholesale-perfumes/shopify/oceanfragrances matches from the prior enricher)
  *   2. Another vendor's offer image for the same EAN (usually BTS)
  *
  * Cross-vendor fill runs for every product whose current URL is missing, a placeholder, or a

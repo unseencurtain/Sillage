@@ -16,7 +16,7 @@ import type { CacheVendor } from "./feedCache.ts";
 import {
   legacyLiveMaxSettingKey,
   resolveLiveMaxPerDay,
-  resolveOceanStoreLimits,
+  resolveWholesalePerfumesStoreLimits,
 } from "./liveLimits.ts";
 
 const log = logger("live-gate");
@@ -139,25 +139,21 @@ export async function resolveLiveOrCache(
 }
 
 /**
- * Separate gate for Ocean's hourly store (price/stock) feed. Must not share the catalog's
- * once-per-day cap, or fast syncs would stall after the first catalog pull.
+ * Separate gate for wholesale-perfumes hourly store (price/stock) feed. Must not share the
+ * catalog's once-per-day cap, or fast syncs would stall after the first catalog pull.
  */
-export async function checkOceanStoreGate(): Promise<LiveGateResult> {
+export async function checkWholesalePerfumesStoreGate(): Promise<LiveGateResult> {
   let vendorRow: Awaited<ReturnType<typeof loadVendor>> | null = null;
   try {
-    vendorRow = await loadVendor("ocean");
+    vendorRow = await loadVendor("wholesale-perfumes");
   } catch {
     vendorRow = null;
   }
-  const [legacyMax, legacyMin] = await Promise.all([
-    readSettingNum("ocean_store_live_max_per_day"),
-    readSettingNum("ocean_store_live_min_minutes"),
-  ]);
-  const { maxPerDay, minMinutes } = resolveOceanStoreLimits(vendorRow, legacyMax, legacyMin);
+  const { maxPerDay, minMinutes } = resolveWholesalePerfumesStoreLimits(vendorRow);
 
   const [lastRow] = await query<RowDataPacket & { setting_value: string }>(
     `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    ["last_live_fetch_ocean_store"],
+    ["last_live_fetch_wholesale-perfumes_store"],
   );
   const lastIso = lastRow?.setting_value ?? null;
   if (lastIso) {
@@ -165,7 +161,7 @@ export async function checkOceanStoreGate(): Promise<LiveGateResult> {
     if (elapsed < minMinutes) {
       return {
         allow: false,
-        reason: `ocean store live fetch blocked: only ${elapsed} min since last download (min ${minMinutes})`,
+        reason: `wholesale-perfumes store live fetch blocked: only ${elapsed} min since last download (min ${minMinutes})`,
         retryInMinutes: minMinutes - elapsed,
       };
     }
@@ -174,13 +170,13 @@ export async function checkOceanStoreGate(): Promise<LiveGateResult> {
   const day = new Date().toISOString().slice(0, 10);
   const [dayCountRow] = await query<RowDataPacket & { setting_value: string }>(
     `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    [`live_fetch_count_ocean_store_${day}`],
+    [`live_fetch_count_wholesale-perfumes_store_${day}`],
   );
   const dayCount = Number(dayCountRow?.setting_value ?? 0);
   if (dayCount >= maxPerDay) {
     return {
       allow: false,
-      reason: `ocean store live fetch blocked: ${dayCount}/${maxPerDay} downloads used today`,
+      reason: `wholesale-perfumes store live fetch blocked: ${dayCount}/${maxPerDay} downloads used today`,
       retryInMinutes: 60,
     };
   }
@@ -188,17 +184,17 @@ export async function checkOceanStoreGate(): Promise<LiveGateResult> {
   return { allow: true, reason: "live allowed", retryInMinutes: 0 };
 }
 
-export async function recordOceanStoreFetch(): Promise<void> {
+export async function recordWholesalePerfumesStoreFetch(): Promise<void> {
   const now = new Date().toISOString();
-  await setSetting("last_live_fetch_ocean_store", now);
-  const dayKey = `live_fetch_count_ocean_store_${now.slice(0, 10)}`;
+  await setSetting("last_live_fetch_wholesale-perfumes_store", now);
+  const dayKey = `live_fetch_count_wholesale-perfumes_store_${now.slice(0, 10)}`;
   const [row] = await query<RowDataPacket & { setting_value: string }>(
     `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
     [dayKey],
   );
   const next = String(Number(row?.setting_value ?? 0) + 1);
   await setSetting(dayKey, next);
-  log.info(`ocean_store: recorded live fetch (#${next} today)`);
+  log.info(`wholesale-perfumes_store: recorded live fetch (#${next} today)`);
 }
 
 /** Wall-clock half-hour slots (:00–:04 and :30–:34). Cron ticks every 5 min; only these open sync. */

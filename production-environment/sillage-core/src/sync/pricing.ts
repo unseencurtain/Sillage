@@ -32,7 +32,7 @@ export interface PricingRules {
   priceTiers: PriceTier[];
   fxRate: number;
   /**
-   * Fraction uplift applied before markup (Ocean publishes price_no_vat). Default 0 so existing
+   * Fraction uplift applied before markup (wholesale-perfumes publishes price_no_vat). Default 0 so existing
    * vendors are unchanged: cost = vendorPrice × fxRate × (1 + vatRate).
    */
   vatRate: number;
