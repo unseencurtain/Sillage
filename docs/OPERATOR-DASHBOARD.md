@@ -220,24 +220,35 @@ empty overlay file before first `compose up` so Docker mounts a file, not a dire
 
 ## Settings
 
-Save → `PUT /api/settings` (allow-listed keys only). Price/visibility keys
-(`global_price_multiplier`, `price_tiers`, `global_stock_threshold`, `hide_products_without_image`)
-mark products dirty and start a **rewrite-only** sync from `sil_offers` (no live download). UI
-toasts **Recalculating prices…** and polls Sync until done. If a sync is already running, Save
-**queues** a follow-up (`pending_price_rewrite`) — toast explains the wait; no need to mash Run
-fast sync. `description_mode` / `volume_filter_mode` mark products dirty and start a **full/cache**
-sync (same queue behaviour).
+Save → `PUT /api/settings` (allow-listed keys only). The dashboard posts the **whole form**; the API
+**persists and kicks rewrites only for keys whose value actually changed** (avoids spurious
+full/cache jobs). Unchanged cart/schedule/order fields are no-ops on that Save.
+
+Price/visibility keys (`global_price_multiplier`, `price_tiers`, `global_stock_threshold`,
+`hide_products_without_image`) mark products dirty and start a **rewrite-only** sync from
+`sil_offers` (no live download). UI toasts **Recalculating prices…** and polls Sync until done.
+If a sync is already running, Save **queues** a follow-up (`pending_price_rewrite`) — toast
+explains the wait; no need to mash Run fast sync. `description_mode` / `volume_filter_mode` mark
+products dirty and start a **full/cache** sync (same queue behaviour).
+
+**Other sections do not rewrite the catalogue:** cart fee, schedule, order rails, company billing,
+shop URLs — they save into `sil_settings` (or billing JSON) and take effect on the next read
+(cart fee: bridge, ~60s object-cache TTL; schedule: next cron tick; URLs: hot-applied in Bun).
 
 UI sections (each control has one-line help): **Shop URLs** → **Pricing & catalogue** → **Cart
 minimum** → **Schedule** → **Order safety** → **Advanced** (live-feed gate, volume/description,
 company billing).
+
+If prices stay stale after a multiplier Save: check `IS_USED_LOCK('sillage:sync')` and
+[`HANDOFF.md`](HANDOFF.md) “If shop prices ≠ Settings multiplier”. Do not burn BeautyFort live
+caps with Fast sync just to reprice.
 
 ### Shop URLs (post-login)
 
 | UI label | Key | Effect |
 |---|---|---|
 | Shop URL | `wp_base_url` | Public WooCommerce origin. Env `WP_BASE_URL` is bootstrap; Settings overrides runtime (admin links, tracking push). In-Docker finalize still uses `WORDPRESS_INTERNAL_URL` (`http://ecom`) |
-| Image CDN base URL | `image_cdn_base_url` | Public image origin for tooling / docs. Does **not** rewrite existing product URLs by itself |
+| Image CDN base URL | `image_cdn_base_url` | Documented public image origin; hot-applied into Bun runtime env. Does **not** rewrite existing product image URLs by itself (overrides + rewrite still required) |
 
 ### Schedule & sync source
 
