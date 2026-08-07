@@ -66,6 +66,12 @@ export interface GlobalSettings {
   syncSource: "live" | "local";
   /** Exclude products whose resolved image is still a placeholder. */
   hideProductsWithoutImage: boolean;
+  /** Foodpanda-style small-order fee on the storefront (bridge reads these). */
+  cartMinEnabled: boolean;
+  cartMinSubtotalEur: number;
+  cartMinFeeEur: number;
+  /** Must contain `{remaining}`; bridge substitutes a WooCommerce-formatted amount. */
+  cartMinMessage: string;
   ordersDryRun: boolean;
   ordersAutoDispatch: boolean;
   ordersMaxValueEur: number;
@@ -125,6 +131,12 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fullSyncHour: num("full_sync_hour", 3),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
     hideProductsWithoutImage: flag("hide_products_without_image", true),
+    cartMinEnabled: flag("cart_min_enabled", false),
+    cartMinSubtotalEur: num("cart_min_subtotal_eur", 50),
+    cartMinFeeEur: num("cart_min_fee_eur", 5),
+    cartMinMessage:
+      map.get("cart_min_message") ??
+      "Add {remaining} more to your order to remove the small-order fee.",
     ordersDryRun: flag("orders_dry_run", true),
     ordersAutoDispatch: flag("orders_auto_dispatch", false),
     ordersMaxValueEur: num("orders_max_value_eur", 500),

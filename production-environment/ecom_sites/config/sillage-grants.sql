@@ -36,7 +36,8 @@ GRANT SELECT ON earth.wp_woocommerce_order_itemmeta     TO 'sillage'@'%';
 
 -- Deliberately absent: any grant on wp_users, wp_usermeta, or writes to wp_options.
 
--- WordPress reads exactly one sillage table, for the EAN search hook. Granted separately by
--- bootstrap.sh after migrations, because a table-level GRANT requires the table to exist.
+-- WordPress (user lime) reads sil_ean_index, sil_settings, and sil_vendors. Those SELECT
+-- grants are applied by bootstrap-sillage.sh / deploy-vps.sh after migrate, because a
+-- table-level GRANT requires the tables to exist.
 
 FLUSH PRIVILEGES;
