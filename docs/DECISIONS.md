@@ -1,0 +1,35 @@
+# DECISIONS
+
+Locked choices and the reasoning behind them. If you want to change one, change it here first.
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | Currency is EUR everywhere, no FX conversion | Both vendors quote EUR — confirmed from BeautyFort's delivery-option response, not assumed. `fx_rate` exists in the schema at `1.0` purely so a future non-EUR vendor needs no migration |
+| 2 | Price is `vendor_price × fx_rate × multiplier`, a plain float | `0.5`, `1.2`, `2` all valid. No percentage arithmetic to get wrong |
+| 3 | RRP is used as the regular price only when `0 < rrp ≤ 10 × computed` | BTS `recommended_price` is `0` on 46% of rows and peaks at €42,795 against a €889 real-price ceiling. Unclamped you ship listings reading "was €42,795, now €30" |
+| 4 | Two databases, one MariaDB server | One server keeps cross-database writes inside a single ACID transaction. Two databases keep sillage-core independently developable and testable |
+| 5 | Bun performs every bulk write via raw SQL; PHP performs none | The writes were always going to be parameterized SQL. Only request-time rendering, the search query, and WooCommerce's own cache invalidation genuinely need a WordPress context |
+| 6 | SKU is `{PREFIX}-{vendor_product_id}` (`BF-L526676`, `BTS-64220`) | Raw EAN cannot work — BeautyFort rows carry up to 26 of them. Raw vendor ID risks cross-vendor collision |
+| 7 | Cross-vendor dedupe by EAN, on by default | 2,646 EANs appear in both feeds. Without dedupe those become duplicate listings. Neither vendor is consistently cheaper, so cheapest-in-stock-wins has real margin value — and it gives Stage 2 automatic vendor failover |
+| 8 | Primary offer selection is destination-aware | BeautyFort ships to 7 countries, BTS to 28. A France-bound order cannot be filled by BeautyFort, so the cheapest offer is only a candidate if its vendor serves the destination |
+| 9 | Vanished from feed → soft-hide, never delete | Hard deletion orphans order history |
+| 10 | Below stock threshold → hidden **and** `outofstock` | Catalog/search exclusion alone still leaves the product addable to cart via a direct link |
+| 11 | Threshold comparison is `stock <= threshold`, inclusive | |
+| 12 | Product slug is `slugify(name) + '-' + sku` | Unique by construction, so no collision-check round trip and re-runs stay idempotent |
+| 13 | Two sync cadences: 30-min fast (price/stock/visibility) and nightly full | A full pipeline every 30 minutes would rewrite ~1M postmeta rows to change a handful of prices |
+| 14 | Brands go to the native `product_brand` taxonomy (singular) | WooCommerce 9.4+ ships it. Free brand archives and filtering. The plural spelling is not registered and fails silently |
+| 14b | External images are served by faking the attachment layer, never by overriding a theme's gallery | A product reports its own post ID as its thumbnail ID, and `image_downsize` resolves that ID to the vendor URL. Every theme, the REST API, wp-admin and structured data go through those filters, so nothing is theme-specific. Overriding gallery renderers needs new code per theme and breaks silently when the theme changes |
+| 14c | The plugin must work on any theme; the storefront theme is not fixed | Currently Blocksy, moving to Astra. Theme-specific code is allowed only as a guarded, additive shim (e.g. rebuilding Blocksy's lookup table), never as the mechanism something depends on |
+| 15 | Primary EAN also written to `_global_unique_id` | WooCommerce's native GTIN field — adds wp-admin search and schema.org markup at no cost |
+| 16 | BTS gender is derived from its category tree, not its `gender` field | The field is 98.4% `unisex` and therefore useless as a facet. BeautyFort encodes gender properly in its category path |
+| 17 | Only BTS categories actually referenced by products (plus ancestors) are created | Products reference 1,834 of 4,103 nodes; the rest would be permanently empty terms |
+| 18 | Real cron inside the sillage-core container, WP-Cron disabled | WP-Cron is traffic-triggered and PHP-timeout-bound |
+| 19 | Auto-dispatch of vendor orders defaults **off** | Both APIs place real orders with real money and neither has a sandbox |
+| 20 | BTS orders stuck in `submitting` after a crash go to `needs_attention`, never auto-retry | BTS accepts no client-supplied reference and exposes no list-orders endpoint, so a retry cannot be proven safe. BeautyFort is fine — its `yourOrderReference` is a real idempotency key |
+| 21 | Dashboard owns all configuration; wp-admin gets a read-only status page | One source of truth, and it keeps the plugin thin |
+
+## Open
+
+| Question | Status |
+|---|---|
+| Product descriptions | Both feeds are 100% empty. The writer supports descriptions; `sil_settings.description_mode` selects `none` (default) or `template` (generated from brand, type, size, collection). An LLM pass is possible later and needs no schema change |
