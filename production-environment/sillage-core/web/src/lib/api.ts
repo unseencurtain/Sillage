@@ -37,13 +37,18 @@ export const api = {
   syncRuns: (page = 1) =>
     request<SyncRunsPage>(`/api/sync/runs?page=${page}&limit=50`),
   runSync: (mode: "fast" | "full", opts?: { source?: string; vendors?: string[] }) =>
-    request<{ ok: boolean; started?: boolean; mode?: string; source?: string; vendors?: string[] }>(
-      "/api/sync/run",
-      {
-        method: "POST",
-        body: JSON.stringify({ mode, ...opts }),
-      },
-    ),
+    request<{
+      ok: boolean;
+      started?: boolean;
+      alreadyRunning?: boolean;
+      detail?: string;
+      mode?: string;
+      source?: string;
+      vendors?: string[];
+    }>("/api/sync/run", {
+      method: "POST",
+      body: JSON.stringify({ mode, ...opts }),
+    }),
   stopSync: () =>
     request<{ ok: boolean; detail?: string }>("/api/sync/stop", { method: "POST" }),
   secrets: () =>
@@ -74,7 +79,14 @@ export const api = {
       globalStockThreshold: number;
     }>("/api/vendors"),
   saveVendor: (slug: string, body: VendorPatch) =>
-    request<{ ok: boolean; syncStarted?: boolean }>(`/api/vendors/${encodeURIComponent(slug)}`, {
+    request<{
+      ok: boolean;
+      syncStarted?: boolean;
+      syncQueued?: boolean;
+      syncKind?: string | null;
+      detail?: string;
+      marked?: number;
+    }>(`/api/vendors/${encodeURIComponent(slug)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -98,7 +110,14 @@ export const api = {
     }),
   settings: () => request<Record<string, string>>("/api/settings"),
   saveSettings: (body: Record<string, string>) =>
-    request<{ ok: boolean; syncStarted?: boolean }>("/api/settings", {
+    request<{
+      ok: boolean;
+      syncStarted?: boolean;
+      syncQueued?: boolean;
+      syncKind?: string | null;
+      detail?: string;
+      marked?: number;
+    }>("/api/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

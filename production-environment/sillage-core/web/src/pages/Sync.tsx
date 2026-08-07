@@ -59,16 +59,24 @@ export function Sync() {
   const run = useMutation({
     mutationFn: (opts: { mode: "fast" | "full"; demo?: boolean }) =>
       api.runSync(opts.mode, opts.demo ? { vendors: ["beautyfort", "bts"] } : undefined),
-    onSuccess: (_res, vars) => {
+    onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
+      if (res.alreadyRunning || res.started === false) {
+        toast(
+          res.detail ??
+            "Sync already running — your new prices will apply when it finishes (or open Sync to watch progress).",
+          "info",
+        );
+        return;
+      }
       toast(
         vars.demo
           ? "Sync started — BeautyFort + BTS. Watch progress below."
           : vars.mode === "full"
-            ? "Full sync queued — taxonomy + vanish + catalogue rewrite (live downloads still rate-limited)."
-            : "Fast sync queued — prices/stock for active retail vendors (live downloads still rate-limited).",
+            ? "Full sync started — taxonomy + vanish + catalogue rewrite (live downloads still rate-limited)."
+            : "Fast sync started — prices/stock for active retail vendors (live downloads still rate-limited).",
         "ok",
       );
       watchingRunId.current = -1;

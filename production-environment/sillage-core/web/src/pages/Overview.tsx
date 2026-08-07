@@ -26,9 +26,17 @@ export function Overview() {
   const syncRunning = isRunActive(data?.lastSync);
   const run = useMutation({
     mutationFn: () => api.runSync("fast", { vendors: ["beautyfort", "bts"] }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["overview"] });
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      if (res.alreadyRunning || res.started === false) {
+        toast(
+          res.detail ??
+            "Sync already running — watch progress on Sync. Pricing Save queues a rewrite when the current run finishes.",
+          "info",
+        );
+        return;
+      }
       toast("Sync started — BeautyFort + BTS. Open Sync for live progress.", "ok");
     },
     onError: (err: Error) => toast(err.message, "error"),

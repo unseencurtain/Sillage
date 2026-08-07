@@ -22,6 +22,7 @@ import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
 import { parsePriceTiers } from "../../sync/pricing.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
+import { isSyncLockHeld, kickContentRewrite, kickPriceRewrite } from "../../sync/pendingRewrite.ts";
 import type { OrderAddress } from "../../orders/types.ts";
 import { feedCacheAgeMinutes } from "../../vendors/feedCache.ts";
 import { checkLiveGate, resolveVendorLiveMaxPerDay } from "../../vendors/liveGate.ts";
@@ -181,6 +182,20 @@ api.post("/sync/run", async (c) => {
   await clearSyncAbort();
   if (!settings.syncEnabled) await setSetting("sync_enabled", "1");
 
+  // Honest status: do not claim "started" when the advisory lock is held (nothing was queued).
+  if (await isSyncLockHeld()) {
+    return c.json({
+      ok: true,
+      started: false,
+      alreadyRunning: true,
+      mode,
+      source,
+      vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+      detail:
+        "Sync already running — your new request was not started. Watch the active run; pricing Save queues a rewrite-only follow-up automatically.",
+    });
+  }
+
   // Fire-and-forget so the HTTP request returns immediately; the dashboard polls /sync/runs.
   void runSync({
     mode,
@@ -190,6 +205,7 @@ api.post("/sync/run", async (c) => {
   return c.json({
     ok: true,
     started: true,
+    alreadyRunning: false,
     mode,
     source,
     vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
@@ -387,28 +403,40 @@ api.put("/vendors/:slug", async (c) => {
     orderConfig: patch.minOrderValueEur !== undefined ? orderConfig : undefined,
   });
 
-  // Multiplier and VAT change storefront prices; hashes cover vendor feed data only.
-  const touchPrice = patch.priceMultiplier !== undefined || patch.vatRate !== undefined;
+  // Multiplier / FX / VAT / stock floor change storefront prices; hashes cover vendor feed only.
+  const touchPrice =
+    patch.priceMultiplier !== undefined ||
+    patch.vatRate !== undefined ||
+    patch.fxRate !== undefined ||
+    patch.minVisibleStock !== undefined;
   let marked = 0;
+  let syncStatus: "started" | "queued" | null = null;
   if (touchPrice) {
     marked = await markAllPricesDirty();
     if (marked > 0) {
-      void runSync({ mode: "fast", source: "cache", rewriteOnly: true }).catch((err) =>
-        log.error("vendor-settings sync failed", String(err)),
-      );
+      // Same path as Settings pricing Save: rewrite from sil_offers, no live vendor API.
+      syncStatus = await kickPriceRewrite();
     }
   }
 
   await recordEvent("info", "vendors", `updated ${slug}`, {
     fields: Object.keys(patch),
     marked,
+    syncStatus,
   });
 
   return c.json({
     ok: true,
     marked,
-    syncStarted: marked > 0,
-    syncKind: marked > 0 ? "fast/rewrite-only" : null,
+    syncStarted: syncStatus === "started",
+    syncQueued: syncStatus === "queued",
+    syncKind: syncStatus ? "fast/rewrite-only" : null,
+    detail:
+      syncStatus === "queued"
+        ? "Sync already running — new prices will apply when it finishes (rewrite-only follow-up queued)."
+        : syncStatus === "started"
+          ? "Recalculating prices from stored offers (no live vendor download)."
+          : undefined,
   });
 });
 
@@ -790,28 +818,30 @@ api.put("/settings", async (c) => {
   applyRuntimeUrls({ wpBaseUrl: refreshed.wpBaseUrl, imageCdnBaseUrl: refreshed.imageCdnBaseUrl });
 
   let marked = 0;
-  if (touchContent) marked = await markAllProductsDirty();
-  else if (touchPrice) marked = await markAllPricesDirty();
-
-  if (marked > 0) {
-    // Never burn a live vendor download for a settings rewrite — use disk cache / rewrite-only.
-    if (touchContent) {
-      void runSync({ mode: "full", source: "cache" }).catch((err) =>
-        log.error("settings-triggered sync failed", String(err)),
-      );
-    } else {
-      void runSync({ mode: "fast", source: "cache", rewriteOnly: true }).catch((err) =>
-        log.error("settings-triggered sync failed", String(err)),
-      );
-    }
+  let syncStatus: "started" | "queued" | null = null;
+  if (touchContent) {
+    marked = await markAllProductsDirty();
+    if (marked > 0) syncStatus = await kickContentRewrite();
+  } else if (touchPrice) {
+    marked = await markAllPricesDirty();
+    if (marked > 0) syncStatus = await kickPriceRewrite();
   }
 
   return c.json({
     ok: true,
     updated: n,
     marked,
-    syncStarted: marked > 0,
-    syncKind: marked > 0 ? (touchContent ? "full/cache" : "fast/rewrite-only") : null,
+    syncStarted: syncStatus === "started",
+    syncQueued: syncStatus === "queued",
+    syncKind: syncStatus ? (touchContent ? "full/cache" : "fast/rewrite-only") : null,
+    detail:
+      syncStatus === "queued"
+        ? "Sync already running — new prices will apply when it finishes (rewrite-only follow-up queued)."
+        : syncStatus === "started"
+          ? touchContent
+            ? "Rewriting catalogue content from cache…"
+            : "Recalculating prices from stored offers (no live vendor download)."
+          : undefined,
   });
 });
 

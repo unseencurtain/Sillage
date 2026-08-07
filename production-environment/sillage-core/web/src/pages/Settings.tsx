@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, emptyCompanyBilling, type CompanyBillingAddress } from "@/lib/api";
 import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
+import { watchSyncUntilIdle } from "@/lib/watchSync";
 import { cn } from "@/lib/utils";
 
 const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; wide?: boolean }> = [
@@ -111,6 +112,7 @@ const inputClass =
 export function Settings() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const cancelWatch = useRef<(() => void) | null>(null);
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [form, setForm] = useState<Record<string, string>>({});
   const [tiers, setTiers] = useState<TierRow[]>([]);
@@ -125,6 +127,8 @@ export function Settings() {
     setBtsBilling(parseBilling(data.company_billing_bts));
   }, [data]);
 
+  useEffect(() => () => cancelWatch.current?.(), []);
+
   const save = useMutation({
     mutationFn: () =>
       api.saveSettings({
@@ -136,8 +140,18 @@ export function Settings() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
+      qc.invalidateQueries({ queryKey: ["sync-runs"] });
       toast("Settings saved", "ok");
-      if (res.syncStarted) toast("Sync started from settings change", "info");
+      if (res.syncStarted || res.syncQueued) {
+        toast(
+          res.syncQueued
+            ? "Sync already running — your new prices will apply when it finishes"
+            : "Recalculating prices…",
+          "info",
+        );
+        cancelWatch.current?.();
+        cancelWatch.current = watchSyncUntilIdle(qc, toast, { expectFollowUp: !!res.syncQueued });
+      }
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
@@ -253,7 +267,7 @@ export function Settings() {
 
       <Section
         title="Pricing & catalogue"
-        help="How retail prices and shop visibility are computed on each sync. Saving tiers / multiplier / hide-without-image starts a cache rewrite automatically."
+        help="Retail is written into WooCommerce (_price / _regular_price) so cart, sorting, and filters work. Cost stays in sil_offers; Save on multiplier / tiers / stock / hide-without-image marks products dirty and starts a rewrite-only sync from stored offers (no live vendor download). Per-vendor markup on Vendors does the same."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Field
