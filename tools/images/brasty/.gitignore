@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+storageState.json
+output/
+watermarked/
+findings/*
+!findings/.gitkeep
+logs/*
+!logs/.gitkeep
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.csv
