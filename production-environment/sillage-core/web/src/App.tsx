@@ -11,6 +11,7 @@ import { Vendors } from "@/pages/Vendors";
 import { Orders } from "@/pages/Orders";
 import { Settings } from "@/pages/Settings";
 import { Logs } from "@/pages/Logs";
+import { ToastProvider } from "@/components/Toast";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -30,6 +31,7 @@ function RequireAuth() {
 export function App() {
   return (
     <QueryClientProvider client={qc}>
+      <ToastProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -47,6 +49,7 @@ export function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

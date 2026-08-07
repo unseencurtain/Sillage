@@ -45,6 +45,7 @@ require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-images.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-search.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-rest.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-orders.php';
+require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-cart.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-admin.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-activator.php';
 
@@ -80,10 +81,14 @@ add_action(
 			return;
 		}
 
+		// Ensure new attributes (pa_vendor, …) exist without requiring a manual reactivation.
+		Sillage_Activator::ensure_attributes();
+
 		( new Sillage_Images() )->register();
 		( new Sillage_Search() )->register();
 		( new Sillage_Rest() )->register();
 		( new Sillage_Orders() )->register();
+		( new Sillage_Cart() )->register();
 
 		if ( is_admin() ) {
 			( new Sillage_Admin() )->register();

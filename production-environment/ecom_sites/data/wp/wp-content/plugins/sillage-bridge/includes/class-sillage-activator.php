@@ -32,6 +32,7 @@ final class Sillage_Activator {
 		'gender'    => 'Gender',
 		'item-type' => 'Product Type',
 		'volume'    => 'Volume',
+		'vendor'    => 'Vendor',
 	);
 
 	/** Option holding the last activation's failures, surfaced on the status page. */
@@ -45,6 +46,11 @@ final class Sillage_Activator {
 
 	public static function deactivate(): void {
 		flush_rewrite_rules();
+	}
+
+	/** Idempotent: create any attributes added after the original activation. */
+	public static function ensure_attributes(): void {
+		self::register_attributes();
 	}
 
 	/** Create any missing global attribute, then force WooCommerce to re-read the list. */

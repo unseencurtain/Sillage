@@ -41,6 +41,8 @@ export interface GlobalSettings {
   dedupeByEan: boolean;
   primaryOfferStrategy: "cheapest" | "most_stock";
   descriptionMode: "none" | "template";
+  /** exact = every ml term; ranges = buckets; off = hide volume facet. */
+  volumeFilterMode: "exact" | "ranges" | "off";
   writeBatchSize: number;
   maxStatementBytes: number;
   syncEnabled: boolean;
@@ -92,6 +94,7 @@ export async function loadSettings(): Promise<GlobalSettings> {
     dedupeByEan: flag("dedupe_by_ean", true),
     primaryOfferStrategy: (map.get("primary_offer_strategy") as GlobalSettings["primaryOfferStrategy"]) ?? "cheapest",
     descriptionMode: (map.get("description_mode") as GlobalSettings["descriptionMode"]) ?? "none",
+    volumeFilterMode: (map.get("volume_filter_mode") as GlobalSettings["volumeFilterMode"]) ?? "ranges",
     writeBatchSize: num("write_batch_size", 500),
     maxStatementBytes: num("max_statement_bytes", 4_194_304),
     syncEnabled: flag("sync_enabled", true),

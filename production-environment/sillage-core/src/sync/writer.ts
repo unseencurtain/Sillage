@@ -6,6 +6,7 @@ import type { GlobalSettings, Vendor } from "../db/settings.ts";
 import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
+import { buildImageLookup, type ImageLookup } from "./images.ts";
 import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
@@ -14,6 +15,7 @@ import {
   loadVisibilityTerms,
   type TermRef,
 } from "./taxonomy.ts";
+import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
 
 const log = logger("writer");
 
@@ -80,6 +82,7 @@ export interface WriteContext {
   productType: TermRef;
   /** Global attribute taxonomies the plugin has actually registered in WooCommerce. */
   activeAttributeTaxonomies: Set<string>;
+  images: ImageLookup;
 }
 
 export interface WriteResult {
@@ -180,8 +183,8 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Both vendor feeds ship 100% empty descriptions, so `description_mode = template` generates copy
- * from the structured fields rather than launching with blank product pages.
+ * Vendor feeds ship empty descriptions. Default: duplicate the title into the body so the product
+ * page is never blank. `template` still builds a short structured paragraph when enabled.
  */
 function buildDescription(input: {
   name: string;
@@ -191,8 +194,10 @@ function buildDescription(input: {
   mode: GlobalSettings["descriptionMode"];
   existing: string;
 }): string {
-  if (input.existing) return input.existing;
-  if (input.mode !== "template") return "";
+  // Always prefer a non-empty title mirror over leaving WooCommerce blank.
+  if (input.mode === "none" || input.mode !== "template") {
+    return `<p>${escapeHtml(input.name)}</p>`;
+  }
 
   const type = input.attributes["type"];
   const volume = input.attributes["volume"];
@@ -202,15 +207,14 @@ function buildDescription(input: {
     .filter(Boolean)
     .join(" ");
 
-  const sentence =
+  return (
     `<p><strong>${escapeHtml(input.name)}</strong>` +
     (lead ? ` by ${escapeHtml(lead)}` : "") +
     (type ? `, a ${escapeHtml(type.toLowerCase())}` : "") +
     (volume ? ` in a ${escapeHtml(volume)} size` : "") +
     (gender ? `, created for ${escapeHtml(gender.toLowerCase())}` : "") +
-    ".</p>";
-
-  return `${sentence}\n<p>Genuine product, sourced directly from an authorised European distributor.</p>`;
+    ".</p>\n<p>Genuine product, sourced directly from an authorised European distributor.</p>"
+  );
 }
 
 export async function buildWriteContext(
@@ -236,6 +240,7 @@ export async function buildWriteContext(
     visibility: await loadVisibilityTerms(),
     productType: await loadProductTypeTerm("simple"),
     activeAttributeTaxonomies: active,
+    images: await buildImageLookup(),
   };
 }
 
@@ -380,6 +385,13 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   const attributes = parseJson<Record<string, string>>(row.attributes, {});
   const extra = parseJson<Record<string, unknown>>(row.extra, {});
   const galleryUrls = parseJson<string[]>(row.gallery_urls, []);
+  const imageUrl = ctx.images.resolve(eans, row.image_url);
+
+  const volume = normalizeVolume(attributes["volume"], ctx.settings.volumeFilterMode);
+  if (volume) attributes["volume"] = volume;
+  else delete attributes["volume"];
+
+  attributes["vendor"] = VENDOR_LABELS[vendor.slug] ?? vendor.name;
 
   const categoryMap = ctx.categoryMaps.get(row.vendor_id);
   const categoryTtIds: number[] = [];
@@ -417,7 +429,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     brand: row.brand,
     categoryTtIds,
     attributeTtIds: attributeTerms.map((a) => a.ttId),
-    imageUrl: row.image_url,
+    imageUrl,
     galleryUrls,
     sku: row.sku,
     eans,
@@ -429,7 +441,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     description,
     slug,
     eans,
-    imageUrl: row.image_url,
+    imageUrl,
     galleryUrls,
     categoryTtIds,
     attributeTerms,
@@ -470,8 +482,11 @@ async function writeBatch(
           post_parent, guid, menu_order, post_type, post_mime_type, comment_count)`,
       // Every column here is NOT NULL in WordPress's schema and sql_mode includes
       // STRICT_TRANS_TABLES, so none of them may be omitted.
-      "(1,NOW(),UTC_TIMESTAMP(),?,?,'','publish','closed','closed','',?,'','',NOW(),UTC_TIMESTAMP(),'',0,'',0,'product','',0)",
-      newProducts.map((p) => [p.description, p.name.slice(0, 500), p.slug]),
+      "(1,NOW(),UTC_TIMESTAMP(),?,?,?,'publish','closed','closed','',?,'','',NOW(),UTC_TIMESTAMP(),'',0,'',0,'product','',0)",
+      newProducts.map((p) => {
+        const title = p.name.slice(0, 500);
+        return [p.description || `<p>${title}</p>`, title, title, p.slug];
+      }),
       "",
       maxBytes,
     );
@@ -516,10 +531,16 @@ async function writeBatch(
   for (const p of contentUpdates) {
     await conn.query(
       `UPDATE ${wp("posts")}
-          SET post_title = ?, post_content = ?, post_name = ?,
+          SET post_title = ?, post_content = ?, post_excerpt = ?, post_name = ?,
               post_modified = NOW(), post_modified_gmt = UTC_TIMESTAMP()
         WHERE ID = ?`,
-      [p.name.slice(0, 500), p.description, p.slug, p.postId],
+      [
+        p.name.slice(0, 500),
+        p.description || `<p>${p.name.slice(0, 500)}</p>`,
+        p.name.slice(0, 500),
+        p.slug,
+        p.postId,
+      ],
     );
   }
   result.postsUpdated = contentUpdates.length;

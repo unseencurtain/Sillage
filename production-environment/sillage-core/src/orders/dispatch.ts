@@ -190,6 +190,35 @@ export async function dispatchVendorOrder(
   const force = options.force ?? false;
   const dryRun = options.dryRun ?? settings.ordersDryRun;
 
+  // A prior dry-run ends in `submitted` with dry_run=1 and no vendor order number. Live follow-up
+  // must reopen that row — otherwise approve fails with "cannot approve from status submitted"
+  // and the dashboard looks like Live succeeded while the vendor never saw the order.
+  const existing = await loadRow(id);
+  if (!existing) return { id, status: "failed", dryRun, vendorOrderNumber: null, reason: "vendor order not found" };
+  if (!dryRun && existing.status === "submitted" && existing.dry_run === 1) {
+    const reopened = await transition(id, "submitted", "approved", "re-open dry-run for live dispatch", {
+      dry_run: 0,
+      last_error: null,
+    });
+    if (!reopened) {
+      return {
+        id,
+        status: (await loadRow(id))!.status,
+        dryRun,
+        vendorOrderNumber: null,
+        reason: "could not reopen dry-run order for live dispatch",
+      };
+    }
+  } else if (existing.status === "submitted" && existing.dry_run === 0) {
+    return {
+      id,
+      status: "submitted",
+      dryRun: false,
+      vendorOrderNumber: existing.vendor_order_number,
+      reason: "already submitted live — refuse to double-spend",
+    };
+  }
+
   const approved = await approveVendorOrder(id, force);
   if (!approved.ok && approved.reason?.includes("auto_dispatch")) {
     return { id, status: "approved", dryRun, vendorOrderNumber: null, reason: approved.reason };

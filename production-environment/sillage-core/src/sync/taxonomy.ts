@@ -18,6 +18,8 @@ export const ATTRIBUTE_TAXONOMIES: Record<string, string> = {
   // wc_create_attribute() rejects it and the attribute never gets registered at all.
   type: "pa_item-type",
   volume: "pa_volume",
+  /** Storefront browse filter: BeautyFort vs BTS. */
+  vendor: "pa_vendor",
 };
 
 /**

@@ -3,11 +3,13 @@
  */
 import { Hono } from "hono";
 import { sil, wp } from "../../config/env.ts";
-import { query, type RowDataPacket } from "../../db/pool.ts";
+import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendors, setSetting } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
+import { destinationAddress, readWooOrder, updateWooShippingAddress } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
-import { runSync } from "../../sync/run.ts";
+import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
+import type { OrderAddress } from "../../orders/types.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
@@ -168,7 +170,56 @@ api.get("/orders/:id", async (c) => {
     ),
     query<RowDataPacket>(`SELECT * FROM ${sil("sil_vendor_order_tracking")} WHERE vendor_order_id = ?`, [id]),
   ]);
-  return c.json({ order, items, events, tracking });
+  const woo = await readWooOrder(Number(order.wc_order_id));
+  const address = woo ? destinationAddress(woo) : null;
+  return c.json({ order, address, items, events, tracking });
+});
+
+api.put("/orders/:id/address", async (c) => {
+  const id = Number(c.req.param("id"));
+  const [order] = await query<RowDataPacket & { status: string; wc_order_id: number }>(
+    `SELECT id, status, wc_order_id FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
+    [id],
+  );
+  if (!order) return c.json({ ok: false, error: "not found" }, 404);
+
+  const editable = new Set(["received", "approved", "needs_attention", "submitted"]);
+  // Allow editing ship-to on dry-run submitted rows so ops can fix the address before live.
+  if (!editable.has(order.status)) {
+    return c.json({ ok: false, error: `cannot edit address in status ${order.status}` }, 409);
+  }
+  if (order.status === "submitted") {
+    const [row] = await query<RowDataPacket & { dry_run: number }>(
+      `SELECT dry_run FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
+      [id],
+    );
+    if (row && Number(row.dry_run) === 0) {
+      return c.json({ ok: false, error: "cannot edit address after a live submit" }, 409);
+    }
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as { address?: OrderAddress };
+  if (!body.address?.address1 || !body.address?.country) {
+    return c.json({ ok: false, error: "address.address1 and address.country are required" }, 400);
+  }
+
+  await updateWooShippingAddress(Number(order.wc_order_id), body.address);
+  await execute(
+    `UPDATE ${sil("sil_vendor_orders")} SET destination_country = ?, updated_at = NOW() WHERE id = ?`,
+    [body.address.country.toUpperCase(), id],
+  );
+  await execute(
+    `INSERT INTO ${sil("sil_order_events")} (vendor_order_id, from_status, to_status, message, context)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      id,
+      order.status,
+      order.status,
+      "ship-to address updated from dashboard",
+      JSON.stringify({ country: body.address.country }),
+    ],
+  );
+  return c.json({ ok: true });
 });
 
 api.post("/orders/:id/approve", async (c) => {
@@ -179,9 +230,10 @@ api.post("/orders/:id/approve", async (c) => {
 api.post("/orders/:id/dispatch", async (c) => {
   const id = Number(c.req.param("id"));
   const body = (await c.req.json().catch(() => ({}))) as { live?: boolean };
+  // Dashboard buttons are explicit: Dry-run always dry, Live always live — never inherit settings.
   const result = await dispatchVendorOrder(id, {
     force: true,
-    dryRun: body.live ? false : undefined,
+    dryRun: body.live === true ? false : true,
   });
   return c.json(result);
 });
@@ -203,6 +255,7 @@ api.get("/settings", async (c) => {
     orders_poll_minutes: String(s.ordersPollMinutes),
     orders_notify_customer: s.ordersNotifyCustomer ? "1" : "0",
     description_mode: s.descriptionMode,
+    volume_filter_mode: s.volumeFilterMode,
   });
 });
 
@@ -223,14 +276,36 @@ api.put("/settings", async (c) => {
     "orders_poll_minutes",
     "orders_notify_customer",
     "description_mode",
+    "volume_filter_mode",
   ]);
+  // Settings that change what we write to WooCommerce. Hashes only see vendor feed data, so a
+  // multiplier edit would otherwise look like "nothing changed" forever.
+  const priceKeys = new Set(["global_price_multiplier", "global_stock_threshold"]);
+  const contentKeys = new Set(["description_mode", "volume_filter_mode"]);
+
   let n = 0;
+  let touchPrice = false;
+  let touchContent = false;
   for (const [key, value] of Object.entries(body)) {
     if (!allowed.has(key) || typeof value !== "string") continue;
     await setSetting(key, value);
     n++;
+    if (priceKeys.has(key)) touchPrice = true;
+    if (contentKeys.has(key)) touchContent = true;
   }
-  return c.json({ ok: true, updated: n });
+
+  let marked = 0;
+  if (touchContent) marked = await markAllProductsDirty();
+  else if (touchPrice) marked = await markAllPricesDirty();
+
+  if (marked > 0) {
+    const settings = await loadSettings();
+    void runSync({ mode: touchContent ? "full" : "fast", source: settings.syncSource }).catch((err) =>
+      log.error("settings-triggered sync failed", String(err)),
+    );
+  }
+
+  return c.json({ ok: true, updated: n, marked, syncStarted: marked > 0 });
 });
 
 api.get("/logs", async (c) => {
