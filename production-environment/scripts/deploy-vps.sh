@@ -117,6 +117,7 @@ if [[ -f "$ROOT/production-environment/ecom_sites/config/php.ini" ]]; then
   "${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/php.ini" "$HOST:~/ecom_sites/config/php.ini"
 fi
 "${SCP[@]}" "$ROOT/production-environment/scripts/vps-bootstrap.sh" "$HOST:~/vps-bootstrap.sh"
+"${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/sillage-grants.sql" "$HOST:~/ecom_sites/config/sillage-grants.sql"
 log_step "Code + plugin + redis compose uploaded"
 
 if [[ -n "$CLONE_FROM" ]]; then
@@ -422,23 +423,12 @@ docker exec sillage-core bun run migrate
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
 
 set -a; source ~/ecom_sites/.env; source ~/sillage-core/.env; set +a
+# Apply canonical grants file (avoids nested-SSH quoting dropping earth table grants).
+sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ~/ecom_sites/config/sillage-grants.sql \
+  | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot
+# Address editor needs write on HPOS addresses (beyond the read-only grants file).
 docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot <<'SQL'
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_posts TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_postmeta TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_terms TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_termmeta TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_term_taxonomy TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_term_relationships TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_product_meta_lookup TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_product_attributes_lookup TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_category_lookup TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_options TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_wc_orders TO 'sillage'@'%';
 GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_wc_order_operational_data TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_order_items TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_order_itemmeta TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_attribute_taxonomies TO 'sillage'@'%';
 GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%';
 FLUSH PRIVILEGES;
 SQL
