@@ -19,6 +19,10 @@ production-environment/sillage-core/logs/
 # the sillage-bridge plugin (each parent directory must be un-ignored for git to descend).
 production-environment/ecom_sites/data/**
 !production-environment/ecom_sites/data/wp/
+# Keep the LPS media mount directory, never the image files themselves.
+!production-environment/ecom_sites/data/media/
+production-environment/ecom_sites/data/media/**
+!production-environment/ecom_sites/data/media/.gitkeep
 production-environment/ecom_sites/data/wp/**
 !production-environment/ecom_sites/data/wp/wp-content/
 production-environment/ecom_sites/data/wp/wp-content/**
