@@ -28,6 +28,22 @@ Images are watermarked on the site. Client may later want LPS logo overlay. Imag
 a **Playwright** scrape (search by EAN on the product list — no PDP pages). Spec:
 `beastly-image.md` (operator notes, not in repo).
 
+### Brasty image tool (`tools/brasty-images/`)
+
+Standalone Node/Playwright package (not a sillage-core dependency). Operator flow:
+
+1. `npm run login` — headed session → gitignored `storageState.json`
+2. `npm run investigate` — evidence gate for how the large preview loads (DOM / data-* /
+   hover inject / CSS bg / network / API / thumb→full URL). Writes `findings/`.
+3. Operator pastes a concrete extraction strategy into `src/imageExtractor.ts` from findings
+4. `npm run download` → `output/EAN.jpg` (resume via JSONL manifest; low concurrency)
+5. Optional `npm run watermark` — LPS logo via sharp into `watermarked/`
+6. `npm run build-overrides` — merge EAN→`PUBLIC_URL_BASE` URLs into
+   `sillage-core/data/image_overrides.json` (never clobber existing keys)
+7. Host files under `ecom_sites/data/media/` bind-mounted RO into `ecom` at `/lps-media/`
+   (compose change described in the tool README; keep media out of `data/wp/`)
+8. Fast/rewrite sync so the storefront picks up the new override URLs
+
 ### Shipping (Brasty)
 
 - Pack weight: **one box per 26 kg** (42 kg → 2 boxes, 53 kg → 3 boxes).
@@ -37,5 +53,6 @@ a **Playwright** scrape (search by EAN on the product list — no PDP pages). Sp
 ## Next steps
 
 1. Done in this slice: Ocean XML → BeautyFort `image_overrides.json`.
-2. Next: Brasty Playwright image downloader → local `EAN.jpg` or CDN map → enrich.
+2. Brasty Playwright scaffold lives in `tools/brasty-images/` — operator must run
+   investigate on the live site, then register the extraction strategy before bulk download.
 3. Later: full Ocean + Brasty catalogue/order adapters in sillage-core; LPS01/LPS02 naming.
