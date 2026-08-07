@@ -27,6 +27,8 @@ Locked choices and the reasoning behind them. If you want to change one, change 
 | 19 | Auto-dispatch of vendor orders defaults **off** | Both APIs place real orders with real money and neither has a sandbox |
 | 20 | BTS orders stuck in `submitting` after a crash go to `needs_attention`, never auto-retry | BTS accepts no client-supplied reference and exposes no list-orders endpoint, so a retry cannot be proven safe. BeautyFort is fine — its `yourOrderReference` is a real idempotency key |
 | 21 | Dashboard owns all configuration; wp-admin gets a read-only status page | One source of truth, and it keeps the plugin thin |
+| 22 | Retail multiplier precedence: per-vendor override > matching `price_tiers` band > global multiplier | Client wants cost bands (e.g. ≤€80 × 1.7, above × 1.5) but also per-vendor exceptions. Tiers are operator-editable JSON in `sil_settings`; seed is `[]` so existing installs do not silently change prices. Cost = `vendorPrice × fxRate`; first tier with `maxCost >= cost` wins (`null` = unbounded, last). |
+| 23 | Products with no usable image are hidden when `hide_products_without_image` is on | Client: missing photos must not be visible. Sync fills from overrides then cross-vendor EAN matches first; if the resolved URL is still empty/placeholder, the product gets the same `exclude-from-catalog` + `exclude-from-search` terms as the stock-threshold rule (OR’d with that rule). Default on. |
 
 ## Open
 

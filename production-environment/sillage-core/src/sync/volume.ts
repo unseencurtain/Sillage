@@ -26,7 +26,16 @@ export function normalizeVolume(raw: string | undefined, mode: VolumeFilterMode)
   return volumeBucket(ml);
 }
 
+/**
+ * Fallback only when `sil_vendors.storefront_label` is unset (pre-migration). Prefer
+ * `vendor.storefrontLabel` from the database everywhere storefront-facing copy is emitted.
+ */
 export const VENDOR_LABELS: Record<string, string> = {
-  beautyfort: "BeautyFort",
-  bts: "BTS Wholesaler",
+  beautyfort: "LPS02",
+  bts: "LPS01",
 };
+
+export function vendorStorefrontLabel(vendor: { slug: string; storefrontLabel?: string; name: string }): string {
+  if (vendor.storefrontLabel?.trim()) return vendor.storefrontLabel.trim();
+  return VENDOR_LABELS[vendor.slug] ?? vendor.name;
+}

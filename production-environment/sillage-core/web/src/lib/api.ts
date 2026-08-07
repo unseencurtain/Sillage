@@ -139,6 +139,7 @@ export interface Vendor {
   id: number;
   slug: string;
   name: string;
+  storefrontLabel: string;
   skuPrefix: string;
   priceMultiplier: number;
   minVisibleStock: number;

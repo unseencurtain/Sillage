@@ -27,10 +27,16 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   {
     key: "global_price_multiplier",
     label: "Price multiplier",
-    hint: "Sell = cost × this. Example: 5 turns €1 cost into €5. Saving starts a sync to WooCommerce.",
+    hint: "Fallback when no tier matches (or tiers are empty). Sell = cost × this.",
     type: "number",
   },
   { key: "global_stock_threshold", label: "Stock threshold", type: "number" },
+  {
+    key: "hide_products_without_image",
+    label: "Hide products without image",
+    hint: "Exclude from catalog/search when the resolved image is still missing or a placeholder",
+    type: "bool",
+  },
   { key: "orders_dry_run", label: "Orders dry-run", hint: "When on, never spend money", type: "bool" },
   { key: "orders_auto_dispatch", label: "Auto-dispatch", hint: "Off = human approval required", type: "bool" },
   { key: "orders_max_value_eur", label: "Max order value EUR", type: "number" },
@@ -89,6 +95,12 @@ const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; w
   { key: "phone", label: "Phone" },
 ];
 
+interface TierRow {
+  maxCost: string;
+  multiplier: string;
+  unbounded: boolean;
+}
+
 function isTruthy(v: string | undefined) {
   return v === "1" || v === "true";
 }
@@ -102,17 +114,46 @@ function parseBilling(raw: string | undefined): CompanyBillingAddress {
   }
 }
 
+function parseTiers(raw: string | undefined): TierRow[] {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw) as Array<{ maxCost: number | null; multiplier: number }>;
+    if (!Array.isArray(list) || list.length === 0) return [];
+    return list.map((t, i) => ({
+      maxCost: t.maxCost === null || t.maxCost === undefined ? "" : String(t.maxCost),
+      multiplier: String(t.multiplier ?? ""),
+      unbounded: t.maxCost === null || t.maxCost === undefined || i === list.length - 1,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function serializeTiers(rows: TierRow[]): string {
+  if (rows.length === 0) return "[]";
+  const out = rows.map((r, i) => {
+    const last = i === rows.length - 1;
+    return {
+      maxCost: last || r.unbounded ? null : Number(r.maxCost),
+      multiplier: Number(r.multiplier),
+    };
+  });
+  return JSON.stringify(out);
+}
+
 export function Settings() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [form, setForm] = useState<Record<string, string>>({});
+  const [tiers, setTiers] = useState<TierRow[]>([]);
   const [bfBilling, setBfBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
   const [btsBilling, setBtsBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
 
   useEffect(() => {
     if (!data) return;
     setForm(data);
+    setTiers(parseTiers(data.price_tiers));
     setBfBilling(parseBilling(data.company_billing_beautyfort));
     setBtsBilling(parseBilling(data.company_billing_bts));
   }, [data]);
@@ -121,6 +162,7 @@ export function Settings() {
     mutationFn: () =>
       api.saveSettings({
         ...form,
+        price_tiers: serializeTiers(tiers),
         company_billing_beautyfort: JSON.stringify(bfBilling),
         company_billing_bts: JSON.stringify(btsBilling),
       }),
@@ -133,6 +175,28 @@ export function Settings() {
   });
 
   const setBool = (key: string, v: boolean) => setForm((prev) => ({ ...prev, [key]: v ? "1" : "0" }));
+
+  const updateTier = (index: number, patch: Partial<TierRow>) => {
+    setTiers((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const addTier = () => {
+    setTiers((prev) => {
+      if (prev.length === 0) return [{ maxCost: "", multiplier: "1.5", unbounded: true }];
+      const next = prev.map((r, i) =>
+        i === prev.length - 1 ? { ...r, unbounded: false, maxCost: r.maxCost || "80" } : r,
+      );
+      return [...next, { maxCost: "", multiplier: "1.5", unbounded: true }];
+    });
+  };
+
+  const removeTier = (index: number) => {
+    setTiers((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) return [];
+      return next.map((r, i) => ({ ...r, unbounded: i === next.length - 1 }));
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -179,6 +243,71 @@ export function Settings() {
           ),
         )}
       </div>
+
+      <section className="space-y-3 rounded-xl border border-line bg-panel p-5 shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Price tiers</h2>
+          <p className="text-sm text-muted">
+            Cost bands (vendor price × FX). First matching max cost wins; the last row is unbounded.
+            Empty list falls back to the global multiplier above.
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            Changing tiers requires <code className="font-mono text-xs">bun run sync -- --rewrite-all</code> to
+            take effect, because sync hashes cover vendor data only and a settings change produces no hash
+            change.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {tiers.length === 0 ? (
+            <p className="text-sm text-muted">No tiers — global multiplier only.</p>
+          ) : (
+            tiers.map((row, i) => (
+              <div key={i} className="flex flex-wrap items-end gap-3">
+                <label className="block text-sm">
+                  <span className="text-xs text-muted">Max cost (EUR)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="mt-1 w-36 rounded-lg border border-line bg-panel px-2.5 py-1.5 font-mono text-sm disabled:opacity-50"
+                    placeholder={row.unbounded ? "∞" : "80"}
+                    value={row.unbounded ? "" : row.maxCost}
+                    disabled={save.isPending || row.unbounded}
+                    onChange={(e) => updateTier(i, { maxCost: e.target.value })}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-xs text-muted">Multiplier</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="mt-1 w-28 rounded-lg border border-line bg-panel px-2.5 py-1.5 font-mono text-sm"
+                    value={row.multiplier}
+                    disabled={save.isPending}
+                    onChange={(e) => updateTier(i, { multiplier: e.target.value })}
+                  />
+                </label>
+                <span className="pb-2 text-xs text-muted">{row.unbounded ? "unbounded (last)" : null}</span>
+                <button
+                  type="button"
+                  className="mb-0.5 rounded-lg border border-line px-2.5 py-1.5 text-xs disabled:opacity-40"
+                  disabled={save.isPending}
+                  onClick={() => removeTier(i)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+        <button
+          type="button"
+          className="rounded-lg border border-line px-3 py-1.5 text-sm disabled:opacity-40"
+          disabled={save.isPending}
+          onClick={addTier}
+        >
+          Add tier
+        </button>
+      </section>
 
       <section className="space-y-4 rounded-xl border border-line bg-panel p-5 shadow-sm">
         <div>

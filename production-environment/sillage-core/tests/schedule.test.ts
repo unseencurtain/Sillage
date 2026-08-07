@@ -4,6 +4,7 @@ import { decide, normaliseHour, type ScheduleTiming } from "../src/sync/schedule
 
 const settings = (patch: Partial<GlobalSettings> = {}): GlobalSettings => ({
   priceMultiplier: 1,
+  priceTiers: [],
   stockThreshold: 0,
   maxRrpRatio: 10,
   dedupeByEan: true,
@@ -20,6 +21,7 @@ const settings = (patch: Partial<GlobalSettings> = {}): GlobalSettings => ({
   fullSyncEnabled: true,
   fullSyncHour: 3,
   syncSource: "live",
+  hideProductsWithoutImage: true,
   ordersDryRun: true,
   ordersAutoDispatch: false,
   ordersMaxValueEur: 500,

@@ -4,13 +4,13 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 
 | Priority | Item | Notes |
 |---|---|---|
-| P0 | Missing product photos (`no_image` / placeholders) | BeautyFort-heavy. Python EAN→URL → `sillage-core/data/image_overrides.json`. **Ocean XML photos wired** (`enrich.py --fetch-ocean --install-core`). Then fast/rewrite sync. |
+| P0 | Missing product photos (`no_image` / placeholders) | **Done (stage 3):** cross-vendor EAN fill on full+fast sync; `hide_products_without_image` (default on) excludes unresolved placeholders. Overrides still via `image_overrides.json` / Ocean enricher. |
 | P0 | Theme compatibility (Astra / Blocksy / Elementor) | Bridge attachment filters (see `sillage-bridge`). |
-| P1 | Rename shop sections to **LPS01** (BTS) / **LPS02** (BeautyFort) | Keep separate categories; less “supplier” naming. |
+| P1 | Rename shop sections to **LPS01** (BTS) / **LPS02** (BeautyFort) | **Done (stage 3):** `sil_vendors.storefront_label`; root `product_cat` renamed in place. SKU prefix / slug formula unchanged. |
 | P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | Feeds documented in [`docs/vendors/ocean-brasty-notes.md`](vendors/ocean-brasty-notes.md). Images already used offline. |
 | P1 | Brasty **Playwright image scrape** | CSV has no images; see operator `beastly-image.md`. |
 | P2 | Vendor **wholesale.brasty.com** (full catalogue + orders) | Watermarked photos; MOQ; shipping 26 kg/box. |
-| P2 | Tiered retail markup | e.g. cost ≤ €80 × 1.7, > €80 × 1.5 — settings-driven. |
+| P2 | Tiered retail markup | **Done (stage 3):** `sil_settings.price_tiers` JSON; dashboard editor; empty `[]` keeps single multiplier. |
 | P2 | Cart minimum / small-order surcharge | Foodpanda-style fee under threshold. |
 | P3 | B2B / higher-MOQ lane | Separate section or mode; UX TBD. |
 
@@ -25,4 +25,4 @@ python3 beautyfort-enriched/enrich.py --fetch-ocean --install-core
 
 ## Out of scope until scheduled
 
-Full Ocean/Brasty Bun connectors, MOQ pricing, LPS rename, Brasty Playwright — listed above.
+Full Ocean/Brasty Bun connectors, MOQ pricing, Brasty Playwright — listed above.

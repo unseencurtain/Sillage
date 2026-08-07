@@ -4,12 +4,18 @@
  * Priority for a given EAN:
  *   1. data/image_overrides.json (hand-curated + ocean/shopify matches from the prior enricher)
  *   2. Another vendor's offer image for the same EAN (usually BTS)
+ *
+ * Cross-vendor fill runs for every product whose current URL is missing, a placeholder, or a
+ * weak BeautyFort thumb — on both full and fast sync paths (caller must invoke resolve()).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
+import { isPlaceholderImage, isWeakVendorThumb } from "./imageRules.ts";
+
+export { isPlaceholderImage, isWeakVendorThumb, shouldHideForMissingImage } from "./imageRules.ts";
 
 const log = logger("images");
 
@@ -18,26 +24,6 @@ function normalizeEan(raw: string | null | undefined): string | null {
   const cleaned = raw.trim().replace(/^'+/, "");
   if (!cleaned || cleaned === "0000000000000" || !/^\d+$/.test(cleaned)) return null;
   return cleaned.replace(/^0+/, "") || null;
-}
-
-export function isPlaceholderImage(url: string | null | undefined): boolean {
-  if (!url) return true;
-  const low = url.toLowerCase();
-  return (
-    low.includes("no_image") ||
-    low.includes("woocommerce-placeholder") ||
-    low.includes("placeholder") ||
-    low.endsWith("/images/") ||
-    (low.includes("/thumb/") && low.includes("noimage"))
-  );
-}
-
-/** BeautyFort's /pic/ CDN serves tiny thumbs — treat as replaceable when a better URL exists. */
-export function isWeakVendorThumb(url: string | null | undefined): boolean {
-  if (!url) return true;
-  if (isPlaceholderImage(url)) return true;
-  const low = url.toLowerCase();
-  return low.includes("beautyfort.com/pic/");
 }
 
 let overridesCache: Map<string, string> | null = null;
@@ -89,15 +75,15 @@ export async function buildImageLookup(root = process.cwd()): Promise<ImageLooku
   const fromOffers = await loadOfferImageIndex();
   return {
     resolve(eans, current) {
-      // Prefer curated / cross-vendor images over empty, placeholder, or BeautyFort thumbs.
+      // Prefer curated / cross-vendor images over empty, placeholder, or weak thumbs.
       for (const raw of eans) {
         const ean = normalizeEan(raw);
         if (!ean) continue;
-        const hit = overrides.get(ean) ?? fromOffers.get(ean);
-        if (hit && hit !== current) {
-          if (isWeakVendorThumb(current) || isPlaceholderImage(current)) return hit;
-          // Even a non-weak current URL loses to an override (hand-curated wins).
-          if (overrides.has(ean)) return hit;
+        const override = overrides.get(ean);
+        if (override && override !== current) return override;
+        const hit = fromOffers.get(ean);
+        if (hit && hit !== current && (isWeakVendorThumb(current) || isPlaceholderImage(current))) {
+          return hit;
         }
       }
       return current;
