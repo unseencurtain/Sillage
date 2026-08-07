@@ -22,12 +22,15 @@ Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
 `redis_network` (ecom ↔ valkey ↔ sillage-core).
 
-**Product images (`/lps-media/`).** Host directory `production-environment/ecom_sites/data/media/`
+**Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
 is bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
-Docker volume — operators and download scripts drop files on the host path). Public URLs stay
-`https://<shop>/lps-media/<file>`. Locally `shop-gateway` strips the prefix; on VPS host Caddy
-`handle_path /lps-media/*` reverse-proxies to `lps-media`. WordPress/`ecom` does not serve these
-files. Sync still stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`).
+Docker volume — operators and download scripts drop files on the host path). Preferred public URLs
+are `https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
+`https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
+`shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
+Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). Base URL is
+configurable via `sil_settings.image_cdn_base_url` (dashboard) and tool env
+`LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default `https://images.slilverbelt.xyz`).
 
 ```bash
 docker network create ecom_network

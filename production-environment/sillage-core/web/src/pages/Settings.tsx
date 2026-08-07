@@ -38,6 +38,12 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
     type: "bool",
   },
   {
+    key: "image_cdn_base_url",
+    label: "Image CDN base URL",
+    hint: "Public origin for self-hosted files (e.g. https://images.slilverbelt.xyz). Does not rewrite existing product URLs — update image_overrides.json / tool PUBLIC_URL_BASE, then sync with --rewrite-all.",
+    type: "text",
+  },
+  {
     key: "cart_min_enabled",
     label: "Small-order fee",
     hint: "Foodpanda-style fee when cart (or a vendor portion) is under the minimum. Off by default.",

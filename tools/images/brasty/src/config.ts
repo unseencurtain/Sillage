@@ -103,10 +103,12 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     logoPosition: parseLogoPosition(envString("LOGO_POSITION", "bottom-right")),
     logoScale: envFloat("LOGO_SCALE", 0.18),
     logoOpacity: envFloat("LOGO_OPACITY", 0.85),
-    publicUrlBase: envString("PUBLIC_URL_BASE", "https://example.com/lps-media").replace(
-      /\/$/,
-      "",
-    ),
+    publicUrlBase: (
+      process.env.LPS_MEDIA_BASE_URL?.trim() ||
+      process.env.IMAGE_HOST_BASE_URL?.trim() ||
+      process.env.PUBLIC_URL_BASE?.trim() ||
+      "https://images.slilverbelt.xyz"
+    ).replace(/\/$/, ""),
     imageOverridesPath: resolvePath(
       envString(
         "IMAGE_OVERRIDES_PATH",

@@ -76,6 +76,12 @@ export interface GlobalSettings {
   syncSource: "live" | "local";
   /** Exclude products whose resolved image is still a placeholder. */
   hideProductsWithoutImage: boolean;
+  /**
+   * Public origin for self-hosted product images (no trailing slash).
+   * Tools that write image_overrides.json should emit `{base}/{file}`; product rows
+   * still store absolute URLs. Changing this alone does not rewrite WooCommerce.
+   */
+  imageCdnBaseUrl: string;
   /** Foodpanda-style small-order fee on the storefront (bridge reads these). */
   cartMinEnabled: boolean;
   cartMinSubtotalEur: number;
@@ -141,6 +147,19 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fullSyncHour: num("full_sync_hour", 3),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
     hideProductsWithoutImage: flag("hide_products_without_image", true),
+    imageCdnBaseUrl: (() => {
+      const fromDb = (map.get("image_cdn_base_url") ?? "").trim().replace(/\/$/, "");
+      if (fromDb) return fromDb;
+      const fromEnv = (
+        process.env.LPS_MEDIA_BASE_URL ??
+        process.env.IMAGE_HOST_BASE_URL ??
+        process.env.PUBLIC_URL_BASE ??
+        ""
+      )
+        .trim()
+        .replace(/\/$/, "");
+      return fromEnv || "https://images.slilverbelt.xyz";
+    })(),
     cartMinEnabled: flag("cart_min_enabled", false),
     cartMinSubtotalEur: num("cart_min_subtotal_eur", 50),
     cartMinFeeEur: num("cart_min_fee_eur", 5),

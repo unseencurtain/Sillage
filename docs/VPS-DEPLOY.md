@@ -13,9 +13,10 @@ You run everything from your **laptop** in a clone of this repo. The VPS never n
 |---|---|
 | Shop (WooCommerce) | `https://shop.example.com` |
 | Dashboard (Sillage) | `https://ops.example.com` |
+| Product images CDN | `https://images.example.com/<file>` (optional `--images`) |
 | Passwords file (laptop only) | `.deploy/vps-dashboard-<ssh-host>.txt` |
 
-Stack: Caddy (TLS) → WordPress `:104` + `lps-media` `:105` (`/lps-media/*`) + sillage-core `:4000`, MariaDB, Valkey, sillage-cron. Host bind-mount `ecom_sites/data/media/` into `lps-media`.
+Stack: Caddy (TLS) → WordPress `:104` + `lps-media` `:105` + sillage-core `:4000`, MariaDB, Valkey, sillage-cron. Host bind-mount `ecom_sites/data/media/` into `lps-media`. Preferred image URLs use the images host (document root); shop `/lps-media/*` remains a fallback.
 
 ---
 
@@ -104,6 +105,7 @@ Point both hostnames at `YOUR_VPS_IP` (TTL 600 is fine):
 |---|---|---|
 | `shop.example.com` (or a subdomain) | A | VPS IP |
 | `ops.example.com` | A | VPS IP |
+| `images.example.com` (optional CDN) | A | VPS IP |
 
 If using Porkbun + `.deploy/porkbun.env`, the next step’s `--dns` flag creates/updates these A records for you.
 
@@ -124,11 +126,13 @@ Public resolvers (1.1.1.1 / 8.8.8.8) often see new names before your ISP cache d
   --host my-sillage \
   --shop shop.example.com \
   --dash ops.example.com \
+  --images images.example.com \
   --dns \
   --ip YOUR_VPS_IP
 ```
 
-Omit `--dns` if you already created the A records manually.
+Omit `--dns` if you already created the A records manually. Omit `--images` only if you will keep
+serving product files solely under `https://shop…/lps-media/`.
 
 ### What the script does
 
@@ -156,6 +160,8 @@ cat .deploy/vps-dashboard-my-sillage.txt
 # From laptop (after DNS works)
 curl -sS -o /dev/null -w "%{http_code}\n" https://shop.example.com/
 curl -sS -o /dev/null -w "%{http_code}\n" https://ops.example.com/
+# After media files exist on the host bind mount:
+curl -sS -o /dev/null -w "%{http_code}\n" https://images.example.com/<known-file>.jpg
 ```
 
 On the VPS:
