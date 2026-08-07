@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Create/update Porkbun A records for Sillage shop + dashboard domains.
+# Create/update Porkbun A records for Sillage shop + dashboard (+ optional images) domains.
 #
 # Usage:
-#   ./production-environment/scripts/porkbun-dns.sh <shop.fqdn> <dash.fqdn> <ipv4>
+#   ./production-environment/scripts/porkbun-dns.sh <shop.fqdn> <dash.fqdn> <ipv4> [images.fqdn]
 #
 # Credentials: .deploy/porkbun.env (PORKBUN_API_KEY, PORKBUN_SECRET_KEY)
 set -euo pipefail
@@ -10,6 +10,7 @@ set -euo pipefail
 SHOP_FQDN="${1:?shop FQDN required}"
 DASH_FQDN="${2:?dash FQDN required}"
 IP="${3:?IPv4 required}"
+IMAGES_FQDN="${4:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${PORKBUN_ENV:-$ROOT/.deploy/porkbun.env}"
 
@@ -92,4 +93,7 @@ for r in d.get('records',[]):
 
 upsert_a "$SHOP_FQDN" "$IP"
 upsert_a "$DASH_FQDN" "$IP"
+if [[ -n "$IMAGES_FQDN" ]]; then
+  upsert_a "$IMAGES_FQDN" "$IP"
+fi
 echo "DNS ready."
