@@ -159,18 +159,38 @@ final class Sillage_Rest {
 	/**
 	 * Rebuild theme-owned product lookup tables.
 	 *
-	 * Blocksy is the only theme known to keep one. Each check is guarded, so this is a no-op on
-	 * any other theme rather than something to remove when the theme changes.
+	 * Blocksy keeps a taxonomy lookup table. Astra / Elementor may expose similar refresh entry
+	 * points — each check is guarded so this is a no-op when those themes/plugins are absent.
 	 */
 	private function regenerate_theme_lookups(): bool {
+		$did = false;
+
 		if (
 			function_exists( 'blocksy_get_product_taxonomies_lookup_table' )
 			|| class_exists( '\Blocksy\ProductTaxonomiesLookup' )
 		) {
 			do_action( 'blocksy:products:taxonomies-lookup:regenerate' );
-			return true;
+			$did = true;
 		}
-		return false;
+
+		// Astra WooCommerce addon / Elementor Pro occasionally cache product card markup.
+		if ( function_exists( 'astra_clear_all_assets_cache' ) ) {
+			astra_clear_all_assets_cache();
+			$did = true;
+		}
+		if ( class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance->files_manager ) ) {
+			$fm = \Elementor\Plugin::$instance->files_manager;
+			if ( is_object( $fm ) && method_exists( $fm, 'clear_cache' ) ) {
+				$fm->clear_cache();
+				$did = true;
+			}
+		}
+		if ( function_exists( 'elementor_theme_do_location' ) && class_exists( '\Elementor\Plugin' ) ) {
+			do_action( 'elementor/core/files/clear_cache' );
+			$did = true;
+		}
+
+		return $did;
 	}
 
 	/** Health and configuration snapshot, used by the dashboard's Overview page. */

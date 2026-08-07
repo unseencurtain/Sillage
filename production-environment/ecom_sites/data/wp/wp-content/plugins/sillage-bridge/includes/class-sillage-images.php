@@ -23,9 +23,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * Themes do not agree on how a product image is rendered. WooCommerce's own templates call
  * `wp_get_attachment_image()`, Blocksy builds its gallery from attachment IDs and ignores the
- * `woocommerce_before_single_product_summary` output entirely, Elementor has its own widget, and
- * the block templates go through yet another path. Overriding each renderer means a new hook for
- * every theme, and silent breakage the day the theme changes.
+ * `woocommerce_before_single_product_summary` output entirely, Elementor has its own widget, Astra
+ * uses theme builders, and the block templates go through yet another path. Overriding each
+ * renderer means a new hook for every theme, and silent breakage the day the theme changes.
  *
  * What all of them share is the attachment ID. So instead of replacing renderers, this makes the
  * product *look like* it has a thumbnail: `post_thumbnail_id` returns an ID, and the resolution
@@ -57,6 +57,12 @@ final class Sillage_Images {
 		// wp_get_attachment_image(), _src(), _url() and every theme helper funnel through.
 		add_filter( 'image_downsize', array( $this, 'downsize' ), 10, 3 );
 		add_filter( 'wp_get_attachment_url', array( $this, 'attachment_url' ), 10, 2 );
+		// Elementor / Astra helpers sometimes call wp_get_attachment_image_src directly and
+		// skip image_downsize when a prior filter already short-circuited — cover that path too.
+		add_filter( 'wp_get_attachment_image_src', array( $this, 'attachment_image_src' ), 10, 4 );
+
+		// Empty gallery → use the main image so Elementor gallery widgets still render something.
+		add_filter( 'woocommerce_product_get_gallery_image_ids', array( $this, 'gallery_image_ids' ), 10, 2 );
 
 		// Alt text is supplied as attachment meta rather than as an image attribute, because the
 		// Store API and the block editor read the meta directly and never build an <img> tag.
@@ -163,6 +169,43 @@ final class Sillage_Images {
 	public function attachment_url( $url, $post_id ) {
 		$external = $this->url_for( (int) $post_id );
 		return '' === $external ? $url : $external;
+	}
+
+	/**
+	 * Resolve wp_get_attachment_image_src() for Elementor / Astra product widgets.
+	 *
+	 * @param array|false  $image  Existing [url, width, height] or false.
+	 * @param int          $id     Attachment ID.
+	 * @param string|int[] $size   Requested size.
+	 * @param bool         $icon   Whether an icon was requested.
+	 * @return array|false
+	 */
+	public function attachment_image_src( $image, $id, $size = 'thumbnail', $icon = false ) {
+		unset( $size, $icon );
+		$url = $this->url_for( (int) $id );
+		if ( '' === $url ) {
+			return $image;
+		}
+		return array( $url, 0, 0, false );
+	}
+
+	/**
+	 * If the product has no gallery attachments, expose the main image ID so Elementor galleries
+	 * still render the vendor URL via the filters above.
+	 *
+	 * @param int[]       $ids     Gallery attachment IDs.
+	 * @param mixed       $product Product object.
+	 * @return int[]
+	 */
+	public function gallery_image_ids( $ids, $product = null ) {
+		if ( ! empty( $ids ) || ! $product instanceof WC_Product ) {
+			return is_array( $ids ) ? $ids : array();
+		}
+		$product_id = $product->get_id();
+		if ( '' === $this->url_for( $product_id ) ) {
+			return is_array( $ids ) ? $ids : array();
+		}
+		return array( $product_id );
 	}
 
 	/**
