@@ -1,0 +1,15 @@
+name: valkey
+
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: valkey
+    hostname: valkey
+    restart: unless-stopped
+    command: valkey-server --save "" --appendonly no
+    networks:
+      - redis_network
+
+networks:
+  redis_network:
+    external: true

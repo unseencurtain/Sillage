@@ -1,0 +1,107 @@
+name: wordpress-ecom
+services:
+  ecom-db:
+    container_name: ecom-db
+    hostname: ecom-db
+    image: mariadb:latest
+    networks:
+      - ecom_network
+    restart: always
+    # Published on loopback only, so sillage-core can run as a host process during development
+    # with DB_HOST=127.0.0.1 DB_PORT=3307. In the container it reaches ecom-db:3306 directly.
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - ./data/wp-db:/var/lib/mysql
+      - ./config/mariadb.cnf:/etc/mysql/conf.d/sillage.cnf:ro
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PWD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PWD}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ecom:
+    container_name: ecom
+    hostname: ecom
+    image: lime/wordpress:latest
+    networks:
+      - ecom_network
+      - redis_network
+    ports:
+      - "80:80"
+    restart: always
+    depends_on:
+      ecom-db:
+        condition: service_healthy
+    volumes:
+      - ./data/wp:/var/www/html
+      - ./config/php.ini:/usr/local/etc/php/conf.d/conf.ini:ro
+    environment:
+      WORDPRESS_DB_HOST: ecom-db
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PWD}
+      WORDPRESS_DB_NAME: ${MYSQL_DB}
+
+  # Shared by every container built from the sillage-core image. They differ only in `command`.
+  x-sillage-common: &sillage-common
+    build:
+      context: ../sillage-core
+    image: sillage-core:latest
+    networks:
+      - ecom_network
+      - redis_network
+    restart: unless-stopped
+    depends_on:
+      ecom-db:
+        condition: service_healthy
+    env_file:
+      - ../sillage-core/.env
+    environment:
+      DB_HOST: ecom-db
+      DB_PORT: "3306"
+      REDIS_URL: redis://valkey:6379
+      WP_BASE_URL: http://ecom
+      # The .env value is relative to the host checkout; inside the container it is a bind mount.
+      FIXTURES_DIR: /app/.feedscratch
+    volumes:
+      - ../sillage-core/logs:/app/logs
+      - ../../.feedscratch:/app/.feedscratch:ro
+
+  # Webhooks from the storefront, plus the dashboard. The plugin resolves this by hostname over
+  # ecom_network; port 4000 is published on loopback for a human's browser.
+  sillage-core:
+    <<: *sillage-common
+    container_name: sillage-core
+    hostname: sillage-core
+    command: ["bun", "run", "src/server/index.ts"]
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:4000/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # The scheduler. Split from the API so a full sync cannot stall an inbound order webhook, and so
+  # either can be restarted without interrupting the other.
+  sillage-cron:
+    <<: *sillage-common
+    container_name: sillage-cron
+    hostname: sillage-cron
+    command: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/crontab"]
+
+networks:
+  ecom_network:
+    name: ecom_network
+    driver: bridge
+    external: true
+
+  redis_network:
+    external: true
+    name: redis_network
