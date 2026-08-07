@@ -8,11 +8,18 @@
  *    `submitted` row; a crash mid-submit leaves `needs_attention` and must never auto-retry.
  *
  * Dry-run means *no remote mutation whatsoever* — not even DELETE /cart.
+ *
+ * API shape: docs/vendors/wholesale-perfumes-api.md
  */
 import { env } from "../../config/env.ts";
 import { query, type RowDataPacket } from "../../db/pool.ts";
 import { loadVendor } from "../../db/settings.ts";
-import { WholesalePerfumesClient } from "../../vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
+import {
+  extractOrderNumber,
+  WholesalePerfumesApiError,
+  WholesalePerfumesClient,
+  type WholesalePerfumesOrderView,
+} from "../../vendors/wholesale-perfumes/WholesalePerfumesClient.ts";
 import type {
   CancelResult,
   Destination,
@@ -23,18 +30,19 @@ import type {
   VendorOrderDraft,
   VendorOrderResult,
   VendorOrderStatus,
+  VendorPollStatus,
 } from "../adapter.ts";
 
 const CART_LOCK = "sillage:wholesale-perfumes-cart";
 const CART_LOCK_TIMEOUT_SEC = 120;
 
 /**
- * Cart line `code` = catalog product `id` (not EAN). Confirmed by wpjshop docs PHP sample
- * (`{ code: 3, quantity: 4 }` against catalog `<id>`) and the all-or-nothing POST /cart body.
- * Still treat as an assumption until a non-dry-run cart round-trip is observed in staging —
- * dry-run performs zero remote cart I/O (decision 25). Change only this function if wrong.
+ * Cart line `code` = catalog product `id` (not EAN).
+ * Confirmed by the vendor B2B API doc (PHP sample `{ code: 3, quantity: 4 }` and
+ * POST /order `"code": "1"` — both are catalog ids). Still prefer a staging cart
+ * round-trip before go-live; change only this function if wrong.
  */
-function wholesalePerfumesCartCode(item: OrderItem): string {
+export function wholesalePerfumesCartCode(item: OrderItem): string {
   return item.vendorProductId;
 }
 
@@ -60,20 +68,29 @@ async function releaseCartLock(): Promise<void> {
   await query(`SELECT RELEASE_LOCK(?)`, [CART_LOCK]);
 }
 
-function extractOrderNumber(response: unknown): string | null {
-  if (response === null || response === undefined) return null;
-  if (typeof response === "string" || typeof response === "number") {
-    const s = String(response).trim();
-    return s || null;
+/** Map GET /order status fields onto our poll enum. Numeric codes are undocumented → unknown. */
+export function mapWholesalePerfumesPollStatus(view: WholesalePerfumesOrderView): {
+  status: VendorPollStatus;
+  rawStatus: string;
+} {
+  const msg =
+    view.statusMsg !== null && view.statusMsg !== undefined ? String(view.statusMsg).trim() : "";
+  const code =
+    view.statusCode !== null && view.statusCode !== undefined ? String(view.statusCode).trim() : "";
+  const rawStatus = msg || code || "unknown";
+  const lower = rawStatus.toLowerCase();
+
+  let status: VendorPollStatus = "unknown";
+  if (lower.includes("deliver")) status = "delivered";
+  else if (lower.includes("ship") || lower.includes("dispatch")) status = "dispatched";
+  else if (lower.includes("cancel")) status = "cancelled";
+  else if (lower.includes("confirm") || lower.includes("paid") || lower.includes("process")) {
+    status = "confirmed";
+  } else if (lower.includes("pend") || lower.includes("new") || lower.includes("open")) {
+    status = "pending";
   }
-  if (typeof response === "object") {
-    const obj = response as Record<string, unknown>;
-    for (const key of ["order_number", "orderNumber", "number", "id", "order_id"]) {
-      const v = obj[key];
-      if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
-    }
-  }
-  return null;
+
+  return { status, rawStatus };
 }
 
 export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
@@ -87,6 +104,7 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
   /**
    * wholesale-perfumes has no dedicated stock-check endpoint. Trust sil_offers quantities carried on the
    * draft (kept fresh by the hourly store sync). Still enforce positive qty here.
+   * Live submit may still fail with API codes 3 / 8 / 1030 if stock moved.
    */
   async verifyStock(items: OrderItem[]): Promise<StockVerification> {
     const lines = items.map((item) => ({
@@ -164,8 +182,8 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
     const requestPayload = {
       ourReference: order.ourReference,
       cartLines,
-      // Isolated assumption — see wholesalePerfumesCartCode().
-      codeFieldAssumption: "catalog id (vendorProductId)",
+      note: order.ourReference,
+      codeField: "catalog id (vendorProductId)",
       delivery: {
         name: `${addr.firstName} ${addr.lastName}`.trim(),
         address1: addr.address1,
@@ -224,7 +242,7 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
       await api.clearCart();
       await api.addToCart(cartLines);
       const cart = await api.getCart();
-      const submitResponse = await api.submitCart();
+      const submitResponse = await api.submitCart({ note: order.ourReference });
       const vendorOrderNumber = extractOrderNumber(submitResponse);
 
       if (!vendorOrderNumber) {
@@ -254,6 +272,9 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
         responsePayload: { cart, submitResponse },
       };
     } catch (err) {
+      const apiErr = err instanceof WholesalePerfumesApiError ? err : null;
+      // Documented error codes mean the order was not created. HTTP/network after mutation is ambiguous.
+      const ambiguous = !(apiErr?.isClearReject);
       return {
         committed: false,
         vendorOrderNumber: null,
@@ -262,8 +283,12 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
         shippingCompany: chosen.company,
         totalCost: null,
         requestPayload,
-        responsePayload: { error: String(err) },
-        ambiguous: true,
+        responsePayload: {
+          error: String(err),
+          apiError: apiErr?.apiError ?? null,
+          details: apiErr?.details ?? null,
+        },
+        ambiguous,
         error: String(err),
       };
     } finally {
@@ -272,26 +297,8 @@ export class WholesalePerfumesOrderAdapter implements VendorOrderAdapter {
   }
 
   async poll(vendorOrderNumber: string): Promise<VendorOrderStatus> {
-    const detail = await client().getOrder(vendorOrderNumber);
-    const rawStatus =
-      detail && typeof detail === "object"
-        ? String(
-            (detail as Record<string, unknown>).status ??
-              (detail as Record<string, unknown>).order_status ??
-              "unknown",
-          )
-        : String(detail ?? "unknown");
-
-    const lower = rawStatus.toLowerCase();
-    let status: VendorOrderStatus["status"] = "unknown";
-    if (lower.includes("deliver")) status = "delivered";
-    else if (lower.includes("ship") || lower.includes("dispatch")) status = "dispatched";
-    else if (lower.includes("cancel")) status = "cancelled";
-    else if (lower.includes("confirm") || lower.includes("paid") || lower.includes("process")) {
-      status = "confirmed";
-    } else if (lower.includes("pend") || lower.includes("new") || lower.includes("open")) {
-      status = "pending";
-    }
+    const view = await client().getOrder(vendorOrderNumber);
+    const { status, rawStatus } = mapWholesalePerfumesPollStatus(view);
 
     return {
       status,
