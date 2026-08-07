@@ -151,6 +151,8 @@ export interface Overview {
     hideProductsWithoutImage?: boolean;
     stockThreshold?: number;
   };
+  /** BeautyFort + BTS credential readiness (values never returned). */
+  secrets?: { ready: boolean; missing: string[] };
 }
 
 export interface SyncRun {

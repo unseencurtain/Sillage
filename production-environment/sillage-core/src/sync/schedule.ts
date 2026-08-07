@@ -10,7 +10,7 @@
  * timestamps are written by the database, so the database is the only clock that cannot be wrong
  * about its own rows.
  */
-import { sil } from "../config/env.ts";
+import { applyRuntimeUrls, sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, recordEvent, type GlobalSettings } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
@@ -125,6 +125,7 @@ export async function decideSchedule(settings: GlobalSettings): Promise<Schedule
 /** One cron tick. Returns the summary when a sync ran, or null when nothing was due. */
 export async function runScheduledSync(override?: "full" | "fast"): Promise<SyncSummary | null> {
   const settings = await loadSettings();
+  applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
   const decision = override ? { action: override, reason: "forced from the command line" } : await decideSchedule(settings);
 
   // Order housekeeping runs every tick, independent of whether a catalogue sync is due.

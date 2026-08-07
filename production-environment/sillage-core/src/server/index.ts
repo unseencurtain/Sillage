@@ -8,9 +8,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { env } from "../config/env.ts";
+import { applyRuntimeUrls, env } from "../config/env.ts";
 import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, query, waitForDatabase } from "../db/pool.ts";
+import { loadSettings } from "../db/settings.ts";
 import { logger, setLogLevel } from "../lib/log.ts";
 import { api } from "./routes/api.ts";
 import { auth } from "./routes/auth.ts";
@@ -66,6 +67,13 @@ app.onError((err, c) => {
 
 if (import.meta.main) {
   await waitForDatabase();
+  try {
+    const settings = await loadSettings();
+    applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
+    log.info(`shop URL ${env.wordpress.baseUrl}`);
+  } catch (err) {
+    log.warn(`could not load settings URLs at boot: ${String(err)}`);
+  }
   const server = Bun.serve({ port: env.port, hostname: "0.0.0.0", fetch: app.fetch });
   log.info(`listening on http://0.0.0.0:${server.port}`);
 

@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { fmtDate } from "@/lib/utils";
+import { cn, fmtDate } from "@/lib/utils";
 
 function isRunActive(run: { status: string; finished_at?: string | null } | null | undefined) {
   if (!run) return false;
@@ -43,25 +43,65 @@ export function Overview() {
   const hiddenNoImage = data.hiddenNoImage ?? 0;
   const hiddenStock = data.hiddenStock ?? 0;
   const outOfStock = data.outOfStock ?? 0;
-  const runBusy = run.isPending || syncRunning;
+  const busy = run.isPending || syncRunning;
+  const secretsReady = data.secrets?.ready !== false;
+  const missingSecrets = data.secrets?.missing ?? [];
 
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-          <p className="text-sm text-muted">Catalogue health, sync cadence, and order rails</p>
+          <p className="text-sm text-muted">
+            Primary path: Secrets → Run sync now → Products. Catalogue only — never places vendor
+            orders.
+          </p>
         </div>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:opacity-50"
-          disabled={runBusy}
+          aria-busy={busy}
+          title="Fast catalogue sync for BeautyFort + BTS (prices/stock). Not orders."
+          className={cn(
+            "inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:cursor-not-allowed",
+            syncRunning ? "ring-2 ring-accent/30 ring-offset-2" : "disabled:opacity-50",
+          )}
+          disabled={busy}
           onClick={() => run.mutate()}
         >
-          {runBusy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          {syncRunning ? "Sync running…" : "Run sync now"}
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+          {syncRunning ? "Syncing…" : run.isPending ? "Starting…" : "Run sync now"}
         </button>
       </header>
+
+      {!secretsReady ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Set vendor secrets first.</strong> Missing {missingSecrets.join(", ") || "BF/BTS keys"}.{" "}
+          <Link to="/secrets" className="font-medium underline underline-offset-2">
+            Open Secrets
+          </Link>{" "}
+          then come back and Run sync now.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-teal-200 bg-teal-50/60 px-4 py-3 text-sm text-muted">
+          <strong className="text-ink">Demo path:</strong> Secrets look set → press Run sync now →
+          watch{" "}
+          <Link to="/sync" className="font-medium text-accent hover:underline">
+            Sync
+          </Link>{" "}
+          → check{" "}
+          <Link to="/products" className="font-medium text-accent hover:underline">
+            Products
+          </Link>
+          .
+        </div>
+      )}
+
+      {!data.settings.dryRun ? (
+        <div className="rounded-xl border border-danger/40 bg-red-50 px-4 py-3 text-sm text-danger">
+          <strong>Orders dry-run is OFF</strong> — auto-dispatch / CLI can spend real money. Keep
+          dry-run on in Settings unless you intend live spend.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard

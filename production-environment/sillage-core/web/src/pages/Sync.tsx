@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play, RefreshCw, Square } from "lucide-react";
 import { api, type SyncRun } from "@/lib/api";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { fmtDate } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { cn, fmtDate } from "@/lib/utils";
 
 function isRunActive(run: SyncRun | undefined) {
   if (!run) return false;
@@ -25,7 +25,6 @@ export function Sync() {
   const [page, setPage] = useState(1);
   const watchingRunId = useRef<number | null>(null);
 
-  // Always keep page 1 warm so the running banner stays accurate while browsing history.
   const latest = useQuery({
     queryKey: ["sync-runs", 1],
     queryFn: () => api.syncRuns(1),
@@ -37,7 +36,6 @@ export function Sync() {
   const list = useQuery({
     queryKey: ["sync-runs", page],
     queryFn: () => api.syncRuns(page),
-    // Share cache with `latest` when page === 1.
   });
 
   const live = useQuery({
@@ -46,11 +44,17 @@ export function Sync() {
     refetchInterval: 15_000,
   });
 
+  const secrets = useQuery({
+    queryKey: ["secrets"],
+    queryFn: api.secrets,
+  });
+
   const data = list.data;
   const isLoading = list.isLoading;
   const runs = data?.runs ?? [];
   const newest = latest.data?.runs?.[0];
   const syncRunning = isRunActive(newest);
+  const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set);
 
   const run = useMutation({
     mutationFn: (opts: { mode: "fast" | "full"; demo?: boolean }) =>
@@ -62,10 +66,11 @@ export function Sync() {
       toast(
         vars.demo
           ? "Sync started — BeautyFort + BTS. Watch progress below."
-          : "Sync queued (live downloads still rate-limited)",
+          : vars.mode === "full"
+            ? "Full sync queued — taxonomy + vanish + catalogue rewrite (live downloads still rate-limited)."
+            : "Fast sync queued — prices/stock for active retail vendors (live downloads still rate-limited).",
         "ok",
       );
-      // Capture the next newest run id once it appears so we can toast completion.
       watchingRunId.current = -1;
     },
     onError: (err: Error) => toast(err.message, "error"),
@@ -77,12 +82,14 @@ export function Sync() {
       watchingRunId.current = null;
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
-      toast(res.detail ?? "Sync stopped — enable Sync or press Run to start fresh", "info");
+      toast(res.detail ?? "Sync stopped — Sync enabled is off until you Run again", "info");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
 
-  // Toast when a watched run finishes (success / failure).
+  const starting = run.isPending;
+  const busy = starting || syncRunning;
+
   useEffect(() => {
     if (watchingRunId.current === -1 && newest && isRunActive(newest)) {
       watchingRunId.current = newest.id;
@@ -115,70 +122,83 @@ export function Sync() {
     };
   }, [newest]);
 
-  const runBusy = run.isPending || syncRunning;
+  const primaryLabel = syncRunning ? "Syncing…" : starting ? "Starting…" : "Run sync now";
+  const stopEnabled = syncRunning && !stop.isPending;
+  const stopTitle = syncRunning
+    ? "Abort the active run between batches and turn Sync enabled off until you Run again"
+    : "No sync running";
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
-          <p className="text-sm text-muted">
-            Scheduled at :00 and :30 · live downloads min {live.data?.liveFeedMinMinutes ?? "…"} min apart
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-danger/40 bg-red-50 px-3 py-2 text-sm font-medium text-danger hover:bg-red-100 disabled:opacity-50"
-            disabled={stop.isPending}
-            onClick={() => stop.mutate()}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <Square size={14} />
-              {stop.isPending ? "Stopping…" : "Stop all sync"}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:opacity-50"
-            disabled={runBusy}
-            onClick={() => run.mutate({ mode: "fast" })}
-          >
-            Run fast sync
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:opacity-50"
-            disabled={runBusy}
-            onClick={() => run.mutate({ mode: "full" })}
-          >
-            Run full sync
-          </button>
-        </div>
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
+        <p className="text-sm text-muted">
+          Catalogue sync for BeautyFort + BTS only — never places vendor orders. Scheduled at :00
+          and :30 · live downloads min {live.data?.liveFeedMinMinutes ?? "…"} min apart.
+        </p>
       </header>
 
+      {secretsMissing.length > 0 ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Vendor secrets incomplete.</strong> Missing{" "}
+          {secretsMissing.map((s) => s.key).join(", ")}.{" "}
+          <Link to="/secrets" className="font-medium underline underline-offset-2">
+            Open Secrets
+          </Link>{" "}
+          before a live sync will succeed.
+        </div>
+      ) : null}
+
       <section className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50 to-panel px-5 py-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-xl">
             <h2 className="text-lg font-semibold tracking-tight text-ink">Run sync now</h2>
             <p className="mt-1 text-sm text-muted">
-              Starts a live catalogue sync for BeautyFort + BTS (not orders). Progress appears in
-              the banner and runs table. Double-click is disabled while a run is active.
+              Starts a <strong className="font-medium text-ink">fast</strong> live catalogue sync for
+              BeautyFort + BTS (prices, stock, new products). Not orders. After it finishes, open
+              Products.
             </p>
           </div>
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-3 text-base font-semibold text-accent-ink shadow-sm hover:opacity-95 disabled:opacity-50"
-            disabled={runBusy}
-            onClick={() => run.mutate({ mode: "fast", demo: true })}
-          >
-            {run.isPending || syncRunning ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Play size={18} />
-            )}
-            {syncRunning ? "Sync running…" : run.isPending ? "Starting…" : "Run sync now"}
-          </button>
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-busy={busy}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed",
+                  syncRunning
+                    ? "bg-accent text-accent-ink opacity-95 ring-2 ring-accent/30 ring-offset-2 ring-offset-panel"
+                    : "bg-accent text-accent-ink hover:opacity-95 disabled:opacity-50",
+                )}
+                disabled={busy}
+                onClick={() => run.mutate({ mode: "fast", demo: true })}
+              >
+                {busy ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
+                {primaryLabel}
+              </button>
+              <button
+                type="button"
+                title={stopTitle}
+                aria-disabled={!stopEnabled}
+                className={cn(
+                  "inline-flex items-center justify-center gap-1.5 rounded-xl border px-4 py-3 text-sm font-medium transition disabled:cursor-not-allowed",
+                  syncRunning
+                    ? "border-danger/50 bg-red-50 text-danger hover:bg-red-100"
+                    : "border-line bg-canvas text-muted opacity-60",
+                )}
+                disabled={!stopEnabled}
+                onClick={() => stop.mutate()}
+              >
+                {stop.isPending ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
+                {stop.isPending ? "Stopping…" : "Stop sync"}
+              </button>
+            </div>
+            <p className="max-w-sm text-right text-xs text-muted">
+              {syncRunning
+                ? "Stop aborts between batches and turns Sync enabled off until you Run again."
+                : "Stop is available only while a sync is running."}
+            </p>
+          </div>
         </div>
       </section>
 
@@ -192,6 +212,9 @@ export function Sync() {
           ).map(([name, v]) => (
             <div key={name} className="rounded-xl border border-line bg-panel px-4 py-3 text-sm">
               <div className="font-medium">{name} live API</div>
+              <p className="mt-0.5 text-xs text-muted">
+                Whether a fresh catalogue download is allowed right now (rate limits / daily caps).
+              </p>
               <div className={cn("mt-1", v.allow ? "text-ok" : "text-amber-700")}>
                 {v.allow ? "Live download allowed" : "Using cache / blocked"}
               </div>
@@ -209,9 +232,9 @@ export function Sync() {
         <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm">
           <Loader2 size={18} className="animate-spin text-accent" />
           <div>
-            <div className="font-medium text-ink">Sync running…</div>
+            <div className="font-medium text-ink">Syncing…</div>
             <div className="text-muted">
-              Run #{newest?.id} · {newest?.mode}/{newest?.source} — Stop aborts between batches
+              Run #{newest?.id} · {newest?.mode}/{newest?.source} — other start buttons are disabled
             </div>
           </div>
         </div>
@@ -238,6 +261,43 @@ export function Sync() {
         </div>
       ) : null}
 
+      <details className="rounded-xl border border-line bg-panel px-5 py-4 shadow-sm">
+        <summary className="cursor-pointer text-sm font-semibold">
+          More sync modes
+          <span className="ml-2 font-normal text-muted">fast vs full</span>
+        </summary>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-line bg-canvas/50 p-3">
+            <button
+              type="button"
+              className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={busy}
+              onClick={() => run.mutate({ mode: "fast" })}
+            >
+              {busy ? "Unavailable while syncing" : "Run fast sync"}
+            </button>
+            <p className="mt-2 text-xs text-muted">
+              Fast: refresh prices and stock for all active retail vendors (BeautyFort + BTS). Same
+              path as Run sync now, without pinning vendors in the request.
+            </p>
+          </div>
+          <div className="rounded-lg border border-line bg-canvas/50 p-3">
+            <button
+              type="button"
+              className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={busy}
+              onClick={() => run.mutate({ mode: "full" })}
+            >
+              {busy ? "Unavailable while syncing" : "Run full sync"}
+            </button>
+            <p className="mt-2 text-xs text-muted">
+              Full: rebuild catalogue structure too (taxonomy, vanished products, park WPF). Heavier;
+              usually overnight via schedule.
+            </p>
+          </div>
+        </div>
+      </details>
+
       <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-line bg-canvas/70 text-xs uppercase tracking-wide text-muted">
@@ -261,7 +321,7 @@ export function Sync() {
             ) : runs.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-muted" colSpan={7}>
-                  No sync runs yet
+                  No sync runs yet — press Run sync now after Secrets are set.
                 </td>
               </tr>
             ) : (

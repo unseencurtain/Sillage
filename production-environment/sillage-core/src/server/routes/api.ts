@@ -3,6 +3,7 @@
  */
 import { Hono } from "hono";
 import { env, sil, wp } from "../../config/env.ts";
+import { applyRuntimeUrls } from "../../config/env.ts";
 import { clearSecret, listSecretStatus, loadSecretsOverlay, setSecret } from "../../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
@@ -127,6 +128,12 @@ api.get("/overview", async (c) => {
       hideProductsWithoutImage: settings.hideProductsWithoutImage,
       stockThreshold: settings.stockThreshold,
     },
+    secrets: (() => {
+      loadSecretsOverlay();
+      const { secrets } = listSecretStatus();
+      const missing = secrets.filter((s) => !s.set).map((s) => s.key);
+      return { ready: missing.length === 0, missing };
+    })(),
   });
 });
 
@@ -685,6 +692,7 @@ api.get("/settings", async (c) => {
     global_stock_threshold: String(s.stockThreshold),
     hide_products_without_image: s.hideProductsWithoutImage ? "1" : "0",
     image_cdn_base_url: s.imageCdnBaseUrl,
+    wp_base_url: s.wpBaseUrl,
     cart_min_enabled: s.cartMinEnabled ? "1" : "0",
     cart_min_subtotal_eur: String(s.cartMinSubtotalEur),
     cart_min_fee_eur: String(s.cartMinFeeEur),
@@ -717,6 +725,7 @@ api.put("/settings", async (c) => {
     "global_stock_threshold",
     "hide_products_without_image",
     "image_cdn_base_url",
+    "wp_base_url",
     "cart_min_enabled",
     "cart_min_subtotal_eur",
     "cart_min_fee_eur",
@@ -775,6 +784,10 @@ api.put("/settings", async (c) => {
       await clearSyncAbort();
     }
   }
+
+  // Hot-apply public URLs so WooCommerce links / tracking use the new shop host without restart.
+  const refreshed = await loadSettings();
+  applyRuntimeUrls({ wpBaseUrl: refreshed.wpBaseUrl, imageCdnBaseUrl: refreshed.imageCdnBaseUrl });
 
   let marked = 0;
   if (touchContent) marked = await markAllProductsDirty();

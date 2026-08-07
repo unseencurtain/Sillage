@@ -82,6 +82,12 @@ export interface GlobalSettings {
    * still store absolute URLs. Changing this alone does not rewrite WooCommerce.
    */
   imageCdnBaseUrl: string;
+  /**
+   * Public shop origin (no trailing slash). Used for WooCommerce admin links and
+   * customer tracking pushes. Env `WP_BASE_URL` is the bootstrap default; Settings
+   * overrides at runtime. In-Docker finalize uses `WORDPRESS_INTERNAL_URL`.
+   */
+  wpBaseUrl: string;
   /** Foodpanda-style small-order fee on the storefront (bridge reads these). */
   cartMinEnabled: boolean;
   cartMinSubtotalEur: number;
@@ -159,6 +165,11 @@ export async function loadSettings(): Promise<GlobalSettings> {
         .trim()
         .replace(/\/$/, "");
       return fromEnv || "https://images.slilverbelt.xyz";
+    })(),
+    wpBaseUrl: (() => {
+      const fromDb = (map.get("wp_base_url") ?? "").trim().replace(/\/$/, "");
+      if (fromDb) return fromDb;
+      return (process.env.WP_BASE_URL ?? "http://localhost").trim().replace(/\/$/, "");
     })(),
     cartMinEnabled: flag("cart_min_enabled", false),
     cartMinSubtotalEur: num("cart_min_subtotal_eur", 50),

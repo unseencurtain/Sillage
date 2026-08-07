@@ -301,6 +301,9 @@ function VendorEditor({
             disabled={save.isPending}
             onChange={(e) => set("fxRate", e.target.value)}
           />
+          <span className="mt-1 block text-xs text-muted">
+            Converts vendor currency into EUR cost before markup (usually 1 for EUR vendors).
+          </span>
         </label>
 
         <label className="block text-sm">
@@ -349,21 +352,6 @@ function VendorEditor({
           </span>
         </label>
 
-        <label className="block text-sm">
-          <span className="font-medium text-ink">Live downloads / day</span>
-          <input
-            type="number"
-            step="1"
-            className={inputClass}
-            value={form.liveMaxPerDay}
-            disabled={save.isPending}
-            onChange={(e) => set("liveMaxPerDay", e.target.value)}
-          />
-          <span className="mt-1 block text-xs text-muted">
-            Catalogue feed daily cap (BeautyFort ~40 SOAP budget; BTS XML similarly capped).
-          </span>
-        </label>
-
         <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3 md:col-span-2">
           <Toggle
             label="Active"
@@ -374,6 +362,25 @@ function VendorEditor({
           />
         </div>
       </div>
+
+      <details className="mt-4 rounded-lg border border-line bg-canvas/40 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium">Advanced — live feed cap</summary>
+        <label className="mt-3 block text-sm">
+          <span className="font-medium text-ink">Live downloads / day</span>
+          <input
+            type="number"
+            step="1"
+            className={inputClass}
+            value={form.liveMaxPerDay}
+            disabled={save.isPending}
+            onChange={(e) => set("liveMaxPerDay", e.target.value)}
+          />
+          <span className="mt-1 block text-xs text-muted">
+            Catalogue feed daily cap (BeautyFort ~40 SOAP budget; BTS similarly capped). Leave the
+            default unless you are tuning rate limits.
+          </span>
+        </label>
+      </details>
 
       <p className="mt-4 text-sm text-muted">
         Changing the multiplier or VAT starts a cache rewrite-only sync after save. CLI{" "}

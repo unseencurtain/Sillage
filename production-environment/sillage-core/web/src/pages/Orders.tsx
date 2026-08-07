@@ -181,6 +181,12 @@ export function Orders() {
     setConfirmLiveId(id);
   };
 
+  const settingsQ = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const settingsDryRun =
+    settingsQ.data?.orders_dry_run === undefined
+      ? true
+      : settingsQ.data.orders_dry_run === "1" || settingsQ.data.orders_dry_run === "true";
+
   const detailData = detail.data;
   const order = detailData?.order;
   const showLiveConfirm = confirmLiveId !== null && confirmLiveId === selected;
@@ -192,10 +198,25 @@ export function Orders() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
         <p className="text-sm text-muted">
-          Per-vendor dispatch rows · dry-run is the default safety rail
+          Per-vendor dispatch rows · prefer Dry-run (no spend). Live always asks for confirmation.
           {data ? ` · ${data.total.toLocaleString()} total` : ""}
         </p>
       </header>
+
+      {!settingsDryRun ? (
+        <div className="rounded-xl border-2 border-danger bg-red-50 px-4 py-4 text-sm text-danger">
+          <div className="text-base font-semibold">LIVE order mode (Settings dry-run is OFF)</div>
+          <p className="mt-1">
+            Auto-dispatch and CLI can spend real money. The Live button on each row also spends money
+            when confirmed. Turn Orders dry-run back on in Settings unless you intend live spend.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-ok">
+          Settings dry-run is on for auto-dispatch/CLI. Row buttons still choose explicitly:{" "}
+          <strong>Dry-run</strong> never spends; <strong>Live</strong> spends after confirm.
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
         <div className="space-y-3">
