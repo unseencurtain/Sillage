@@ -228,8 +228,8 @@ final class Sillage_Rest {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$wpdb->query( "TRUNCATE TABLE {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-		// Mirror Blocksy's store: product_cat + brand taxonomy (WC registers singular product_brand;
-		// older Blocksy rows used product_brands — index both spellings when present).
+		// Retail shop only: index BeautyFort/BTS browse taxonomies. Skip wholesale-perfumes and
+		// anything already exclude-from-catalog so Blocksy's category filter matches /shop.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$inserted = $wpdb->query(
 			"INSERT INTO {$table} (product_id, taxonomy, term_id)
@@ -239,7 +239,23 @@ final class Sillage_Rest {
 			INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
 			WHERE p.post_type = 'product'
 			  AND p.post_status = 'publish'
-			  AND tt.taxonomy IN ('product_cat', 'product_brand', 'product_brands')"
+			  AND tt.taxonomy IN ('product_cat', 'product_brand', 'product_brands')
+			  AND NOT EXISTS (
+			        SELECT 1 FROM {$wpdb->postmeta} pm_wpf
+			         WHERE pm_wpf.post_id = p.ID
+			           AND pm_wpf.meta_key = '_sillage_vendor'
+			           AND pm_wpf.meta_value = 'wholesale-perfumes'
+			      )
+			  AND NOT EXISTS (
+			        SELECT 1
+			          FROM {$wpdb->term_relationships} tr_vis
+			          INNER JOIN {$wpdb->term_taxonomy} tt_vis
+			            ON tt_vis.term_taxonomy_id = tr_vis.term_taxonomy_id
+			           AND tt_vis.taxonomy = 'product_visibility'
+			          INNER JOIN {$wpdb->terms} t_vis ON t_vis.term_id = tt_vis.term_id
+			         WHERE tr_vis.object_id = p.ID
+			           AND t_vis.slug = 'exclude-from-catalog'
+			      )"
 		);
 
 		if ( false === $inserted ) {
