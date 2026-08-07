@@ -7,6 +7,7 @@
  *   bun run sync -- --mode=full --source=local --redrive
  *   bun run sync -- --mode=full --source=local --rewrite-all
  *   bun run sync -- --mode=full --rewrite-only --rewrite-all
+ *   bun run sync -- --mode=fast --source=cache --rewrite-only
  */
 import { env } from "../config/env.ts";
 import { closePool, waitForDatabase } from "../db/pool.ts";
@@ -33,8 +34,8 @@ if (mode !== "full" && mode !== "fast") {
   log.error(`--mode must be "full" or "fast", got "${mode}"`);
   process.exit(1);
 }
-if (source !== "live" && source !== "local") {
-  log.error(`--source must be "live" or "local", got "${source}"`);
+if (source !== "live" && source !== "local" && source !== "cache") {
+  log.error(`--source must be "live", "local", or "cache", got "${source}"`);
   process.exit(1);
 }
 

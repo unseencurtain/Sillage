@@ -66,11 +66,15 @@ async function tryStartFromPending(): Promise<RewriteKickStatus> {
   if (!wantContent && !wantPrice) return "queued";
 
   if (wantContent) {
+    // Content rewrite also refreshes prices. Keep price pending until the run actually
+    // starts — if we race the lock, re-flag both so a multiplier Save is not lost.
     await clearFlag(PENDING_CONTENT_KEY);
-    await clearFlag(PENDING_PRICE_KEY);
+    const hadPrice = wantPrice;
+    if (hadPrice) await clearFlag(PENDING_PRICE_KEY);
     void runSync({ mode: "full", source: "cache" }).catch(async (err) => {
       if (String(err).includes("another sync is already running")) {
         await flagPending("content");
+        if (hadPrice) await flagPending("price");
         log.info("content rewrite: lock busy — left pending for drain after current run");
         return;
       }
