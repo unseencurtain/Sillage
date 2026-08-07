@@ -8,8 +8,11 @@ import { loadSettings, loadVendors, setSetting } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
 import { destinationAddress, readWooOrder, updateWooShippingAddress } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
+import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
 import type { OrderAddress } from "../../orders/types.ts";
+import { feedCacheAgeMinutes } from "../../vendors/feedCache.ts";
+import { checkLiveGate } from "../../vendors/liveGate.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
@@ -75,11 +78,51 @@ api.post("/sync/run", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { mode?: string; source?: string };
   const mode = body.mode === "full" ? "full" : "fast";
   const settings = await loadSettings();
-  const source = body.source === "local" || body.source === "live" ? body.source : settings.syncSource;
+  const source =
+    body.source === "local" || body.source === "live" || body.source === "cache"
+      ? body.source
+      : settings.syncSource;
+
+  // Re-enable scheduling when an operator deliberately starts a run after Stop.
+  await clearSyncAbort();
+  if (!settings.syncEnabled) await setSetting("sync_enabled", "1");
 
   // Fire-and-forget so the HTTP request returns immediately; the dashboard polls /sync/runs.
   void runSync({ mode, source }).catch((err) => log.error(`manual ${mode} sync failed`, String(err)));
   return c.json({ ok: true, started: true, mode, source });
+});
+
+/** Hard stop: abort the running sync and disable scheduled sync until re-enabled. */
+api.post("/sync/stop", async (c) => {
+  await requestSyncAbort();
+  return c.json({
+    ok: true,
+    stopped: true,
+    detail: "Running sync will abort between batches. sync_enabled is now off — turn it on or press Run to start fresh.",
+  });
+});
+
+api.get("/sync/live-status", async (c) => {
+  const settings = await loadSettings();
+  const [bfGate, btsGate, bfAge, btsAge] = await Promise.all([
+    checkLiveGate("beautyfort"),
+    checkLiveGate("bts"),
+    feedCacheAgeMinutes("beautyfort"),
+    feedCacheAgeMinutes("bts"),
+  ]);
+  return c.json({
+    liveFeedMinMinutes: settings.liveFeedMinMinutes,
+    beautyfort: {
+      ...bfGate,
+      maxPerDay: settings.beautyfortLiveMaxPerDay,
+      cacheAgeMinutes: bfAge,
+    },
+    bts: {
+      ...btsGate,
+      maxPerDay: settings.btsLiveMaxPerDay,
+      cacheAgeMinutes: btsAge,
+    },
+  });
 });
 
 api.get("/products", async (c) => {
@@ -256,6 +299,9 @@ api.get("/settings", async (c) => {
     orders_notify_customer: s.ordersNotifyCustomer ? "1" : "0",
     description_mode: s.descriptionMode,
     volume_filter_mode: s.volumeFilterMode,
+    live_feed_min_minutes: String(s.liveFeedMinMinutes),
+    beautyfort_live_max_per_day: String(s.beautyfortLiveMaxPerDay),
+    bts_live_max_per_day: String(s.btsLiveMaxPerDay),
   });
 });
 
@@ -277,6 +323,9 @@ api.put("/settings", async (c) => {
     "orders_notify_customer",
     "description_mode",
     "volume_filter_mode",
+    "live_feed_min_minutes",
+    "beautyfort_live_max_per_day",
+    "bts_live_max_per_day",
   ]);
   // Settings that change what we write to WooCommerce. Hashes only see vendor feed data, so a
   // multiplier edit would otherwise look like "nothing changed" forever.
@@ -292,6 +341,10 @@ api.put("/settings", async (c) => {
     n++;
     if (priceKeys.has(key)) touchPrice = true;
     if (contentKeys.has(key)) touchContent = true;
+    // Turning sync back on clears a previous Stop.
+    if (key === "sync_enabled" && (value === "1" || value === "true")) {
+      await clearSyncAbort();
+    }
   }
 
   let marked = 0;
@@ -299,13 +352,25 @@ api.put("/settings", async (c) => {
   else if (touchPrice) marked = await markAllPricesDirty();
 
   if (marked > 0) {
-    const settings = await loadSettings();
-    void runSync({ mode: touchContent ? "full" : "fast", source: settings.syncSource }).catch((err) =>
-      log.error("settings-triggered sync failed", String(err)),
-    );
+    // Never burn a live vendor download for a settings rewrite — use disk cache / rewrite-only.
+    if (touchContent) {
+      void runSync({ mode: "full", source: "cache" }).catch((err) =>
+        log.error("settings-triggered sync failed", String(err)),
+      );
+    } else {
+      void runSync({ mode: "fast", source: "cache", rewriteOnly: true }).catch((err) =>
+        log.error("settings-triggered sync failed", String(err)),
+      );
+    }
   }
 
-  return c.json({ ok: true, updated: n, marked, syncStarted: marked > 0 });
+  return c.json({
+    ok: true,
+    updated: n,
+    marked,
+    syncStarted: marked > 0,
+    syncKind: marked > 0 ? (touchContent ? "full/cache" : "fast/rewrite-only") : null,
+  });
 });
 
 api.get("/logs", async (c) => {

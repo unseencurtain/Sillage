@@ -37,6 +37,14 @@ export const api = {
   syncRuns: () => request<{ runs: SyncRun[] }>("/api/sync/runs"),
   runSync: (mode: "fast" | "full") =>
     request<{ ok: boolean }>("/api/sync/run", { method: "POST", body: JSON.stringify({ mode }) }),
+  stopSync: () =>
+    request<{ ok: boolean; detail?: string }>("/api/sync/stop", { method: "POST" }),
+  liveStatus: () =>
+    request<{
+      liveFeedMinMinutes: number;
+      beautyfort: { allow: boolean; reason: string; maxPerDay: number; cacheAgeMinutes: number | null };
+      bts: { allow: boolean; reason: string; maxPerDay: number; cacheAgeMinutes: number | null };
+    }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
   vendors: () => request<{ vendors: Vendor[] }>("/api/vendors"),

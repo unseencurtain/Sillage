@@ -6,6 +6,7 @@ import type { GlobalSettings, Vendor } from "../db/settings.ts";
 import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
+import { throwIfSyncAborted } from "./abort.ts";
 import { buildImageLookup, type ImageLookup } from "./images.ts";
 import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
@@ -303,6 +304,7 @@ export async function writePendingProducts(
     );
     if (rows.length === 0) break;
     lastId = rows[rows.length - 1]!.product_id;
+    await throwIfSyncAborted();
 
     try {
       const batch = rows.map((row) => prepare(row, ctx, mode));
