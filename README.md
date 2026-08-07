@@ -36,6 +36,8 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 
 ## One-click VPS deploy (presentation path)
 
+**Full step-by-step (provider → bootstrap → DNS → deploy → verify):** see [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md).
+
 Needs: Ubuntu 22.04+ (or 24/26), SSH key access, Docker Hub reachability, a domain on Porkbun (optional `--dns`).
 
 ### 1. Fresh host (as `root`, once)
