@@ -22,7 +22,9 @@ final class Sillage_Cart_Fee {
 	private const CACHE_KEY   = 'cart_min_config';
 	private const CACHE_TTL   = 60;
 
-	/** @var array{enabled:bool,min:float,fee:float,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null|false */
+	private const DEFAULT_FEE_LABEL = 'Small order fee';
+
+	/** @var array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null|false */
 	private $config = false;
 
 	public function register(): void {
@@ -49,7 +51,7 @@ final class Sillage_Cart_Fee {
 		}
 
 		$cart->add_fee(
-			__( 'Small order fee', 'sillage-bridge' ),
+			$assessment['label'],
 			$assessment['fee'],
 			false
 		);
@@ -106,6 +108,7 @@ final class Sillage_Cart_Fee {
 	 * @return array{
 	 *   applies: bool,
 	 *   fee: float,
+	 *   label: string,
 	 *   remaining: float,
 	 *   global_shortfall: float,
 	 *   vendor_shortfalls: array<string, float>,
@@ -153,6 +156,7 @@ final class Sillage_Cart_Fee {
 		return array(
 			'applies'           => $applies,
 			'fee'               => $config['fee'],
+			'label'             => $config['label'],
 			'remaining'         => $remaining,
 			'global_shortfall'  => $global_shortfall,
 			'vendor_shortfalls' => $vendor_shortfalls,
@@ -192,7 +196,7 @@ final class Sillage_Cart_Fee {
 	}
 
 	/**
-	 * @return array{enabled:bool,min:float,fee:float,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
+	 * @return array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
 	 */
 	private function load_config(): ?array {
 		if ( false !== $this->config ) {
@@ -200,7 +204,10 @@ final class Sillage_Cart_Fee {
 		}
 
 		$cached = wp_cache_get( self::CACHE_KEY, self::CACHE_GROUP );
-		if ( is_array( $cached ) && isset( $cached['enabled'], $cached['min'], $cached['fee'], $cached['message'], $cached['vendor_mins'], $cached['vendor_labels'] ) ) {
+		if (
+			is_array( $cached )
+			&& isset( $cached['enabled'], $cached['min'], $cached['fee'], $cached['label'], $cached['message'], $cached['vendor_mins'], $cached['vendor_labels'] )
+		) {
 			$this->config = $cached;
 			return $this->config;
 		}
@@ -214,7 +221,7 @@ final class Sillage_Cart_Fee {
 	}
 
 	/**
-	 * @return array{enabled:bool,min:float,fee:float,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
+	 * @return array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
 	 */
 	private function fetch_config(): ?array {
 		global $wpdb;
@@ -226,10 +233,11 @@ final class Sillage_Cart_Fee {
 			$rows = $wpdb->get_results(
 				$wpdb->prepare(
 					"SELECT setting_key, setting_value FROM {$settings_table}
-					 WHERE setting_key IN (%s, %s, %s, %s)",
+					 WHERE setting_key IN (%s, %s, %s, %s, %s)",
 					'cart_min_enabled',
 					'cart_min_subtotal_eur',
 					'cart_min_fee_eur',
+					'cart_min_fee_label',
 					'cart_min_message'
 				),
 				ARRAY_A
@@ -257,6 +265,12 @@ final class Sillage_Cart_Fee {
 			$fee     = $this->parse_non_negative( $map['cart_min_fee_eur'] );
 			if ( null === $min || null === $fee ) {
 				return null;
+			}
+
+			// Missing or blank label must not produce an unlabelled fee line — fall back.
+			$label = isset( $map['cart_min_fee_label'] ) ? trim( $map['cart_min_fee_label'] ) : '';
+			if ( '' === $label ) {
+				$label = self::DEFAULT_FEE_LABEL;
 			}
 
 			// An operator editing the wording must not be able to switch the feature off by
@@ -308,6 +322,7 @@ final class Sillage_Cart_Fee {
 				'enabled'       => $enabled,
 				'min'           => $min,
 				'fee'           => $fee,
+				'label'         => $label,
 				'message'       => $message,
 				'vendor_mins'   => $vendor_mins,
 				'vendor_labels' => $vendor_labels,
