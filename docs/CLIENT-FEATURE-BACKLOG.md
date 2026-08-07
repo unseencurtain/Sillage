@@ -13,7 +13,17 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | P2 | ~~Brasty shipping rules (26 kg/box, pallet >120 kg)~~ | **Dropped.** Kept as reference in [`vendors-and-image-sources.md`](vendors/vendors-and-image-sources.md); not wired. |
 | P2 | Tiered retail markup | **Done (stage 3):** `sil_settings.price_tiers` JSON; dashboard editor; empty `[]` keeps single multiplier. |
 | P2 | Cart minimum / small-order surcharge | **Done (stage 3):** Foodpanda-style fee under global / per-vendor minimum; dashboard knobs default off; bridge adds fee + “add X more” notice. |
-| P3 | B2B / higher-MOQ lane | Separate section or mode; UX TBD. |
+| P3 | B2B / higher-MOQ lane | **Partial:** page `/b2b-wholesale` + LPS03 `product_cat` exist; main shop excludes LPS03 products. Empty LPS03 is hidden from category widgets/menus until products exist. Full B2B UX (role/section) still TBD — do not activate `wholesale-perfumes` until MOQ/countries/VAT/cart `code` confirmed. |
+
+## Staging / deploy notes (Aug 2026)
+
+| Fact | Value |
+|---|---|
+| Staging SSH | `ovhe` only — never deploy to production `ovh` without explicit approval |
+| B2B page | `https://<shop>/b2b-wholesale/` (`_sillage_b2b_shop` postmeta) |
+| LPS categories | LPS01 = BTS, LPS02 = BeautyFort, LPS03 = wholesale-perfumes (inactive → 0 products) |
+| Image CDN | `sil_settings.image_cdn_base_url` / `LPS_MEDIA_BASE_URL` → `https://images.<domain>/…` via `lps-media` |
+| Unified deploy | `production-environment/compose.yaml` + `scripts/deploy-vps.sh` (build/push Hub tags, rsync plugin + overrides, remote `compose pull && up`) — see `docs/VPS-DEPLOY.md` |
 
 ## Image pipeline (operator)
 

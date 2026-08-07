@@ -19,6 +19,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * dedicated B2B page created by sillage-core. Everything else — shop, search, related products,
  * other category archives — excludes that term.
  *
+ * When LPS03 has zero assigned products (vendor inactive / not yet synced), the empty term is
+ * also dropped from category widgets, `get_terms` lists, and nav menus. As soon as `tt.count`
+ * becomes > 0 after sync, those surfaces show it again — no operator toggle.
+ *
  * Resolution uses `sil_vendors.storefront_label` (lime has SELECT) plus the WordPress
  * `product_cat` term — not `sil_term_map`, which the WordPress DB user cannot read.
  */
@@ -30,13 +34,23 @@ final class Sillage_Catalog {
 	/** @var int|null term_taxonomy_id for the B2B product_cat, or 0 when unknown. */
 	private ?int $b2b_tt_id = null;
 
+	/** @var int|null term_id for the B2B product_cat, or 0 when unknown. */
+	private ?int $b2b_term_id = null;
+
 	/** @var string|null product_cat slug for the B2B term. */
 	private ?string $b2b_slug = null;
+
+	/** @var int|null Cached product count for the B2B term (−1 = unresolved). */
+	private ?int $b2b_count = null;
 
 	public function register(): void {
 		add_action( 'pre_get_posts', array( $this, 'exclude_b2b_from_main_catalog' ), 20 );
 		add_action( 'woocommerce_product_query', array( $this, 'exclude_b2b_from_wc_query' ), 20 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_image_safety_css' ), 30 );
+		add_filter( 'get_terms', array( $this, 'hide_empty_b2b_from_term_lists' ), 20, 3 );
+		add_filter( 'woocommerce_product_categories_widget_args', array( $this, 'exclude_empty_b2b_from_category_widget' ), 20 );
+		add_filter( 'woocommerce_product_categories_widget_dropdown_args', array( $this, 'exclude_empty_b2b_from_category_widget' ), 20 );
+		add_filter( 'wp_get_nav_menu_items', array( $this, 'hide_empty_b2b_from_nav_menus' ), 20, 3 );
 	}
 
 	/**
@@ -189,6 +203,107 @@ final class Sillage_Catalog {
 		$query->set( 'tax_query', $tax_query );
 	}
 
+	/**
+	 * Drop the empty B2B product_cat from front-end term lists (widgets, Blocksy, etc.).
+	 *
+	 * @param array                 $terms      Term results.
+	 * @param array|string          $taxonomies Taxonomies requested.
+	 * @param array|string|WP_Term  $_args      Query args (unused).
+	 * @return array
+	 */
+	public function hide_empty_b2b_from_term_lists( $terms, $taxonomies = array(), $_args = array() ) {
+		if ( is_admin() || is_wp_error( $terms ) || ! is_array( $terms ) || ! $this->is_empty_b2b_category() ) {
+			return $terms;
+		}
+		$tax_list = is_array( $taxonomies ) ? $taxonomies : array( $taxonomies );
+		if ( ! in_array( 'product_cat', $tax_list, true ) ) {
+			return $terms;
+		}
+
+		$term_id = $this->b2b_term_id();
+		$tt_id   = $this->b2b_term_taxonomy_id();
+		$slug    = $this->b2b_category_slug();
+
+		return array_values(
+			array_filter(
+				$terms,
+				static function ( $term ) use ( $term_id, $tt_id, $slug ) {
+					if ( $term instanceof WP_Term ) {
+						return (int) $term->term_id !== $term_id
+							&& (int) $term->term_taxonomy_id !== $tt_id
+							&& (string) $term->slug !== $slug;
+					}
+					if ( is_numeric( $term ) ) {
+						return (int) $term !== $term_id;
+					}
+					if ( is_string( $term ) ) {
+						return $term !== $slug;
+					}
+					return true;
+				}
+			)
+		);
+	}
+
+	/**
+	 * @param array $args Widget args.
+	 * @return array
+	 */
+	public function exclude_empty_b2b_from_category_widget( array $args ): array {
+		if ( ! $this->is_empty_b2b_category() ) {
+			return $args;
+		}
+		$term_id = $this->b2b_term_id();
+		if ( $term_id <= 0 ) {
+			return $args;
+		}
+		$exclude = isset( $args['exclude'] ) ? (array) $args['exclude'] : array();
+		$exclude[] = $term_id;
+		$args['exclude'] = array_values( array_unique( array_map( 'intval', $exclude ) ) );
+		return $args;
+	}
+
+	/**
+	 * @param array         $items Menu items.
+	 * @param WP_Term|mixed $_menu Menu term (unused).
+	 * @param array         $_args Menu args (unused).
+	 * @return array
+	 */
+	public function hide_empty_b2b_from_nav_menus( $items, $_menu = null, $_args = array() ) {
+		if ( is_admin() || ! is_array( $items ) || ! $this->is_empty_b2b_category() ) {
+			return $items;
+		}
+		$term_id = $this->b2b_term_id();
+		$slug    = $this->b2b_category_slug();
+		if ( $term_id <= 0 && '' === $slug ) {
+			return $items;
+		}
+
+		return array_values(
+			array_filter(
+				$items,
+				static function ( $item ) use ( $term_id, $slug ) {
+					if ( ! is_object( $item ) ) {
+						return true;
+					}
+					$object = isset( $item->object ) ? (string) $item->object : '';
+					if ( 'product_cat' !== $object ) {
+						return true;
+					}
+					$object_id = isset( $item->object_id ) ? (int) $item->object_id : 0;
+					if ( $term_id > 0 && $object_id === $term_id ) {
+						return false;
+					}
+					$url = isset( $item->url ) ? (string) $item->url : '';
+					if ( '' !== $slug && false !== strpos( $url, '/product-category/' . $slug ) ) {
+						return false;
+					}
+					return true;
+				}
+			)
+		);
+	}
+
 	private function b2b_category_slug(): string {
 		$this->resolve_b2b_term();
 		return $this->b2b_slug ?? '';
@@ -199,6 +314,20 @@ final class Sillage_Catalog {
 		return $this->b2b_tt_id ?? 0;
 	}
 
+	private function b2b_term_id(): int {
+		$this->resolve_b2b_term();
+		return $this->b2b_term_id ?? 0;
+	}
+
+	/** True when the B2B product_cat exists and currently has zero products. */
+	private function is_empty_b2b_category(): bool {
+		$this->resolve_b2b_term();
+		if ( ( $this->b2b_term_id ?? 0 ) <= 0 ) {
+			return false;
+		}
+		return ( $this->b2b_count ?? 0 ) <= 0;
+	}
+
 	/**
 	 * Resolve the B2B product_cat from sil_vendors.storefront_label → WP term slug/name.
 	 */
@@ -206,8 +335,10 @@ final class Sillage_Catalog {
 		if ( null !== $this->b2b_tt_id ) {
 			return;
 		}
-		$this->b2b_tt_id = 0;
-		$this->b2b_slug  = '';
+		$this->b2b_tt_id   = 0;
+		$this->b2b_term_id = 0;
+		$this->b2b_slug    = '';
+		$this->b2b_count   = 0;
 
 		$label = $this->b2b_storefront_label();
 		$guesses = array_values(
@@ -229,8 +360,10 @@ final class Sillage_Catalog {
 				$term = get_term_by( 'name', $label, 'product_cat' );
 			}
 			if ( $term instanceof WP_Term ) {
-				$this->b2b_tt_id = (int) $term->term_taxonomy_id;
-				$this->b2b_slug  = (string) $term->slug;
+				$this->b2b_tt_id   = (int) $term->term_taxonomy_id;
+				$this->b2b_term_id = (int) $term->term_id;
+				$this->b2b_slug    = (string) $term->slug;
+				$this->b2b_count   = (int) $term->count;
 				return;
 			}
 		}
