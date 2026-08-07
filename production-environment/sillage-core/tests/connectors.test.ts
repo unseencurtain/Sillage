@@ -353,6 +353,16 @@ describe("shouldHideForMissingImage", () => {
     expect(shouldHideForMissingImage("https://cdn.example/real.jpg", true)).toBe(false);
     expect(shouldHideForMissingImage(null, false)).toBe(false);
   });
+
+  test("treats BeautyFort /pic/ thumbs as unusable when hide is on", () => {
+    const bfPic =
+      "https://www.beautyfort.com/pic/dHNhMzRKNjBiNDA0V2xZRGM5UHhranNEWDVYaTNFdlk%3D";
+    expect(shouldHideForMissingImage(bfPic, true)).toBe(true);
+    expect(shouldHideForMissingImage(bfPic, false)).toBe(false);
+    expect(
+      shouldHideForMissingImage("https://images.slilverbelt.xyz/9339341005643.jpg", true),
+    ).toBe(false);
+  });
 });
 
 describe("foldKey", () => {
