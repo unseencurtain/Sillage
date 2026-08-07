@@ -89,7 +89,21 @@ export const env = {
   },
 
   fixturesDir: resolve(rootDir, opt("FIXTURES_DIR", "../../.feedscratch")),
-} as const;
+  /** Bind-mounted overlay written by the dashboard Secrets UI (gitignored). */
+  secretsFile: resolve(rootDir, opt("SILLAGE_SECRETS_FILE", "data/secrets.overlay.env")),
+};
+
+/**
+ * Re-read vendor API credentials from `process.env` into `env`.
+ * Called after the secrets overlay is applied (boot / set / clear / sync start).
+ */
+export function refreshVendorSecretsFromProcessEnv(): void {
+  env.beautyfort.user = opt("BEAUTYFORT_USER");
+  env.beautyfort.secret = opt("BEAUTYFORT_SECRET");
+  env.bts.token = opt("BTS_JWT_TOKEN");
+  env.wholesalePerfumes.user = opt("WHOLESALE_PERFUMES_USER");
+  env.wholesalePerfumes.token = opt("WHOLESALE_PERFUMES_TOKEN");
+}
 
 /** Fully-qualified WordPress table name. Never rely on a pooled connection's default schema. */
 export function wp(table: string): string {

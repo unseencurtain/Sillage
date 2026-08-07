@@ -1,15 +1,37 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Play } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useToast } from "@/components/Toast";
 import { fmtDate } from "@/lib/utils";
 
+function isRunActive(run: { status: string; finished_at?: string | null } | null | undefined) {
+  if (!run) return false;
+  if (run.status === "running") return true;
+  return run.finished_at == null || run.finished_at === "";
+}
+
 export function Overview() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
   const { data, isLoading, error } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,
     refetchInterval: 15_000,
+  });
+
+  const syncRunning = isRunActive(data?.lastSync);
+  const run = useMutation({
+    mutationFn: () => api.runSync("fast", { vendors: ["beautyfort", "bts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["overview"] });
+      qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      toast("Sync started — BeautyFort + BTS. Open Sync for live progress.", "ok");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
   });
 
   if (isLoading) return <p className="text-muted">Loading overview…</p>;
@@ -21,12 +43,24 @@ export function Overview() {
   const hiddenNoImage = data.hiddenNoImage ?? 0;
   const hiddenStock = data.hiddenStock ?? 0;
   const outOfStock = data.outOfStock ?? 0;
+  const runBusy = run.isPending || syncRunning;
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="text-sm text-muted">Catalogue health, sync cadence, and order rails</p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+          <p className="text-sm text-muted">Catalogue health, sync cadence, and order rails</p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:opacity-50"
+          disabled={runBusy}
+          onClick={() => run.mutate()}
+        >
+          {runBusy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+          {syncRunning ? "Sync running…" : "Run sync now"}
+        </button>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -110,6 +144,9 @@ export function Overview() {
                 <span className={data.lastSync.errors ? "text-danger" : ""}>errors {data.lastSync.errors}</span>
                 <span>{(data.lastSync.duration_ms / 1000).toFixed(1)}s</span>
               </div>
+              <Link to="/sync" className="inline-block text-xs font-medium text-accent hover:underline">
+                Open Sync for progress →
+              </Link>
             </div>
           ) : (
             <p className="mt-3 text-sm text-muted">No sync runs yet</p>

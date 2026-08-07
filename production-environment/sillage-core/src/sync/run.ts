@@ -1,4 +1,5 @@
 import { env, sil } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
 import { formatDuration, logger } from "../lib/log.ts";
@@ -170,6 +171,8 @@ async function releaseLock(name: string): Promise<void> {
 
 export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   const startedAt = Date.now();
+  // Pick up dashboard Secrets overlay without restarting sillage-cron / sillage-core.
+  loadSecretsOverlay();
 
   if (!(await acquireLock("sync"))) {
     throw new Error("another sync is already running");

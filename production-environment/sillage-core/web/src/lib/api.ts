@@ -36,10 +36,29 @@ export const api = {
   overview: () => request<Overview>("/api/overview"),
   syncRuns: (page = 1) =>
     request<SyncRunsPage>(`/api/sync/runs?page=${page}&limit=50`),
-  runSync: (mode: "fast" | "full") =>
-    request<{ ok: boolean }>("/api/sync/run", { method: "POST", body: JSON.stringify({ mode }) }),
+  runSync: (mode: "fast" | "full", opts?: { source?: string; vendors?: string[] }) =>
+    request<{ ok: boolean; started?: boolean; mode?: string; source?: string; vendors?: string[] }>(
+      "/api/sync/run",
+      {
+        method: "POST",
+        body: JSON.stringify({ mode, ...opts }),
+      },
+    ),
   stopSync: () =>
     request<{ ok: boolean; detail?: string }>("/api/sync/stop", { method: "POST" }),
+  secrets: () =>
+    request<{ path: string; hotReload: boolean; note?: string; secrets: SecretStatus[] }>(
+      "/api/secrets",
+    ),
+  setSecret: (key: string, value: string) =>
+    request<{ ok: boolean; secret: SecretStatus }>("/api/secrets", {
+      method: "PUT",
+      body: JSON.stringify({ key, value }),
+    }),
+  clearSecret: (key: string) =>
+    request<{ ok: boolean; secret: SecretStatus }>(`/api/secrets/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    }),
   liveStatus: () =>
     request<{
       liveFeedMinMinutes: number;
@@ -148,6 +167,14 @@ export interface SyncRun {
   errors: number;
   started_at: string;
   finished_at?: string | null;
+}
+
+export interface SecretStatus {
+  key: string;
+  label: string;
+  set: boolean;
+  source: "overlay" | "env" | "unset";
+  masked: string;
 }
 
 export interface SyncRunsPage {

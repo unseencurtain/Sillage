@@ -3,6 +3,7 @@
  */
 import { Hono } from "hono";
 import { env, sil, wp } from "../../config/env.ts";
+import { clearSecret, listSecretStatus, loadSecretsOverlay, setSecret } from "../../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
@@ -153,21 +154,76 @@ api.get("/sync/runs", async (c) => {
 });
 
 api.post("/sync/run", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { mode?: string; source?: string };
+  const body = (await c.req.json().catch(() => ({}))) as {
+    mode?: string;
+    source?: string;
+    vendors?: string[];
+  };
   const mode = body.mode === "full" ? "full" : "fast";
   const settings = await loadSettings();
   const source =
     body.source === "local" || body.source === "live" || body.source === "cache"
       ? body.source
       : settings.syncSource;
+  // Dashboard "Run sync now" may pin BeautyFort + BTS; never accept parked WPF here.
+  const vendors = Array.isArray(body.vendors)
+    ? body.vendors.filter((v): v is string => v === "beautyfort" || v === "bts")
+    : undefined;
 
   // Re-enable scheduling when an operator deliberately starts a run after Stop.
   await clearSyncAbort();
   if (!settings.syncEnabled) await setSetting("sync_enabled", "1");
 
   // Fire-and-forget so the HTTP request returns immediately; the dashboard polls /sync/runs.
-  void runSync({ mode, source }).catch((err) => log.error(`manual ${mode} sync failed`, String(err)));
-  return c.json({ ok: true, started: true, mode, source });
+  void runSync({
+    mode,
+    source,
+    vendors: vendors?.length ? vendors : undefined,
+  }).catch((err) => log.error(`manual ${mode} sync failed`, String(err)));
+  return c.json({
+    ok: true,
+    started: true,
+    mode,
+    source,
+    vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+  });
+});
+
+/** Vendor API credentials — status only (never echo values). */
+api.get("/secrets", (c) => {
+  loadSecretsOverlay();
+  const { path, secrets } = listSecretStatus();
+  return c.json({
+    path,
+    hotReload: true,
+    note: "Changes apply immediately to this process and at the start of each sync. No container restart required for BF/BTS credentials.",
+    secrets,
+  });
+});
+
+api.put("/secrets", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { key?: string; value?: string };
+  const key = typeof body.key === "string" ? body.key.trim() : "";
+  const value = typeof body.value === "string" ? body.value : "";
+  if (!key) return c.json({ ok: false, error: "key is required" }, 400);
+  try {
+    const secret = setSecret(key, value);
+    await recordEvent("info", "secrets", `Set ${key} via dashboard`, { key, source: secret.source });
+    return c.json({ ok: true, secret });
+  } catch (err) {
+    return c.json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
+api.delete("/secrets/:key", async (c) => {
+  const key = c.req.param("key");
+  try {
+    const secret = clearSecret(key);
+    await recordEvent("info", "secrets", `Cleared ${key} via dashboard`, { key });
+    return c.json({ ok: true, secret });
+  } catch (err) {
+    return c.json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 400);
+  }
 });
 
 /** Hard stop: abort the running sync and disable scheduled sync until re-enabled. */

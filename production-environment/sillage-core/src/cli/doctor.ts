@@ -7,12 +7,14 @@
  * red crosses.
  */
 import { env, sil, wp } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendors } from "../db/settings.ts";
 import { signPayload } from "../lib/hmac.ts";
 import { setLogLevel } from "../lib/log.ts";
 
 setLogLevel("warn");
+loadSecretsOverlay();
 
 interface Check {
   name: string;

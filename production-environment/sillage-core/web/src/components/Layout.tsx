@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Boxes,
   ClipboardList,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Package,
@@ -18,6 +19,7 @@ const nav = [
   { to: "/products", label: "Products", icon: Package },
   { to: "/vendors", label: "Vendors", icon: Store },
   { to: "/orders", label: "Orders", icon: Boxes },
+  { to: "/secrets", label: "Secrets", icon: KeyRound },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/logs", label: "Logs", icon: ClipboardList },
 ];
