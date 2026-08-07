@@ -123,7 +123,8 @@ final class Sillage_Catalog {
 	}
 
 	/**
-	 * Allow B2B products on their category archive and on the dedicated B2B page.
+	 * Allow B2B products on their category archive, dedicated B2B page, and explicit
+	 * product_cat filters that target that term (Blocksy search `ct_tax_query`, etc.).
 	 *
 	 * @param WP_Query $query Query.
 	 */
@@ -134,6 +135,11 @@ final class Sillage_Catalog {
 		}
 
 		if ( function_exists( 'is_product_category' ) && is_product_category( $slug ) ) {
+			return true;
+		}
+
+		// Blocksy search: ?ct_tax_query=product_cat:{term_id} (field=id, often nested).
+		if ( $this->request_targets_b2b_category() ) {
 			return true;
 		}
 
@@ -153,28 +159,93 @@ final class Sillage_Catalog {
 	}
 
 	/**
+	 * True when the current request explicitly filters to the B2B product_cat.
+	 */
+	private function request_targets_b2b_category(): bool {
+		$term_id = $this->b2b_term_id();
+		$slug    = $this->b2b_category_slug();
+		if ( $term_id <= 0 && '' === $slug ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only catalog routing.
+		$raw = isset( $_GET['ct_tax_query'] ) ? wp_unslash( (string) $_GET['ct_tax_query'] ) : '';
+		$raw = sanitize_text_field( $raw );
+		if ( '' === $raw ) {
+			return false;
+		}
+
+		$parts = explode( ':', $raw, 2 );
+		if ( 2 !== count( $parts ) || 'product_cat' !== $parts[0] ) {
+			return false;
+		}
+
+		$value = $parts[1];
+		if ( $term_id > 0 && (string) $term_id === $value ) {
+			return true;
+		}
+		if ( '' !== $slug && $slug === $value ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
 	 * @param array  $tax_query Tax query clauses.
 	 * @param string $slug      B2B category slug.
 	 */
 	private function tax_query_targets_b2b( array $tax_query, string $slug ): bool {
+		$term_id = $this->b2b_term_id();
+		$tt_id   = $this->b2b_term_taxonomy_id();
+
 		foreach ( $tax_query as $clause ) {
 			if ( ! is_array( $clause ) ) {
 				continue;
 			}
 			if ( isset( $clause['taxonomy'] ) && 'product_cat' === $clause['taxonomy'] ) {
-				$terms = $clause['terms'] ?? null;
-				$field = isset( $clause['field'] ) ? (string) $clause['field'] : 'term_id';
-				if ( 'slug' === $field || '' === $field ) {
+				$terms    = $clause['terms'] ?? null;
+				$field    = isset( $clause['field'] ) ? (string) $clause['field'] : 'term_id';
+				$operator = isset( $clause['operator'] ) ? strtoupper( (string) $clause['operator'] ) : 'IN';
+				if ( in_array( $operator, array( 'NOT IN', 'NOT EXISTS', 'NOT AND' ), true ) ) {
+					// Exclusion clauses are ours or unrelated — do not treat as allow.
+				} elseif ( 'slug' === $field ) {
 					if ( is_string( $terms ) && $terms === $slug ) {
 						return true;
 					}
 					if ( is_array( $terms ) && in_array( $slug, array_map( 'strval', $terms ), true ) ) {
 						return true;
 					}
+				} elseif ( in_array( $field, array( 'term_id', 'id', '' ), true ) ) {
+					if ( $term_id > 0 && $this->terms_include_id( $terms, $term_id ) ) {
+						return true;
+					}
+				} elseif ( 'term_taxonomy_id' === $field ) {
+					if ( $tt_id > 0 && $this->terms_include_id( $terms, $tt_id ) ) {
+						return true;
+					}
 				}
 			}
 			if ( $this->tax_query_targets_b2b( $clause, $slug ) ) {
 				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * @param mixed $terms Term list from a tax_query clause.
+	 * @param int   $id    Expected numeric id.
+	 */
+	private function terms_include_id( $terms, int $id ): bool {
+		if ( is_numeric( $terms ) && (int) $terms === $id ) {
+			return true;
+		}
+		if ( is_array( $terms ) ) {
+			foreach ( $terms as $term ) {
+				if ( is_numeric( $term ) && (int) $term === $id ) {
+					return true;
+				}
 			}
 		}
 		return false;
