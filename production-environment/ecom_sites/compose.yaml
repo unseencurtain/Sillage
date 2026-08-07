@@ -70,7 +70,7 @@ services:
       FIXTURES_DIR: /app/.feedscratch
     volumes:
       - ../sillage-core/logs:/app/logs
-      - ../../.feedscratch:/app/.feedscratch:ro
+      - ../../.feedscratch:/app/.feedscratch
 
   # Webhooks from the storefront, plus the dashboard. The plugin resolves this by hostname over
   # ecom_network; port 4000 is published on loopback for a human's browser.

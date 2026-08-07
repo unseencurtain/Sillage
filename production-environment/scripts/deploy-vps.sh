@@ -118,7 +118,13 @@ if [[ -f "$ROOT/production-environment/ecom_sites/config/php.ini" ]]; then
 fi
 "${SCP[@]}" "$ROOT/production-environment/scripts/vps-bootstrap.sh" "$HOST:~/vps-bootstrap.sh"
 "${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/sillage-grants.sql" "$HOST:~/ecom_sites/config/sillage-grants.sql"
+"${SSH[@]}" "$HOST" 'mkdir -p ~/wordpress-image'
+"${RSYNC[@]}" "$ROOT/production-environment/wordpress-image/" "$HOST:~/wordpress-image/"
 log_step "Code + plugin + redis compose uploaded"
+
+echo "==> build lime/wordpress:latest on ${HOST} (wordpress:latest + phpredis)"
+"${SSH[@]}" "$HOST" 'cd ~/wordpress-image && docker build -t lime/wordpress:latest .'
+log_step "Built lime/wordpress:latest on host"
 
 if [[ -n "$CLONE_FROM" ]]; then
   echo "==> clone WordPress+DB from ${CLONE_FROM} → ${HOST} (live, no downtime on source)"
@@ -280,7 +286,7 @@ services:
       FIXTURES_DIR: /app/.feedscratch
     volumes:
       - /home/ubuntu/sillage-core/logs:/app/logs
-      - /home/ubuntu/Sillage/.feedscratch:/app/.feedscratch:ro
+      - /home/ubuntu/Sillage/.feedscratch:/app/.feedscratch
   sillage-core:
     <<: *sillage-common
     container_name: sillage-core
@@ -309,8 +315,9 @@ ${DASH_DOMAIN} {
 	reverse_proxy localhost:4000
 }
 EOF
+sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy
 
 docker network create ecom_network 2>/dev/null || true
 docker network create redis_network 2>/dev/null || true
@@ -324,12 +331,15 @@ cd ~/ecom_sites
 
 docker compose up -d ecom-db
 echo "Waiting for MariaDB..."
+# IMPORTANT: redirect stdin — this script is fed via `bash -s`; docker exec would otherwise
+# consume the rest of the remote script and silently abort the deploy.
 for i in $(seq 1 60); do
-  if docker compose exec -T ecom-db healthcheck.sh --connect --innodb_initialized 2>/dev/null; then
+  if docker exec -i ecom-db healthcheck.sh --connect --innodb_initialized </dev/null 2>/dev/null; then
     break
   fi
   sleep 2
 done
+echo "MariaDB ready (or timed out), continuing..."
 
 # Import cloned SQL before starting WordPress (fresh datadir may already have empty earth)
 if [[ -f /tmp/sillage-clone.sql ]]; then
@@ -354,45 +364,75 @@ if [[ ! -f "$HOME/ecom_sites/data/wp/wp-config.php" ]]; then
   exit 1
 fi
 
+# Download free Woo/theme plugins if missing (from wordpress.org — not a live-site clone)
+if [[ -z "${CLONE_MODE:-}" ]]; then
+  echo "Fetching WooCommerce / redis-cache / Blocksy from wordpress.org..."
+  sudo chown -R "$USER":"$USER" "$HOME/ecom_sites/data/wp/wp-content" || true
+  mkdir -p "$HOME/ecom_sites/data/wp/wp-content/plugins" "$HOME/ecom_sites/data/wp/wp-content/themes"
+  cd /tmp
+  for item in \
+    "plugin:woocommerce" \
+    "plugin:redis-cache" \
+    "theme:blocksy"
+  do
+    kind=${item%%:*}; slug=${item##*:}
+    dest="$HOME/ecom_sites/data/wp/wp-content/${kind}s/${slug}"
+    if [[ -d "$dest" ]]; then
+      echo "  $slug already present"
+      continue
+    fi
+    curl -fsSL -o "${slug}.zip" "https://downloads.wordpress.org/${kind}/${slug}.latest-stable.zip"
+    unzip -qo "${slug}.zip" -d "$HOME/ecom_sites/data/wp/wp-content/${kind}s"
+    rm -f "${slug}.zip"
+    echo "  $slug installed"
+  done
+fi
+
 # Fresh WordPress install (empty site — not a clone of production catalog)
 if [[ -z "${CLONE_MODE:-}" ]]; then
   echo "Running fresh wp_install..."
-  docker exec -e SHOP_DOMAIN="$SHOP_DOMAIN" -e WP_ADMIN_PASS="$WP_ADMIN_PASS" ecom php -r '
-    $_SERVER["HTTP_HOST"] = getenv("SHOP_DOMAIN");
-    $_SERVER["REQUEST_URI"] = "/";
-    require "/var/www/html/wp-load.php";
-    require_once ABSPATH . "wp-admin/includes/upgrade.php";
-    $url = "https://" . getenv("SHOP_DOMAIN");
-    if (!is_blog_installed()) {
-      $pass = getenv("WP_ADMIN_PASS") ?: wp_generate_password(20, false);
-      $r = wp_install("Cosmetic", "admin", "admin@" . getenv("SHOP_DOMAIN"), true, "", $pass, "en_US");
-      echo "installed user_id=" . ($r["user_id"] ?? "?") . "\n";
-    } else {
-      echo "already_installed\n";
-    }
-    update_option("siteurl", $url);
-    update_option("home", $url);
-    update_option("woocommerce_currency", "EUR");
-    update_option("woocommerce_currency_pos", "left");
-    update_option("woocommerce_price_num_decimals", "2");
-    require_once ABSPATH . "wp-admin/includes/plugin.php";
-    foreach (["woocommerce/woocommerce.php","redis-cache/redis-cache.php","sillage-bridge/sillage-bridge.php"] as $p) {
-      if (file_exists(WP_PLUGIN_DIR . "/" . dirname($p) . "/" . basename($p)) || file_exists(WP_PLUGIN_DIR . "/" . $p)) {
-        $res = activate_plugin($p);
-        echo $p . (is_wp_error($res) ? (" FAIL ".$res->get_error_message()) : " ok") . "\n";
-      } else {
-        echo $p . " missing\n";
-      }
-    }
-    $theme = "blocksy";
-    if (wp_get_theme($theme)->exists()) {
-      switch_theme($theme);
-      echo "theme=$theme\n";
-    }
-  '
+  cat > /tmp/wp-fresh-install.php <<'PHP'
+<?php
+define('WP_INSTALLING', true);
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+$_SERVER['HTTP_HOST'] = getenv('SHOP_DOMAIN') ?: 'localhost';
+$_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'];
+$_SERVER['REQUEST_URI'] = '/';
+require '/var/www/html/wp-load.php';
+require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+$url = 'https://' . $_SERVER['HTTP_HOST'];
+echo 'installed=' . (is_blog_installed() ? 'yes' : 'no') . PHP_EOL;
+if (!is_blog_installed()) {
+    $pass = getenv('WP_ADMIN_PASS') ?: wp_generate_password(20, false);
+    $r = wp_install('Cosmetic', 'admin', 'admin@' . $_SERVER['HTTP_HOST'], true, '', $pass, 'en_US');
+    echo 'wp_install_ok user=' . ($r['user_id'] ?? '?') . PHP_EOL;
+}
+update_option('siteurl', $url);
+update_option('home', $url);
+update_option('woocommerce_currency', 'EUR');
+update_option('woocommerce_currency_pos', 'left');
+update_option('woocommerce_price_num_decimals', '2');
+require_once ABSPATH . 'wp-admin/includes/plugin.php';
+foreach (['woocommerce/woocommerce.php', 'redis-cache/redis-cache.php', 'sillage-bridge/sillage-bridge.php'] as $p) {
+    if (!file_exists(WP_PLUGIN_DIR . '/' . $p)) { echo "$p missing\n"; continue; }
+    $res = activate_plugin($p);
+    echo $p . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' ok') . PHP_EOL;
+}
+if (wp_get_theme('blocksy')->exists()) {
+    switch_theme('blocksy');
+    echo "theme=blocksy\n";
+}
+echo 'siteurl=' . get_option('siteurl') . PHP_EOL;
+PHP
+  docker cp /tmp/wp-fresh-install.php ecom:/tmp/wp-fresh-install.php
+  docker exec -e SHOP_DOMAIN="$SHOP_DOMAIN" -e WP_ADMIN_PASS="$WP_ADMIN_PASS" ecom php /tmp/wp-fresh-install.php
 fi
 
 export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
+# wp-config is owned by www-data; allow ubuntu to patch constants
+sudo chown "$USER":"$USER" "$HOME/ecom_sites/data/wp/wp-config.php" || true
+sudo chmod 664 "$HOME/ecom_sites/data/wp/wp-config.php" || true
 bash ~/vps-bootstrap.sh
 
 # URL rewrite when cloning another storefront
@@ -417,21 +457,19 @@ m = "/* That's all, stop editing!"
 p.write_text(t.replace(m, b+m) if m in t else t+b)
 PY
 
+set -a; source ~/ecom_sites/.env; source ~/sillage-core/.env; set +a
+# Apply canonical grants before migrate (sil_ean_index grant comes after migrate).
+sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ~/ecom_sites/config/sillage-grants.sql \
+  | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot
+docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
+  -e "GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%'; FLUSH PRIVILEGES;"
+
 docker compose build sillage-core
 docker compose up -d sillage-core sillage-cron ecom
 docker exec sillage-core bun run migrate
+docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
+  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; FLUSH PRIVILEGES;"
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
-
-set -a; source ~/ecom_sites/.env; source ~/sillage-core/.env; set +a
-# Apply canonical grants file (avoids nested-SSH quoting dropping earth table grants).
-sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ~/ecom_sites/config/sillage-grants.sql \
-  | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot
-# Address editor needs write on HPOS addresses (beyond the read-only grants file).
-docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot <<'SQL'
-GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%';
-GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%';
-FLUSH PRIVILEGES;
-SQL
 
 curl -sS http://127.0.0.1:4000/health || true
 echo
