@@ -47,7 +47,17 @@ export const api = {
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
-  vendors: () => request<{ vendors: Vendor[] }>("/api/vendors"),
+  vendors: () =>
+    request<{
+      vendors: Vendor[];
+      globalPriceMultiplier: number;
+      globalStockThreshold: number;
+    }>("/api/vendors"),
+  saveVendor: (slug: string, body: VendorPatch) =>
+    request<{ ok: boolean; syncStarted?: boolean }>(`/api/vendors/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   orders: (status?: string) =>
     request<{ orders: VendorOrder[] }>(`/api/orders${status ? `?status=${status}` : ""}`),
   order: (id: number) => request<OrderDetail>(`/api/orders/${id}`),
@@ -141,10 +151,34 @@ export interface Vendor {
   name: string;
   storefrontLabel: string;
   skuPrefix: string;
-  priceMultiplier: number;
-  minVisibleStock: number;
+  currency: string;
+  fxRate: number;
+  vatRate: number;
+  /** null = fall back to global multiplier + price tiers. */
+  priceMultiplier: number | null;
+  /** null = fall back to global stock threshold. */
+  minVisibleStock: number | null;
+  minOrderValueEur: number | null;
   serviceableCountries: string[];
   active: boolean;
+  liveMaxPerDay: number | null;
+  storeLiveMaxPerDay: number | null;
+  storeLiveMinMinutes: number | null;
+  orderConfig: Record<string, unknown>;
+}
+
+export interface VendorPatch {
+  storefrontLabel?: string;
+  priceMultiplier?: number | null;
+  minVisibleStock?: number | null;
+  fxRate?: number;
+  vatRate?: number;
+  minOrderValueEur?: number | null;
+  serviceableCountries?: string[];
+  active?: boolean;
+  liveMaxPerDay?: number | null;
+  storeLiveMaxPerDay?: number | null;
+  storeLiveMinMinutes?: number | null;
 }
 
 export interface VendorOrder {

@@ -4,12 +4,20 @@
  * BeautyFort has a very small daily SOAP budget (~40). Hitting live on every settings save or
  * dashboard "Sync" click would burn the quota and risk a ban. Scheduled catalogue syncs must
  * prefer the on-disk feed cache unless enough time has passed and the daily cap still has room.
+ *
+ * Per-vendor daily caps live on sil_vendors (live_max_per_day / store_*). Legacy setting keys
+ * like beautyfort_live_max_per_day remain as fallback for databases migrated but not backfilled.
  */
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
-import { loadSettings, setSetting } from "../db/settings.ts";
+import { loadSettings, loadVendor, setSetting } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
 import type { CacheVendor } from "./feedCache.ts";
+import {
+  legacyLiveMaxSettingKey,
+  resolveLiveMaxPerDay,
+  resolveOceanStoreLimits,
+} from "./liveLimits.ts";
 
 const log = logger("live-gate");
 
@@ -24,11 +32,30 @@ function lastKey(vendor: CacheVendor): string {
   return `last_live_fetch_${vendor}`;
 }
 
-function maxPerDay(vendor: CacheVendor, settings: Awaited<ReturnType<typeof loadSettings>>): number {
-  if (vendor === "beautyfort") return settings.beautyfortLiveMaxPerDay;
-  if (vendor === "bts") return settings.btsLiveMaxPerDay;
-  if (vendor === "ocean") return settings.oceanLiveMaxPerDay;
-  return 48;
+async function readSettingNum(key: string): Promise<number | null> {
+  const [row] = await query<RowDataPacket & { setting_value: string }>(
+    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
+    [key],
+  );
+  if (!row) return null;
+  const n = Number(row.setting_value);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function catalogueMaxPerDay(vendor: CacheVendor): Promise<number> {
+  let vendorRow: Awaited<ReturnType<typeof loadVendor>> | null = null;
+  try {
+    vendorRow = await loadVendor(vendor);
+  } catch {
+    vendorRow = null;
+  }
+  const legacy = await readSettingNum(legacyLiveMaxSettingKey(vendor));
+  return resolveLiveMaxPerDay(vendor, vendorRow, legacy);
+}
+
+/** Exported for the live-status dashboard endpoint. */
+export async function resolveVendorLiveMaxPerDay(vendor: CacheVendor): Promise<number> {
+  return catalogueMaxPerDay(vendor);
 }
 
 export async function checkLiveGate(vendor: CacheVendor): Promise<LiveGateResult> {
@@ -63,7 +90,7 @@ export async function checkLiveGate(vendor: CacheVendor): Promise<LiveGateResult
     [`live_fetch_count_${vendor}_${new Date().toISOString().slice(0, 10)}`],
   );
   const dayCount = Number(dayCountRow?.setting_value ?? 0);
-  const max = maxPerDay(vendor, settings);
+  const max = await catalogueMaxPerDay(vendor);
   if (dayCount >= max) {
     return {
       allow: false,
@@ -116,8 +143,17 @@ export async function resolveLiveOrCache(
  * once-per-day cap, or fast syncs would stall after the first catalog pull.
  */
 export async function checkOceanStoreGate(): Promise<LiveGateResult> {
-  const settings = await loadSettings();
-  const minMinutes = settings.oceanStoreLiveMinMinutes;
+  let vendorRow: Awaited<ReturnType<typeof loadVendor>> | null = null;
+  try {
+    vendorRow = await loadVendor("ocean");
+  } catch {
+    vendorRow = null;
+  }
+  const [legacyMax, legacyMin] = await Promise.all([
+    readSettingNum("ocean_store_live_max_per_day"),
+    readSettingNum("ocean_store_live_min_minutes"),
+  ]);
+  const { maxPerDay, minMinutes } = resolveOceanStoreLimits(vendorRow, legacyMax, legacyMin);
 
   const [lastRow] = await query<RowDataPacket & { setting_value: string }>(
     `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
@@ -141,11 +177,10 @@ export async function checkOceanStoreGate(): Promise<LiveGateResult> {
     [`live_fetch_count_ocean_store_${day}`],
   );
   const dayCount = Number(dayCountRow?.setting_value ?? 0);
-  const max = settings.oceanStoreLiveMaxPerDay;
-  if (dayCount >= max) {
+  if (dayCount >= maxPerDay) {
     return {
       allow: false,
-      reason: `ocean store live fetch blocked: ${dayCount}/${max} downloads used today`,
+      reason: `ocean store live fetch blocked: ${dayCount}/${maxPerDay} downloads used today`,
       retryInMinutes: 60,
     };
   }
