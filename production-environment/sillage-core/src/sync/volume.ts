@@ -33,6 +33,7 @@ export function normalizeVolume(raw: string | undefined, mode: VolumeFilterMode)
 export const VENDOR_LABELS: Record<string, string> = {
   beautyfort: "LPS02",
   bts: "LPS01",
+  ocean: "LPS03",
 };
 
 export function vendorStorefrontLabel(vendor: { slug: string; storefrontLabel?: string; name: string }): string {

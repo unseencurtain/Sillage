@@ -7,7 +7,7 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | P0 | Missing product photos (`no_image` / placeholders) | **Done (stage 3):** cross-vendor EAN fill on full+fast sync; `hide_products_without_image` (default on) excludes unresolved placeholders. Overrides still via `image_overrides.json` / Ocean enricher. |
 | P0 | Theme compatibility (Astra / Blocksy / Elementor) | Bridge attachment filters (see `sillage-bridge`). |
 | P1 | Rename shop sections to **LPS01** (BTS) / **LPS02** (BeautyFort) | **Done (stage 3):** `sil_vendors.storefront_label`; root `product_cat` renamed in place. SKU prefix / slug formula unchanged. |
-| P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | Feeds documented in [`docs/vendors/ocean-brasty-notes.md`](vendors/ocean-brasty-notes.md). Images already used offline. |
+| P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | **Done (connector):** slug `ocean`, sku `OC`, LPS03, migration 013 (inactive). Confirm MOQ / countries / VAT / cart `code` before enable. See [`docs/vendors/ocean-brasty-notes.md`](vendors/ocean-brasty-notes.md). |
 | P1 | Brasty **Playwright image scrape** | CSV has no images; see operator `beastly-image.md`. |
 | P2 | Vendor **wholesale.brasty.com** (full catalogue + orders) | Watermarked photos; MOQ; shipping 26 kg/box. |
 | P2 | Tiered retail markup | **Done (stage 3):** `sil_settings.price_tiers` JSON; dashboard editor; empty `[]` keeps single multiplier. |
@@ -25,4 +25,5 @@ python3 beautyfort-enriched/enrich.py --fetch-ocean --install-core
 
 ## Out of scope until scheduled
 
-Full Ocean/Brasty Bun connectors, MOQ pricing, Brasty Playwright — listed above.
+Brasty Bun connectors, Brasty Playwright bulk download — listed above. Ocean is implemented but
+seeded inactive pending operator confirmation of MOQ, countries, VAT, and cart `code`.

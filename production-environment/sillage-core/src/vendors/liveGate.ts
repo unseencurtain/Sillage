@@ -20,16 +20,15 @@ export interface LiveGateResult {
   retryInMinutes: number;
 }
 
-const DEFAULT_MIN_MINUTES = 60;
-const DEFAULT_BF_MAX_DAY = 20;
-const DEFAULT_BTS_MAX_DAY = 48;
-
 function lastKey(vendor: CacheVendor): string {
   return `last_live_fetch_${vendor}`;
 }
 
 function maxPerDay(vendor: CacheVendor, settings: Awaited<ReturnType<typeof loadSettings>>): number {
-  return vendor === "beautyfort" ? settings.beautyfortLiveMaxPerDay : settings.btsLiveMaxPerDay;
+  if (vendor === "beautyfort") return settings.beautyfortLiveMaxPerDay;
+  if (vendor === "bts") return settings.btsLiveMaxPerDay;
+  if (vendor === "ocean") return settings.oceanLiveMaxPerDay;
+  return 48;
 }
 
 export async function checkLiveGate(vendor: CacheVendor): Promise<LiveGateResult> {
@@ -110,6 +109,61 @@ export async function resolveLiveOrCache(
   if (gate.allow) return { mode: "live", gate };
   log.warn(gate.reason);
   return { mode: "cache", gate };
+}
+
+/**
+ * Separate gate for Ocean's hourly store (price/stock) feed. Must not share the catalog's
+ * once-per-day cap, or fast syncs would stall after the first catalog pull.
+ */
+export async function checkOceanStoreGate(): Promise<LiveGateResult> {
+  const settings = await loadSettings();
+  const minMinutes = settings.oceanStoreLiveMinMinutes;
+
+  const [lastRow] = await query<RowDataPacket & { setting_value: string }>(
+    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
+    ["last_live_fetch_ocean_store"],
+  );
+  const lastIso = lastRow?.setting_value ?? null;
+  if (lastIso) {
+    const elapsed = Math.floor((Date.now() - new Date(lastIso).getTime()) / 60_000);
+    if (elapsed < minMinutes) {
+      return {
+        allow: false,
+        reason: `ocean store live fetch blocked: only ${elapsed} min since last download (min ${minMinutes})`,
+        retryInMinutes: minMinutes - elapsed,
+      };
+    }
+  }
+
+  const day = new Date().toISOString().slice(0, 10);
+  const [dayCountRow] = await query<RowDataPacket & { setting_value: string }>(
+    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
+    [`live_fetch_count_ocean_store_${day}`],
+  );
+  const dayCount = Number(dayCountRow?.setting_value ?? 0);
+  const max = settings.oceanStoreLiveMaxPerDay;
+  if (dayCount >= max) {
+    return {
+      allow: false,
+      reason: `ocean store live fetch blocked: ${dayCount}/${max} downloads used today`,
+      retryInMinutes: 60,
+    };
+  }
+
+  return { allow: true, reason: "live allowed", retryInMinutes: 0 };
+}
+
+export async function recordOceanStoreFetch(): Promise<void> {
+  const now = new Date().toISOString();
+  await setSetting("last_live_fetch_ocean_store", now);
+  const dayKey = `live_fetch_count_ocean_store_${now.slice(0, 10)}`;
+  const [row] = await query<RowDataPacket & { setting_value: string }>(
+    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
+    [dayKey],
+  );
+  const next = String(Number(row?.setting_value ?? 0) + 1);
+  await setSetting(dayKey, next);
+  log.info(`ocean_store: recorded live fetch (#${next} today)`);
 }
 
 /** Wall-clock half-hour slots (:00–:04 and :30–:34). Cron ticks every 5 min; only these open sync. */

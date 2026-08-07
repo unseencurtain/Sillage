@@ -25,6 +25,7 @@ import {
 import { clearSyncAbort, SyncAbortedError, throwIfSyncAborted } from "./abort.ts";
 import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
+import type { CacheVendor } from "../vendors/feedCache.ts";
 import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
 
 const log = logger("sync");
@@ -409,7 +410,12 @@ async function fastSyncVendor(
   summary: SyncSummary,
 ): Promise<number> {
   if (connector.fetchPriceStock && options.source === "live") {
-    const gate = await checkLiveGate(vendor.slug as "beautyfort" | "bts");
+    // Ocean's store feed has its own hourly gate inside fetchPriceStock — do not apply the
+    // catalog once-per-day gate here or fast syncs would stall after the first catalog pull.
+    const sharedGate = vendor.slug !== "ocean";
+    const gate = sharedGate
+      ? await checkLiveGate(vendor.slug as CacheVendor)
+      : { allow: true, reason: "ocean store self-gated", retryInMinutes: 0 };
     if (!gate.allow) {
       log.warn(`${vendor.slug}: skipping live delta — ${gate.reason}`);
     } else {
@@ -418,7 +424,7 @@ async function fastSyncVendor(
         const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
         log.progressEnd();
         if (updates) {
-          await recordLiveFetch(vendor.slug as "beautyfort" | "bts");
+          if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
           summary.fetched += updates.length;
           const changed = await applyPriceStockDelta(vendor.id, updates);
           summary.updated += changed;

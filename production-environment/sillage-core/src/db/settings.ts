@@ -18,6 +18,7 @@ export interface VendorRow extends RowDataPacket {
   sku_prefix: string;
   currency: string;
   fx_rate: string;
+  vat_rate: string | number | null;
   price_multiplier: string | null;
   min_visible_stock: number | null;
   serviceable_countries: string | string[];
@@ -29,11 +30,13 @@ export interface Vendor {
   id: number;
   slug: string;
   name: string;
-  /** Customer-facing label (LPS01 / LPS02). Falls back to name when unset. */
+  /** Customer-facing label (LPS01 / LPS02 / LPS03). Falls back to name when unset. */
   storefrontLabel: string;
   skuPrefix: string;
   currency: string;
   fxRate: number;
+  /** Fraction uplift before markup. 0 for BF/BTS; Ocean may need a confirmed rate. */
+  vatRate: number;
   priceMultiplier: number | null;
   minVisibleStock: number | null;
   serviceableCountries: string[];
@@ -56,6 +59,9 @@ export interface GlobalSettings {
   liveFeedMinMinutes: number;
   beautyfortLiveMaxPerDay: number;
   btsLiveMaxPerDay: number;
+  oceanLiveMaxPerDay: number;
+  oceanStoreLiveMaxPerDay: number;
+  oceanStoreLiveMinMinutes: number;
   writeBatchSize: number;
   maxStatementBytes: number;
   syncEnabled: boolean;
@@ -123,6 +129,9 @@ export async function loadSettings(): Promise<GlobalSettings> {
     liveFeedMinMinutes: num("live_feed_min_minutes", 60),
     beautyfortLiveMaxPerDay: num("beautyfort_live_max_per_day", 20),
     btsLiveMaxPerDay: num("bts_live_max_per_day", 48),
+    oceanLiveMaxPerDay: num("ocean_live_max_per_day", 1),
+    oceanStoreLiveMaxPerDay: num("ocean_store_live_max_per_day", 24),
+    oceanStoreLiveMinMinutes: num("ocean_store_live_min_minutes", 60),
     writeBatchSize: num("write_batch_size", 500),
     maxStatementBytes: num("max_statement_bytes", 4_194_304),
     syncEnabled: flag("sync_enabled", true),
@@ -164,6 +173,7 @@ function toVendor(row: VendorRow): Vendor {
     skuPrefix: row.sku_prefix,
     currency: row.currency,
     fxRate: Number(row.fx_rate),
+    vatRate: Number(row.vat_rate ?? 0) || 0,
     priceMultiplier: row.price_multiplier === null ? null : Number(row.price_multiplier),
     minVisibleStock: row.min_visible_stock,
     serviceableCountries: parseJson<string[]>(row.serviceable_countries, []),

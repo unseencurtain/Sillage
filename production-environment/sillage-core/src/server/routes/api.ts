@@ -181,6 +181,7 @@ api.get("/vendors", async (c) => {
       skuPrefix: v.skuPrefix,
       currency: v.currency,
       fxRate: v.fxRate,
+      vatRate: v.vatRate,
       priceMultiplier: v.priceMultiplier ?? settings.priceMultiplier,
       minVisibleStock: v.minVisibleStock ?? settings.stockThreshold,
       serviceableCountries: v.serviceableCountries,
