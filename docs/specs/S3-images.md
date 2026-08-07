@@ -38,7 +38,7 @@ any EAN that appears in the feed.
 
 1. Fetch or replay the catalog (live token auth or local fixture — see vendor connector / `fetch_wholesale_perfumes.py`).
 2. Extract EAN → `flask_front` URL pairs (`enrich.py --fetch-wholesale-perfumes`).
-3. **Host under `/lps-media/`** — `host_override_images.py --host images.elsvc.net` downloads override CDN URLs into `ecom_sites/data/media/` and rewrites keys to `PUBLIC_URL_BASE` (see [Hosting](#hosting-lps-media)).
+3. **Host on the images CDN** — `host_override_images.py --host images.elsvc.net` downloads override CDN URLs into `ecom_sites/data/media/` and rewrites keys to `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (see [Hosting](#hosting-lps-media--images-cdn)).
 4. Merge EAN → public URL into `image_overrides.json` (do not overwrite existing keys).
 
 The Python enricher under `production-environment/python-analysis/` already owns much of this path
@@ -53,7 +53,7 @@ for BeautyFort rows; follow the same merge → sync loop.
 Image-only index: EAN → external image URL. Not a vendor, not wholesale-perfumes.eu.
 
 1. Read the CSV (EAN + image URL columns).
-2. Download or link URLs as needed; prefer hosting copies under `/lps-media/` when URLs are fragile.
+2. Download or link URLs as needed; prefer hosting copies on the images CDN when URLs are fragile.
 3. Merge into `image_overrides.json` (skip keys already set by step 1).
 
 ---
@@ -119,7 +119,7 @@ only one vendor ships a real photo.
 
 ---
 
-## Hosting (`/lps-media/`)
+## Hosting (`lps-media` / images CDN)
 
 Product images are **external URLs** — WordPress never creates attachments. Host scraped or
 watermarked files outside `data/wp/`:
@@ -128,11 +128,21 @@ watermarked files outside `data/wp/`:
    `production-environment/ecom_sites/data/media/`
 2. Dedicated **`lps-media`** container (`nginx:alpine`) mounts that path read-only as its
    document root (`/usr/share/nginx/html`). No PHP, no DB, no WooCommerce.
-3. Public path stays **`/lps-media/<file>`** so existing override URLs keep working:
+3. **Preferred public URLs:** `https://images.<domain>/<file>` (root of the media container).
+   - VPS: host Caddy site `images.slilverbelt.xyz` → `127.0.0.1:105` (`lps-media`)
+   - Deploy with `--images images.example.com` (optional Porkbun A via `--dns`)
+4. **Fallback path** (unchanged): `https://<shop>/lps-media/<file>`
    - Local compose: `shop-gateway` (Caddy) `handle_path /lps-media/*` → `lps-media`
-   - VPS: host Caddy `handle_path /lps-media/*` → `127.0.0.1:105` (`lps-media`)
-4. `ecom` does **not** mount or Alias media — Apache no longer serves product images.
-5. Set `PUBLIC_URL_BASE=https://<shop>/lps-media` in tool `.env` before `build-overrides`
+   - VPS: shop site still has `handle_path /lps-media/*` → `:105`
+5. `ecom` does **not** mount or Alias media — Apache never serves product images.
+6. **Configurable base URL** (no code change to flip hosts later):
+   - Dashboard / `sil_settings.image_cdn_base_url` (default `https://images.slilverbelt.xyz`)
+   - Tool env (first match): `LPS_MEDIA_BASE_URL` → `IMAGE_HOST_BASE_URL` → `PUBLIC_URL_BASE`
+   - Host scripts (`host_override_images.py`, Brasty `build-overrides`) write absolute URLs like
+     `https://images.slilverbelt.xyz/<EAN>.jpg`
+   - Changing the base does **not** rewrite WooCommerce rows by itself: update
+     `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
+     `bun run sync -- --rewrite-all`
 
 Drop new files onto the host `data/media/` path; nginx serves them immediately (read-only mount).
 
