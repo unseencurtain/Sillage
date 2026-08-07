@@ -3,7 +3,7 @@
 #
 # Usage (from repo root):
 #   ./production-environment/scripts/deploy-vps.sh --host ovhe
-#   # Domains optional — defaults from production-environment/.env, else staging:
+#   # Domains optional — defaults from production-environment/.env, else live-shop defaults:
 #   #   shop=cosmetic.slilverbelt.xyz dash=sillage.slilverbelt.xyz images=images.slilverbelt.xyz
 #   ./production-environment/scripts/deploy-vps.sh \
 #       --host ovhe \
@@ -96,7 +96,7 @@ log_step() {
   printf '| %s | %dm%02ds | %s |\n' "$now" $((elapsed/60)) $((elapsed%60)) "$msg" | tee -a "$CHRONO"
 }
 
-# Domain precedence: CLI flags > remote ~/sillage/.env > local .env (non-localhost) > staging defaults.
+# Domain precedence: CLI flags > remote ~/sillage/.env > local .env (non-localhost) > live-shop defaults.
 CLI_SHOP="$SHOP_DOMAIN"
 CLI_DASH="$DASH_DOMAIN"
 CLI_IMAGES="$IMAGES_DOMAIN"
