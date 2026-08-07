@@ -1,6 +1,6 @@
 import { env, sil } from "../config/env.ts";
 import { execute, query, type RowDataPacket } from "../db/pool.ts";
-import { loadSettings, loadVendors, recordEvent, type Vendor } from "../db/settings.ts";
+import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
 import { formatDuration, logger } from "../lib/log.ts";
 import { createConnector } from "../vendors/registry.ts";
 import type { FeedSource, NormalizedProduct } from "../vendors/types.ts";
@@ -15,7 +15,10 @@ import { finalizeWordPress } from "./finalize.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
+  ensureB2bShopPage,
   ensureVendorShopCategories,
+  loadCategoryMapsFromDb,
+  loadFlatTermMapFromDb,
   rebuildCategoryLookup,
   recountTerms,
   syncCategories,
@@ -24,7 +27,7 @@ import {
 } from "./taxonomy.ts";
 import { clearSyncAbort, SyncAbortedError, throwIfSyncAborted } from "./abort.ts";
 import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
-import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
+import { buildWriteContext, writePendingProducts, type WriteContext, type WriteMode } from "./writer.ts";
 import type { CacheVendor } from "../vendors/feedCache.ts";
 import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
 
@@ -211,9 +214,10 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     }
 
     // Settings-driven rewrites: products are already dirty; do not touch vendor APIs.
+    // Must rebuild taxonomy maps from DB — empty maps + full mode wipe product_cat / brands.
     if (options.rewriteOnly) {
       await throwIfSyncAborted();
-      const ctx = await buildWriteContext(settings, allVendors, new Map(), new Map(), new Map(), new Map());
+      const ctx = await buildRewriteWriteContext(settings, allVendors);
       if (!options.dryRun) {
         const written = await writePendingProducts(ctx, options.mode, (done, total) => {
           log.progress(`writing ${done}/${total}`);
@@ -224,6 +228,13 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         summary.pricesUpdated = written.pricesUpdated;
         summary.errors += written.errors;
         summary.hiddenNoImage = written.hiddenNoImage;
+        if (options.mode === "full") {
+          await recountTerms(["product_cat", BRAND_TAXONOMY, ...Object.values(ATTRIBUTE_TAXONOMIES)]);
+          await rebuildCategoryLookup();
+        } else {
+          await recountTerms(["product_cat", BRAND_TAXONOMY]);
+        }
+        await finalizeWordPress();
       }
       summary.durationMs = Date.now() - startedAt;
       await finishRun(runId, startedAt, summary);
@@ -322,6 +333,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
       const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
       summary.termsCreated += vendorShop.created;
+      if (!options.dryRun) {
+        await ensureB2bShopPage(vendorShop.bySlug);
+      }
 
       await resolveProductIdentities(settings);
       await markDirtyFromPendingOffers();
@@ -451,6 +465,34 @@ async function fastSyncVendor(
   // which is the only path that creates posts and terms.
   await markDirtyFromPendingOffers();
   return diff.updated + diff.vanished;
+}
+
+/**
+ * Rebuild a full write context from DB maps — no vendor feed fetch.
+ * rewrite-only used to pass empty maps, which deleted every product_cat / brand relationship.
+ */
+async function buildRewriteWriteContext(
+  settings: GlobalSettings,
+  allVendors: Vendor[],
+): Promise<WriteContext> {
+  const categoryMaps = await loadCategoryMapsFromDb(allVendors.map((v) => v.id));
+  const brandMap = await loadFlatTermMapFromDb(BRAND_TAXONOMY);
+  const attributeMaps = new Map<string, Map<string, TermRef>>();
+  for (const taxonomy of new Set(Object.values(ATTRIBUTE_TAXONOMIES))) {
+    attributeMaps.set(taxonomy, await loadFlatTermMapFromDb(taxonomy));
+  }
+  const storefrontLabels: Record<string, string> = {};
+  for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
+  const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
+  await ensureB2bShopPage(vendorShop.bySlug);
+  return buildWriteContext(
+    settings,
+    allVendors,
+    categoryMaps,
+    brandMap,
+    attributeMaps,
+    vendorShop.bySlug,
+  );
 }
 
 async function lastSuccessfulRun(vendorId: number): Promise<Date> {

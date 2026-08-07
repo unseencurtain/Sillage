@@ -213,6 +213,10 @@ This is a closed list. If a task seems to require adding write logic here, it be
 6. On activation: register `pa_gender` / `pa_item-type` / `pa_volume` via `wc_create_attribute()`
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (and the cart/checkout notice) from sillage settings when enabled
+9. Exclude the B2B wholesaler (`wholesale-perfumes` / LPS03) `product_cat` from the main shop,
+   search, and other product queries; allow it only on that category archive and the dedicated
+   B2B page (`_sillage_b2b_shop` postmeta). Optional safety CSS so external thumbs cannot stretch
+   product cards.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
