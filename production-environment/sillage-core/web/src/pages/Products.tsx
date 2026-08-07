@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Pagination } from "@/components/Pagination";
 import { api } from "@/lib/api";
 import { eur } from "@/lib/utils";
 
@@ -66,25 +67,9 @@ export function Products() {
         </table>
       </div>
 
-      <div className="flex items-center gap-3 text-sm">
-        <button
-          type="button"
-          className="rounded-lg border border-line px-3 py-1.5 disabled:opacity-40"
-          disabled={page <= 1}
-          onClick={() => setPage((p) => p - 1)}
-        >
-          Previous
-        </button>
-        <span className="font-mono text-muted">page {page}</span>
-        <button
-          type="button"
-          className="rounded-lg border border-line px-3 py-1.5 disabled:opacity-40"
-          disabled={!data || page * data.limit >= data.total}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </button>
-      </div>
+      {data ? (
+        <Pagination page={page} limit={data.limit} total={data.total} onPageChange={setPage} />
+      ) : null}
     </div>
   );
 }
