@@ -1,26 +1,67 @@
 #!/usr/bin/env bash
-# One-script Sillage deploy onto a fresh (or existing) Ubuntu VPS with Docker + Caddy.
+# One-script Sillage deploy onto a Ubuntu VPS with Docker + Caddy already installed.
 #
-# Usage (from your laptop, in the repo):
-#   ./production-environment/scripts/deploy-vps.sh ovhe cosmetic.slilverbelt.xyz sillage.slilverbelt.xyz
+# Usage (from repo root / laptop):
+#   ./production-environment/scripts/deploy-vps.sh \
+#       --host ovh \
+#       --shop cosmetic.silverblade.xyz \
+#       --dash sillage.silverblade.xyz \
+#       [--dns] \
+#       [--clone-from ovhe] \
+#       [--ip 51.79.255.226]
 #
-# Args:
-#   $1  SSH host (ssh config alias or user@ip)
-#   $2  Storefront domain (WordPress / WooCommerce)
-#   $3  Dashboard domain (sillage-core UI)
+# Legacy positional form still works:
+#   ./production-environment/scripts/deploy-vps.sh ovhe cosmetic.example.com sillage.example.com
 #
-# Passwords / secrets:
-#   - Dashboard login is written to .deploy/vps-dashboard.txt on THIS machine (gitignored).
-#   - Vendor API keys are copied from production-environment/sillage-core/.env (must already exist).
-#   - WooCommerce DB password stays whatever is already in remote ecom_sites/.env
+# Secrets:
+#   - Dashboard login → .deploy/vps-dashboard-<host>.txt (gitignored)
+#   - Vendor keys from production-environment/sillage-core/.env
+#   - Optional Porkbun DNS → .deploy/porkbun.env
 #
 set -euo pipefail
 
-HOST="${1:?SSH host required, e.g. ovhe}"
-SHOP_DOMAIN="${2:?Storefront domain required}"
-DASH_DOMAIN="${3:?Dashboard domain required}"
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+HOST=""
+SHOP_DOMAIN=""
+DASH_DOMAIN=""
+DO_DNS=0
+CLONE_FROM=""
+IP=""
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host) HOST="${2:?}"; shift 2 ;;
+    --shop) SHOP_DOMAIN="${2:?}"; shift 2 ;;
+    --dash) DASH_DOMAIN="${2:?}"; shift 2 ;;
+    --dns) DO_DNS=1; shift ;;
+    --clone-from) CLONE_FROM="${2:?}"; shift 2 ;;
+    --ip) IP="${2:?}"; shift 2 ;;
+    -h|--help) usage ;;
+    *)
+      if [[ -z "$HOST" ]]; then HOST="$1"
+      elif [[ -z "$SHOP_DOMAIN" ]]; then SHOP_DOMAIN="$1"
+      elif [[ -z "$DASH_DOMAIN" ]]; then DASH_DOMAIN="$1"
+      else echo "Unexpected arg: $1" >&2; usage
+      fi
+      shift
+      ;;
+  esac
+done
+
+: "${HOST:?SSH host required}"
+: "${SHOP_DOMAIN:?shop domain required}"
+: "${DASH_DOMAIN:?dash domain required}"
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOCAL_ENV="$ROOT/production-environment/sillage-core/.env"
+CHRONO="$ROOT/.deploy/deploy-CHRONOLOGY.md"
+SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
+SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
+RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
 
 if [[ ! -f "$LOCAL_ENV" ]]; then
   echo "Missing $LOCAL_ENV — copy .env.example and fill vendor credentials first." >&2
@@ -28,18 +69,71 @@ if [[ ! -f "$LOCAL_ENV" ]]; then
 fi
 
 mkdir -p "$ROOT/.deploy"
-CREDS="$ROOT/.deploy/vps-dashboard.txt"
+CREDS="$ROOT/.deploy/vps-dashboard-${HOST}.txt"
+START_EPOCH=$(date +%s)
+log_step() {
+  local msg="$1"
+  local now elapsed
+  now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  elapsed=$(( $(date +%s) - START_EPOCH ))
+  printf '| %s | %dm%02ds | %s |\n' "$now" $((elapsed/60)) $((elapsed%60)) "$msg" | tee -a "$CHRONO"
+}
+
+if [[ ! -f "$CHRONO" ]]; then
+  cat > "$CHRONO" <<EOF
+# Deploy chronology
+
+| UTC | Elapsed | Step |
+|---|---|---|
+EOF
+fi
+
+log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} dns=${DO_DNS} clone_from=${CLONE_FROM:-none}"
+
+if [[ -z "$IP" ]]; then
+  IP=$("${SSH[@]}" "$HOST" 'curl -4 -sS --max-time 5 ifconfig.me || curl -4 -sS --max-time 5 icanhazip.com' | tr -d '[:space:]')
+fi
+: "${IP:?could not detect public IP}"
+log_step "Public IP ${IP}"
+
+if [[ "$DO_DNS" -eq 1 ]]; then
+  bash "$ROOT/production-environment/scripts/porkbun-dns.sh" "$SHOP_DOMAIN" "$DASH_DOMAIN" "$IP"
+  log_step "Porkbun A records set for shop+dash → ${IP}"
+fi
 
 echo "==> rsync code → $HOST"
-ssh "$HOST" 'mkdir -p ~/sillage-core ~/Sillage/.feedscratch ~/ecom_sites/config ~/ecom_sites/data/wp/wp-content/plugins ~/sillage-core/logs'
-rsync -az --delete \
+"${SSH[@]}" "$HOST" 'mkdir -p ~/sillage-core ~/Sillage/.feedscratch ~/ecom_sites/config ~/ecom_sites/data/wp/wp-content/plugins ~/sillage-core/logs ~/redis'
+"${RSYNC[@]}" --delete \
   --exclude node_modules --exclude .env --exclude logs --exclude dist --exclude web/node_modules \
   "$ROOT/production-environment/sillage-core/" "$HOST:~/sillage-core/"
-rsync -az --delete \
+"${RSYNC[@]}" --delete \
   "$ROOT/production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
   "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
+"${RSYNC[@]}" "$ROOT/production-environment/redis/compose.yaml" "$HOST:~/redis/compose.yaml"
 if [[ -d "$ROOT/.feedscratch" ]]; then
-  rsync -az "$ROOT/.feedscratch/" "$HOST:~/Sillage/.feedscratch/"
+  "${RSYNC[@]}" "$ROOT/.feedscratch/" "$HOST:~/Sillage/.feedscratch/"
+fi
+if [[ -f "$ROOT/production-environment/ecom_sites/config/php.ini" ]]; then
+  "${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/php.ini" "$HOST:~/ecom_sites/config/php.ini"
+fi
+"${SCP[@]}" "$ROOT/production-environment/scripts/vps-bootstrap.sh" "$HOST:~/vps-bootstrap.sh"
+"${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/sillage-grants.sql" "$HOST:~/ecom_sites/config/sillage-grants.sql"
+log_step "Code + plugin + redis compose uploaded"
+
+if [[ -n "$CLONE_FROM" ]]; then
+  echo "==> clone WordPress+DB from ${CLONE_FROM} → ${HOST} (live, no downtime on source)"
+  "${SSH[@]}" "$HOST" 'mkdir -p ~/ecom_sites/data/wp ~/ecom_sites/data/wp-db'
+  # Stream remote→remote via local stdin (rsync cannot do hostA: → hostB:)
+  "${SSH[@]}" "$CLONE_FROM" 'tar -C ~/ecom_sites/data/wp --exclude=wp-content/cache -cf - .' \
+    | "${SSH[@]}" "$HOST" 'tar -C ~/ecom_sites/data/wp -xf -'
+  "${SSH[@]}" "$CLONE_FROM" 'set -a; source ~/ecom_sites/.env; set +a; docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb-dump -uroot --single-transaction --routines --triggers --all-databases' \
+    | "${SSH[@]}" "$HOST" 'cat > /tmp/sillage-clone.sql'
+  "${SSH[@]}" "$CLONE_FROM" 'cat ~/ecom_sites/.env' | "${SSH[@]}" "$HOST" 'cat > ~/ecom_sites/.env && chmod 600 ~/ecom_sites/.env'
+  # Re-apply current plugin over the cloned tree
+  "${RSYNC[@]}" --delete \
+    "$ROOT/production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
+    "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
+  log_step "Cloned wp files + SQL dump from ${CLONE_FROM}"
 fi
 
 echo "==> generate remote .env + dashboard password"
@@ -48,9 +142,25 @@ set -a; source "$LOCAL_ENV"; set +a
 SECRET=$(openssl rand -hex 32)
 SESSION=$(openssl rand -hex 32)
 PASS=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
+WP_ADMIN_PASS=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
 DBPASS=$(openssl rand -hex 16)
+MYSQL_ROOT=$(openssl rand -hex 16)
+MYSQL_PWD=$(openssl rand -hex 16)
 
-ssh "$HOST" "cat > ~/sillage-core/.env" <<EOF
+REMOTE_HAS_ECOM_ENV=$("${SSH[@]}" "$HOST" 'test -f ~/ecom_sites/.env && echo yes || echo no')
+if [[ "$REMOTE_HAS_ECOM_ENV" != "yes" ]]; then
+  "${SSH[@]}" "$HOST" "cat > ~/ecom_sites/.env" <<EOF
+MYSQL_ROOT_PWD=${MYSQL_ROOT}
+MYSQL_DB=earth
+MYSQL_USER=lime
+MYSQL_PWD=${MYSQL_PWD}
+COMPOSE_PROFILES=
+EOF
+  "${SSH[@]}" "$HOST" 'chmod 600 ~/ecom_sites/.env'
+  log_step "Created fresh ecom_sites/.env"
+fi
+
+"${SSH[@]}" "$HOST" "cat > ~/sillage-core/.env" <<EOF
 NODE_ENV=production
 PORT=4000
 LOG_LEVEL=info
@@ -77,23 +187,27 @@ SESSION_SECRET=${SESSION}
 FIXTURES_DIR=/app/.feedscratch
 REDIS_URL=redis://valkey:6379
 EOF
-ssh "$HOST" 'chmod 600 ~/sillage-core/.env'
+"${SSH[@]}" "$HOST" 'chmod 600 ~/sillage-core/.env'
 
 cat > "$CREDS" <<EOF
+host=${HOST}
 url=https://${DASH_DOMAIN}
 user=admin
 password=${PASS}
 shop=https://${SHOP_DOMAIN}
+wp_admin_user=admin
+wp_admin_password=${WP_ADMIN_PASS}
+ip=${IP}
+created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 chmod 600 "$CREDS"
 echo "Dashboard password saved to $CREDS"
+log_step "Wrote dashboard creds to ${CREDS}"
 
-echo "==> upload compose / caddy / bootstrap"
-scp "$ROOT/production-environment/scripts/vps-bootstrap.sh" "$HOST:~/vps-bootstrap.sh"
-scp "$ROOT/production-environment/ecom_sites/config/php.ini" "$HOST:~/ecom_sites/config/php.ini" 2>/dev/null || true
-
-ssh "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' bash -s" <<'REMOTE'
+echo "==> remote compose / caddy / bring-up"
+"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' SILLAGE_DASHBOARD_URL='https://${DASH_DOMAIN}' CLONE_MODE='${CLONE_FROM:+1}' WP_ADMIN_PASS='${WP_ADMIN_PASS}' bash -s" <<'REMOTE'
 set -euo pipefail
+
 cat > ~/ecom_sites/config/mariadb.cnf <<'CNF'
 [mariadbd]
 innodb_buffer_pool_size         = 1G
@@ -107,9 +221,7 @@ character-set-server            = utf8mb4
 collation-server                = utf8mb4_unicode_ci
 CNF
 
-# Keep existing WP port mapping if present (104), else 80.
 WP_PORT=104
-grep -q '104:80' ~/ecom_sites/compose.yaml 2>/dev/null || WP_PORT=80
 
 cat > ~/ecom_sites/compose.yaml <<EOF
 name: wordpress-ecom
@@ -203,9 +315,97 @@ sudo systemctl reload caddy
 docker network create ecom_network 2>/dev/null || true
 docker network create redis_network 2>/dev/null || true
 
+cd ~/redis
+docker compose up -d
+
+cd ~/ecom_sites
+# php.ini optional
+[[ -f config/php.ini ]] || touch config/php.ini
+
+docker compose up -d ecom-db
+echo "Waiting for MariaDB..."
+for i in $(seq 1 60); do
+  if docker compose exec -T ecom-db healthcheck.sh --connect --innodb_initialized 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+
+# Import cloned SQL before starting WordPress (fresh datadir may already have empty earth)
+if [[ -f /tmp/sillage-clone.sql ]]; then
+  echo "Importing cloned SQL..."
+  set -a; source ~/ecom_sites/.env; set +a
+  docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot < /tmp/sillage-clone.sql
+  rm -f /tmp/sillage-clone.sql
+fi
+
+docker compose up -d ecom
+echo "Waiting for WordPress files..."
+for i in $(seq 1 90); do
+  if [[ -f "$HOME/ecom_sites/data/wp/wp-config.php" ]]; then
+    break
+  fi
+  sleep 2
+done
+
+if [[ ! -f "$HOME/ecom_sites/data/wp/wp-config.php" ]]; then
+  echo "wp-config.php still missing after wait" >&2
+  ls -la "$HOME/ecom_sites/data/wp" | head >&2 || true
+  exit 1
+fi
+
+# Fresh WordPress install (empty site — not a clone of production catalog)
+if [[ -z "${CLONE_MODE:-}" ]]; then
+  echo "Running fresh wp_install..."
+  docker exec -e SHOP_DOMAIN="$SHOP_DOMAIN" -e WP_ADMIN_PASS="$WP_ADMIN_PASS" ecom php -r '
+    $_SERVER["HTTP_HOST"] = getenv("SHOP_DOMAIN");
+    $_SERVER["REQUEST_URI"] = "/";
+    require "/var/www/html/wp-load.php";
+    require_once ABSPATH . "wp-admin/includes/upgrade.php";
+    $url = "https://" . getenv("SHOP_DOMAIN");
+    if (!is_blog_installed()) {
+      $pass = getenv("WP_ADMIN_PASS") ?: wp_generate_password(20, false);
+      $r = wp_install("Cosmetic", "admin", "admin@" . getenv("SHOP_DOMAIN"), true, "", $pass, "en_US");
+      echo "installed user_id=" . ($r["user_id"] ?? "?") . "\n";
+    } else {
+      echo "already_installed\n";
+    }
+    update_option("siteurl", $url);
+    update_option("home", $url);
+    update_option("woocommerce_currency", "EUR");
+    update_option("woocommerce_currency_pos", "left");
+    update_option("woocommerce_price_num_decimals", "2");
+    require_once ABSPATH . "wp-admin/includes/plugin.php";
+    foreach (["woocommerce/woocommerce.php","redis-cache/redis-cache.php","sillage-bridge/sillage-bridge.php"] as $p) {
+      if (file_exists(WP_PLUGIN_DIR . "/" . dirname($p) . "/" . basename($p)) || file_exists(WP_PLUGIN_DIR . "/" . $p)) {
+        $res = activate_plugin($p);
+        echo $p . (is_wp_error($res) ? (" FAIL ".$res->get_error_message()) : " ok") . "\n";
+      } else {
+        echo $p . " missing\n";
+      }
+    }
+    $theme = "blocksy";
+    if (wp_get_theme($theme)->exists()) {
+      switch_theme($theme);
+      echo "theme=$theme\n";
+    }
+  '
+fi
+
+export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
 bash ~/vps-bootstrap.sh
 
-# Patch DISABLE_WP_CRON + currency
+# URL rewrite when cloning another storefront
+if [[ -n "${CLONE_MODE:-}" ]]; then
+  docker exec ecom php -r "
+    require '/var/www/html/wp-load.php';
+    \$url = 'https://${SHOP_DOMAIN}';
+    update_option('siteurl', \$url);
+    update_option('home', \$url);
+    echo \"urls=\$url\\n\";
+  " || true
+fi
+
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; update_option("woocommerce_currency","EUR");' || true
 WP=~/ecom_sites/data/wp/wp-config.php
 grep -q DISABLE_WP_CRON "$WP" || python3 - <<'PY'
@@ -217,39 +417,34 @@ m = "/* That's all, stop editing!"
 p.write_text(t.replace(m, b+m) if m in t else t+b)
 PY
 
-cd ~/ecom_sites
-docker compose up -d ecom-db
 docker compose build sillage-core
 docker compose up -d sillage-core sillage-cron ecom
 docker exec sillage-core bun run migrate
-docker exec ecom php -r 'require "/var/www/html/wp-load.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";'
-# Grants for earth tables (needs -i)
+docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
+
 set -a; source ~/ecom_sites/.env; source ~/sillage-core/.env; set +a
+# Apply canonical grants file (avoids nested-SSH quoting dropping earth table grants).
+sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ~/ecom_sites/config/sillage-grants.sql \
+  | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot
+# Address editor needs write on HPOS addresses (beyond the read-only grants file).
 docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot <<'SQL'
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_posts TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_postmeta TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_terms TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_termmeta TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_term_taxonomy TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_term_relationships TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_product_meta_lookup TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_product_attributes_lookup TO 'sillage'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON earth.wp_wc_category_lookup TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_options TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_wc_orders TO 'sillage'@'%';
 GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_wc_order_operational_data TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_order_items TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_order_itemmeta TO 'sillage'@'%';
-GRANT SELECT ON earth.wp_woocommerce_attribute_taxonomies TO 'sillage'@'%';
 GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%';
 FLUSH PRIVILEGES;
 SQL
+
 curl -sS http://127.0.0.1:4000/health || true
 echo
-echo "Deploy finished. Open https://${DASH_DOMAIN} — password is on the laptop in .deploy/vps-dashboard.txt"
+echo "Deploy finished. Open https://${DASH_DOMAIN}"
 REMOTE
 
+log_step "Remote bring-up finished"
+TOTAL=$(( $(date +%s) - START_EPOCH ))
+log_step "DONE total=${TOTAL}s (~$((TOTAL/60))m$((TOTAL%60))s)"
+
+echo
 echo "==> done"
+echo "Shop:      https://${SHOP_DOMAIN}"
 echo "Dashboard: https://${DASH_DOMAIN}"
-echo "Password file: $CREDS"
+echo "Password:  $CREDS"
+echo "Chronology:$CHRONO"
