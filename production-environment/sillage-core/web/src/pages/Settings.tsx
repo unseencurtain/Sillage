@@ -6,6 +6,7 @@ import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
 import { watchSyncUntilIdle } from "@/lib/watchSync";
 import { cn } from "@/lib/utils";
+import { COMMON_TIMEZONES, resolveTimeZone, utcClockForLocalHour } from "@/lib/timezone";
 
 const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; wide?: boolean }> = [
   { key: "company", label: "Company", wide: true },
@@ -429,7 +430,7 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help="Cron ticks every 5 minutes; catalogue sync only opens in the :00 / :30 windows. Order housekeeping runs every tick."
+        help="Cron ticks every 5 minutes; catalogue sync only opens in the :00 / :30 windows. Order housekeeping runs every tick. Full-sync hour and dashboard clocks use the operator timezone below (MariaDB stays UTC)."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
@@ -441,6 +442,28 @@ export function Settings() {
               onChange={(v) => setBool("sync_enabled", v)}
             />
           </div>
+          <Field
+            label="Operator timezone"
+            help="IANA zone for the full-sync hour and Sync / Orders / Logs timestamps. Does not change the shop for customers."
+          >
+            <select
+              className={inputClass}
+              value={resolveTimeZone(form.schedule_timezone)}
+              disabled={busy}
+              onChange={(e) => set("schedule_timezone", e.target.value)}
+            >
+              {(() => {
+                const current = resolveTimeZone(form.schedule_timezone);
+                const known = COMMON_TIMEZONES as readonly string[];
+                const list = known.includes(current) ? [...known] : [current, ...known];
+                return list.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ));
+              })()}
+            </select>
+          </Field>
           <Field
             label="Fast sync minutes"
             help="Minutes since last success before a fast sync is due (still only in :00/:30 windows)."
@@ -464,8 +487,11 @@ export function Settings() {
             />
           </div>
           <Field
-            label="Full sync hour (UTC)"
-            help="Database hour for the nightly full attempt (UTC on this stack)."
+            label={`Full sync hour (${resolveTimeZone(form.schedule_timezone)})`}
+            help={`Nightly full attempt at this local hour. ≈ ${utcClockForLocalHour(
+              resolveTimeZone(form.schedule_timezone),
+              Number(form.full_sync_hour ?? 0),
+            )} today.`}
           >
             <input
               type="number"

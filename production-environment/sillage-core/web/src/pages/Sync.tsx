@@ -6,7 +6,7 @@ import { api, type SyncRun } from "@/lib/api";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { cn, fmtDate } from "@/lib/utils";
+import { cn, useFmtDate } from "@/lib/utils";
 
 function isRunActive(run: SyncRun | undefined) {
   if (!run) return false;
@@ -22,6 +22,7 @@ function isRunFinished(run: SyncRun) {
 export function Sync() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const fmtDate = useFmtDate();
   const [page, setPage] = useState(1);
   const watchingRunId = useRef<number | null>(null);
 

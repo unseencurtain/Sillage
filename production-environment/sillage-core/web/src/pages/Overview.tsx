@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { cn, fmtDate } from "@/lib/utils";
+import { cn, useFmtDate } from "@/lib/utils";
 
 function isRunActive(run: { status: string; finished_at?: string | null } | null | undefined) {
   if (!run) return false;
@@ -17,6 +17,7 @@ function isRunActive(run: { status: string; finished_at?: string | null } | null
 export function Overview() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const fmtDate = useFmtDate();
   const { data, isLoading, error } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,

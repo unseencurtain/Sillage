@@ -55,6 +55,16 @@ describe("pending price rewrite on Save", () => {
     expect(apiSrc).toContain("alreadyRunning");
   });
 
+  test("schedule_timezone is allow-listed and does not kick catalogue rewrite", () => {
+    expect(apiSrc).toContain('"schedule_timezone"');
+    expect(apiSrc).toContain("resolveTimeZone");
+    const priceKeysBlock = apiSrc.slice(
+      apiSrc.indexOf("const priceKeys = new Set"),
+      apiSrc.indexOf("const contentKeys = new Set"),
+    );
+    expect(priceKeysBlock).not.toContain("schedule_timezone");
+  });
+
   test("migration widens sil_sync_runs.source for cache/rewrite-only", () => {
     const mig = readFileSync(
       join(import.meta.dir, "../migrations/018_sync_run_source_cache.sql"),

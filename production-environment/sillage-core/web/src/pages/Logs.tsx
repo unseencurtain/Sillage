@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Pagination } from "@/components/Pagination";
 import { api } from "@/lib/api";
-import { fmtDate } from "@/lib/utils";
+import { useFmtDate } from "@/lib/utils";
 
 export function Logs() {
+  const fmtDate = useFmtDate();
   const [level, setLevel] = useState("");
   const [page, setPage] = useState(1);
   const { data, isLoading } = useQuery({
