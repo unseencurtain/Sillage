@@ -11,7 +11,7 @@ Everything else in this document is an *image source*: EAN → URL, no stock, no
 
 | SSH host | Role | What you may do |
 |---|---|---|
-| `ovhe` | Staging | Deploy, migrate, sync, run image tools freely |
+| `ovhe` (`ovh-experi`) | Staging | Deploy, migrate, sync, run image tools freely. Caddy owns `:80`; ecom is `127.0.0.1:104→80` |
 | `ovh` | **Production** | Read-only inspection unless the operator explicitly approves writes |
 
 ---
@@ -36,9 +36,9 @@ The wholesaler is vendor `wholesale-perfumes` (SKU prefix `WPF`). Its catalog XM
 `pictures/flask_front` URLs — use these as the first-choice image source for WPF products and for
 any EAN that appears in the feed.
 
-1. Fetch or replay the catalog (live token auth or local fixture — see vendor connector).
-2. Extract EAN → `flask_front` URL pairs.
-3. **Host under `/lps-media/`** — see [Hosting](#hosting-lps-media) below.
+1. Fetch or replay the catalog (live token auth or local fixture — see vendor connector / `fetch_wholesale_perfumes.py`).
+2. Extract EAN → `flask_front` URL pairs (`enrich.py --fetch-wholesale-perfumes`).
+3. **Host under `/lps-media/`** — `host_override_images.py --host images.elsvc.net` downloads override CDN URLs into `ecom_sites/data/media/` and rewrites keys to `PUBLIC_URL_BASE` (see [Hosting](#hosting-lps-media)).
 4. Merge EAN → public URL into `image_overrides.json` (do not overwrite existing keys).
 
 The Python enricher under `production-environment/python-analysis/` already owns much of this path

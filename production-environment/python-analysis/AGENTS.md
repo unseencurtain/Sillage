@@ -17,10 +17,17 @@ cd production-environment/python-analysis
 python3 beautyfort-enriched/test.py
 python3 beautyfort-enriched/fetch_wholesale_perfumes.py
 python3 beautyfort-enriched/enrich.py --fetch-wholesale-perfumes --install-core
+
+# Host flask_front (elsvc) override URLs under /lps-media (binaries gitignored)
+python3 beautyfort-enriched/host_override_images.py --dry-run
+PUBLIC_URL_BASE=https://cosmetic.slilverbelt.xyz/lps-media \
+  python3 beautyfort-enriched/host_override_images.py --host images.elsvc.net
+# optional next: --host www.oceanfragrances.com
 ```
 
-After `--install-core`, run a **fast / rewrite sync** on the shop so `_external_thumbnail_url`
-updates for existing products.
+After `--install-core` / hosting rewrites, run a **fast / rewrite sync** on the shop so
+`_external_thumbnail_url` updates for existing products. Rsync `ecom_sites/data/media/` to
+the VPS when using self-hosted URLs.
 
 wholesale-perfumes catalog etiquette: download at most once per day (script caches ~20h).
 
@@ -30,6 +37,7 @@ wholesale-perfumes catalog etiquette: download at most once per day (script cach
 beautyfort-enriched/
   enrich.py
   fetch_wholesale_perfumes.py  — wholesale-perfumes.eu catalog download + parse
+  host_override_images.py      — download remote override URLs → ecom_sites/data/media (/lps-media)
   test.py
   fixtures/
     wholesale_perfumes_catalog_sample.xml  — tiny fixture for tests
