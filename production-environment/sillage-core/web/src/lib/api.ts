@@ -52,7 +52,15 @@ export const api = {
     }),
   settings: () => request<Record<string, string>>("/api/settings"),
   saveSettings: (body: Record<string, string>) =>
-    request<{ ok: boolean }>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
+    request<{ ok: boolean; syncStarted?: boolean }>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  updateOrderAddress: (id: number, address: OrderAddress) =>
+    request<{ ok: boolean }>(`/api/orders/${id}/address`, {
+      method: "PUT",
+      body: JSON.stringify({ address }),
+    }),
   logs: (level?: string) =>
     request<{ events: LogEvent[] }>(`/api/logs${level ? `?level=${level}` : ""}`),
 };
@@ -127,12 +135,66 @@ export interface VendorOrder {
   created_at: string;
 }
 
+export interface OrderAddress {
+  firstName: string;
+  lastName: string;
+  company: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  postcode: string;
+  country: string;
+  email: string;
+  phone: string;
+}
+
+export interface OrderLineItem {
+  id: number;
+  sku: string;
+  name: string;
+  quantity: number;
+  unit_cost: string;
+  unit_price?: string;
+}
+
+export interface OrderEvent {
+  id: number;
+  from_status: string | null;
+  to_status: string | null;
+  message: string;
+  created_at: string;
+}
+
+export interface OrderTracking {
+  id: number;
+  courier: string | null;
+  tracking_code: string;
+  tracking_url: string | null;
+  dispatched_at: string | null;
+}
+
 export interface OrderDetail {
   order: VendorOrder & Record<string, unknown>;
-  items: Array<Record<string, unknown>>;
-  events: Array<Record<string, unknown>>;
-  tracking: Array<Record<string, unknown>>;
+  address?: OrderAddress;
+  items: OrderLineItem[];
+  events: OrderEvent[];
+  tracking: OrderTracking[];
 }
+
+export const emptyAddress = (): OrderAddress => ({
+  firstName: "",
+  lastName: "",
+  company: "",
+  address1: "",
+  address2: "",
+  city: "",
+  state: "",
+  postcode: "",
+  country: "",
+  email: "",
+  phone: "",
+});
 
 export interface LogEvent {
   id: number;
