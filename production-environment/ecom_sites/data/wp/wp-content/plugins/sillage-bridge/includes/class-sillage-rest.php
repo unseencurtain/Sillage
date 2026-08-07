@@ -132,6 +132,13 @@ final class Sillage_Rest {
 			$done[] = 'theme_lookup';
 		}
 
+		// Blocksy's category filter defaults to a flat A–Z of every product_cat (including nested
+		// brand leaves from the BTS feed). Force hierarchical+expandable so /shop shows feed
+		// browse roots (Makeup, Hair, Parapharmacy, …) instead of demo/brand noise.
+		if ( $this->ensure_shop_category_filters_hierarchical() ) {
+			$done[] = 'category_filter_hierarchy';
+		}
+
 		/**
 		 * Fires after Sillage has invalidated WooCommerce's caches following a bulk import.
 		 *
@@ -251,6 +258,69 @@ final class Sillage_Rest {
 			false
 		);
 
+		return true;
+	}
+
+	/**
+	 * Idempotently set hierarchical+expandable on Blocksy product_cat filter widgets.
+	 *
+	 * Leaves attribute filters (volume, etc.) untouched. No-op when Blocksy widgets are absent.
+	 */
+	private function ensure_shop_category_filters_hierarchical(): bool {
+		$widgets = get_option( 'widget_block', null );
+		if ( ! is_array( $widgets ) ) {
+			return false;
+		}
+
+		$changed = false;
+		foreach ( $widgets as $key => $widget ) {
+			if ( ! is_array( $widget ) || ! isset( $widget['content'] ) || ! is_string( $widget['content'] ) ) {
+				continue;
+			}
+			$content = $widget['content'];
+			if ( false === strpos( $content, 'wp:blocksy/woocommerce-filters' ) ) {
+				continue;
+			}
+
+			$new = preg_replace_callback(
+				'/<!-- wp:blocksy\/woocommerce-filters \{([^}]*)\} -->/',
+				static function ( array $m ): string {
+					$attrs = $m[1];
+					// Attribute filters (volume, skin-condition, …) stay flat.
+					if ( false !== strpos( $attrs, '"type":"attributes"' ) || false !== strpos( $attrs, '"attribute"' ) ) {
+						return $m[0];
+					}
+					if ( false !== strpos( $attrs, '"hierarchical":true' ) ) {
+						if ( false === strpos( $attrs, '"expandable"' ) ) {
+							$attrs .= ',"expandable":true';
+							return '<!-- wp:blocksy/woocommerce-filters {' . $attrs . '} -->';
+						}
+						return $m[0];
+					}
+					if ( false !== strpos( $attrs, '"hierarchical":false' ) ) {
+						$attrs = str_replace( '"hierarchical":false', '"hierarchical":true', $attrs );
+					} else {
+						$attrs = ( '' !== trim( $attrs ) ? $attrs . ',' : '' ) . '"hierarchical":true';
+					}
+					if ( false === strpos( $attrs, '"expandable"' ) ) {
+						$attrs .= ',"expandable":true';
+					}
+					return '<!-- wp:blocksy/woocommerce-filters {' . $attrs . '} -->';
+				},
+				$content
+			);
+
+			if ( is_string( $new ) && $new !== $content ) {
+				$widgets[ $key ]['content'] = $new;
+				$changed                    = true;
+			}
+		}
+
+		if ( ! $changed ) {
+			return false;
+		}
+
+		update_option( 'widget_block', $widgets, false );
 		return true;
 	}
 
