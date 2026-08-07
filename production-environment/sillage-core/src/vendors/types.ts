@@ -1,5 +1,10 @@
-/** Where a connector reads its feed from. `local` uses the fixtures in `.feedscratch`. */
-export type FeedSource = "live" | "local";
+/**
+ * Where a connector reads its feed from.
+ * - `live` — vendor API, subject to the hard live-gate (min interval + daily cap); falls back to cache
+ * - `cache` — on-disk feed from the last successful live download (never hits the vendor)
+ * - `local` — checked-in fixtures under `.feedscratch` (offline tests)
+ */
+export type FeedSource = "live" | "local" | "cache";
 
 /**
  * The vendor-agnostic product shape. Nothing vendor-specific may leak past a connector — that is

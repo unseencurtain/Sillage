@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Square } from "lucide-react";
 import { api, type SyncRun } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -31,6 +31,12 @@ export function Sync() {
     },
   });
 
+  const live = useQuery({
+    queryKey: ["live-status"],
+    queryFn: api.liveStatus,
+    refetchInterval: 15_000,
+  });
+
   const runs = data?.runs ?? [];
   const newest = runs[0];
   const syncRunning = isRunActive(newest);
@@ -39,7 +45,18 @@ export function Sync() {
     mutationFn: (mode: "fast" | "full") => api.runSync(mode),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
-      toast("Sync queued", "info");
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast("Sync queued (live downloads still rate-limited)", "info");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+
+  const stop = useMutation({
+    mutationFn: () => api.stopSync(),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      toast(res.detail ?? "Sync stopped — enable Sync or press Run to start fresh", "info");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
@@ -60,9 +77,22 @@ export function Sync() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
-          <p className="text-sm text-muted">Catalogue import runs and manual triggers</p>
+          <p className="text-sm text-muted">
+            Scheduled at :00 and :30 · live downloads min {live.data?.liveFeedMinMinutes ?? "…"} min apart
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-danger/40 bg-red-50 px-3 py-2 text-sm font-medium text-danger hover:bg-red-100 disabled:opacity-50"
+            disabled={stop.isPending}
+            onClick={() => stop.mutate()}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Square size={14} />
+              {stop.isPending ? "Stopping…" : "Stop all sync"}
+            </span>
+          </button>
           <button
             type="button"
             className="rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:opacity-50"
@@ -82,13 +112,36 @@ export function Sync() {
         </div>
       </header>
 
+      {live.data ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ["BeautyFort", live.data.beautyfort],
+              ["BTS", live.data.bts],
+            ] as const
+          ).map(([name, v]) => (
+            <div key={name} className="rounded-xl border border-line bg-panel px-4 py-3 text-sm">
+              <div className="font-medium">{name} live API</div>
+              <div className={cn("mt-1", v.allow ? "text-ok" : "text-amber-700")}>
+                {v.allow ? "Live download allowed" : "Using cache / blocked"}
+              </div>
+              <div className="mt-1 text-xs text-muted">{v.reason}</div>
+              <div className="mt-1 font-mono text-xs text-muted">
+                max {v.maxPerDay}/day · cache age{" "}
+                {v.cacheAgeMinutes == null ? "none" : `${v.cacheAgeMinutes}m`}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {syncRunning ? (
         <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm">
           <Loader2 size={18} className="animate-spin text-accent" />
           <div>
             <div className="font-medium text-ink">Sync running…</div>
             <div className="text-muted">
-              Run #{newest?.id} · {newest?.mode}/{newest?.source} — polling every 2s
+              Run #{newest?.id} · {newest?.mode}/{newest?.source} — Stop aborts between batches
             </div>
           </div>
         </div>

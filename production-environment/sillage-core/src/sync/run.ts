@@ -22,8 +22,10 @@ import {
   syncFlatTerms,
   type TermRef,
 } from "./taxonomy.ts";
+import { clearSyncAbort, SyncAbortedError, throwIfSyncAborted } from "./abort.ts";
 import { normalizeVolume, VENDOR_LABELS } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteMode } from "./writer.ts";
+import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
 
 const log = logger("sync");
 
@@ -38,6 +40,12 @@ export interface SyncOptions {
   redrive?: boolean;
   /** Re-mark every product, ignoring the applied hashes. */
   rewriteAll?: boolean;
+  /**
+   * Skip vendor feed fetch entirely — only rewrite already-dirty WooCommerce rows from DB state.
+   * Used when a settings change (multiplier, description) must hit the storefront without burning
+   * a live API download.
+   */
+  rewriteOnly?: boolean;
 }
 
 /**
@@ -157,6 +165,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     throw new Error("another sync is already running");
   }
 
+  // A previous Stop must not permanently block the next deliberate run.
+  await clearSyncAbort();
+
   const settings = await loadSettings();
   const allVendors = await loadVendors();
   const selected = allVendors.filter(
@@ -165,7 +176,11 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
   if (selected.length === 0) throw new Error("no active vendors selected");
 
   const runId = await startRun(options.mode, options.source, selected.length === 1 ? selected[0]!.id : null);
-  log.info(`run ${runId}: ${options.mode} sync from ${options.source} for ${selected.map((v) => v.slug).join(", ")}`);
+  log.info(
+    `run ${runId}: ${options.mode} sync from ${options.source}` +
+      (options.rewriteOnly ? " (rewrite-only, no vendor fetch)" : "") +
+      ` for ${selected.map((v) => v.slug).join(", ")}`,
+  );
 
   const summary: SyncSummary = {
     runId,
@@ -191,13 +206,32 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       log.info(`redrive: ${redriven} products re-marked for writing`);
     }
 
+    // Settings-driven rewrites: products are already dirty; do not touch vendor APIs.
+    if (options.rewriteOnly) {
+      await throwIfSyncAborted();
+      const ctx = await buildWriteContext(settings, allVendors, new Map(), new Map(), new Map(), new Map());
+      if (!options.dryRun) {
+        const written = await writePendingProducts(ctx, options.mode, (done, total) => {
+          log.progress(`writing ${done}/${total}`);
+        });
+        log.progressEnd();
+        summary.postsCreated = written.postsCreated;
+        summary.postsUpdated = written.postsUpdated;
+        summary.pricesUpdated = written.pricesUpdated;
+        summary.errors += written.errors;
+      }
+      summary.durationMs = Date.now() - startedAt;
+      await finishRun(runId, startedAt, summary);
+      return summary;
+    }
+
     const categoryMaps = new Map<number, Map<string, TermRef>>();
     const brandValues = new Set<string>();
     const attributeValues = new Map<string, Set<string>>();
 
     for (const vendor of selected) {
+      await throwIfSyncAborted();
       const connector = createConnector(vendor.slug);
-
       // ── Fast path: price and stock only ────────────────────────────────────
       if (options.mode === "fast") {
         const changed = await fastSyncVendor(vendor, connector, options, runId, summary);
@@ -337,8 +371,15 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     return summary;
   } catch (err) {
     summary.durationMs = Date.now() - startedAt;
+    const aborted = err instanceof SyncAbortedError || String(err).includes("aborted");
     await finishRun(runId, startedAt, summary, err);
-    await recordEvent("error", "sync", `run ${runId} failed: ${String(err)}`, undefined, runId);
+    await recordEvent(
+      aborted ? "warn" : "error",
+      "sync",
+      `run ${runId} ${aborted ? "aborted" : "failed"}: ${String(err)}`,
+      undefined,
+      runId,
+    );
     throw err;
   } finally {
     await releaseLock("sync");
@@ -359,21 +400,26 @@ async function fastSyncVendor(
   summary: SyncSummary,
 ): Promise<number> {
   if (connector.fetchPriceStock && options.source === "live") {
-    const since = await lastSuccessfulRun(vendor.id);
-    try {
-      const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
-      log.progressEnd();
-      if (updates) {
-        summary.fetched += updates.length;
-        const changed = await applyPriceStockDelta(vendor.id, updates);
-        summary.updated += changed;
-        return changed;
+    const gate = await checkLiveGate(vendor.slug as "beautyfort" | "bts");
+    if (!gate.allow) {
+      log.warn(`${vendor.slug}: skipping live delta — ${gate.reason}`);
+    } else {
+      const since = await lastSuccessfulRun(vendor.id);
+      try {
+        const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
+        log.progressEnd();
+        if (updates) {
+          await recordLiveFetch(vendor.slug as "beautyfort" | "bts");
+          summary.fetched += updates.length;
+          const changed = await applyPriceStockDelta(vendor.id, updates);
+          summary.updated += changed;
+          return changed;
+        }
+      } catch (err) {
+        log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
       }
-    } catch (err) {
-      log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
     }
   }
-
   // Fallback and BeautyFort's normal path: pull the full feed and diff by checksum.
   await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
   const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));

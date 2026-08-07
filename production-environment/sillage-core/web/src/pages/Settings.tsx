@@ -12,6 +12,9 @@ const NUMERIC_KEYS = new Set([
   "orders_max_value_eur",
   "orders_daily_cap_eur",
   "orders_poll_minutes",
+  "live_feed_min_minutes",
+  "beautyfort_live_max_per_day",
+  "bts_live_max_per_day",
 ]);
 
 const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | "number" | "text" }> = [
@@ -49,6 +52,24 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
     label: "Description mode",
     hint: "none (title copy) | template",
     type: "text",
+  },
+  {
+    key: "live_feed_min_minutes",
+    label: "Min minutes between live downloads",
+    hint: "Hard gate. Cache is used until this elapses (default 60).",
+    type: "number",
+  },
+  {
+    key: "beautyfort_live_max_per_day",
+    label: "BeautyFort live downloads / day",
+    hint: "Hard cap (BF ~40 SOAP/day budget). Default 20.",
+    type: "number",
+  },
+  {
+    key: "bts_live_max_per_day",
+    label: "BTS live downloads / day",
+    hint: "Hard cap on full catalogue pulls. Default 48.",
+    type: "number",
   },
 ];
 
