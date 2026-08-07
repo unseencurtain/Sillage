@@ -5,6 +5,9 @@ import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
 
+/** Parked B2B supplier — not editable on this retail shop. */
+const PARKED_B2B_SLUG = "wholesale-perfumes";
+
 interface VendorForm {
   storefrontLabel: string;
   priceMultiplier: string;
@@ -15,8 +18,6 @@ interface VendorForm {
   serviceableCountries: string;
   active: boolean;
   liveMaxPerDay: string;
-  storeLiveMaxPerDay: string;
-  storeLiveMinMinutes: string;
 }
 
 function toForm(v: Vendor): VendorForm {
@@ -31,10 +32,6 @@ function toForm(v: Vendor): VendorForm {
     serviceableCountries: v.serviceableCountries.join(" "),
     active: v.active,
     liveMaxPerDay: v.liveMaxPerDay === null || v.liveMaxPerDay === undefined ? "" : String(v.liveMaxPerDay),
-    storeLiveMaxPerDay:
-      v.storeLiveMaxPerDay === null || v.storeLiveMaxPerDay === undefined ? "" : String(v.storeLiveMaxPerDay),
-    storeLiveMinMinutes:
-      v.storeLiveMinMinutes === null || v.storeLiveMinMinutes === undefined ? "" : String(v.storeLiveMinMinutes),
   };
 }
 
@@ -91,16 +88,6 @@ function buildPatch(form: VendorForm, original: Vendor): VendorPatch {
   const liveMaxInt = liveMax === null ? null : Math.trunc(liveMax);
   if (liveMaxInt !== original.liveMaxPerDay) patch.liveMaxPerDay = liveMaxInt;
 
-  if (original.slug === "wholesale-perfumes") {
-    const storeMax = emptyToNullNumber(form.storeLiveMaxPerDay);
-    const storeMaxInt = storeMax === null ? null : Math.trunc(storeMax);
-    if (storeMaxInt !== original.storeLiveMaxPerDay) patch.storeLiveMaxPerDay = storeMaxInt;
-
-    const storeMin = emptyToNullNumber(form.storeLiveMinMinutes);
-    const storeMinInt = storeMin === null ? null : Math.trunc(storeMin);
-    if (storeMinInt !== original.storeLiveMinMinutes) patch.storeLiveMinMinutes = storeMinInt;
-  }
-
   return patch;
 }
 
@@ -123,20 +110,23 @@ function confirmDescription(original: Vendor, patch: VendorPatch): string {
 
 export function Vendors() {
   const { data, isLoading } = useQuery({ queryKey: ["vendors"], queryFn: api.vendors });
+  const vendors = data?.vendors ?? [];
+  const retail = vendors.filter((v) => v.slug !== PARKED_B2B_SLUG);
+  const parked = vendors.filter((v) => v.slug === PARKED_B2B_SLUG);
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted">
-          Per-supplier multipliers, stock floors, VAT, shipping coverage, and live-feed caps
+          BeautyFort + BTS only — multipliers, stock floors, VAT, shipping coverage, and live-feed caps
         </p>
       </header>
 
       {isLoading ? <p className="text-muted">Loading…</p> : null}
 
       <div className="grid gap-4 xl:grid-cols-1">
-        {(data?.vendors ?? []).map((v) => (
+        {retail.map((v) => (
           <VendorEditor
             key={v.id}
             vendor={v}
@@ -144,8 +134,34 @@ export function Vendors() {
             globalStockThreshold={data?.globalStockThreshold ?? 0}
           />
         ))}
+        {parked.map((v) => (
+          <ParkedVendorCard key={v.id} vendor={v} />
+        ))}
       </div>
     </div>
+  );
+}
+
+function ParkedVendorCard({ vendor }: { vendor: Vendor }) {
+  return (
+    <article className="rounded-xl border border-dashed border-line bg-canvas/40 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-muted">{vendor.storefrontLabel || vendor.name}</h2>
+          <div className="font-mono text-xs text-muted">
+            {vendor.slug} · SKU {vendor.skuPrefix}-*
+          </div>
+        </div>
+        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
+          parked
+        </span>
+      </div>
+      <p className="mt-3 text-sm text-muted">
+        Parked for the separate <code className="font-mono text-xs">b2b-wholesale/</code> site. Forced
+        inactive, excluded from <code className="font-mono text-xs">--vendor=all</code>, and not editable
+        on this retail shop. Connector remains in sillage-core for history and a future B2B deploy.
+      </p>
+    </article>
   );
 }
 
@@ -290,8 +306,7 @@ function VendorEditor({
             onChange={(e) => set("vatRate", e.target.value)}
           />
           <span className="mt-1 block text-xs text-muted">
-            Cost = vendor price × FX × (1 + VAT). Use 0.21 for 21%, not 21. wholesale-perfumes publishes
-            ex-VAT prices.
+            Cost = vendor price × FX × (1 + VAT). Use 0.21 for 21%, not 21.
           </span>
         </label>
 
@@ -336,42 +351,10 @@ function VendorEditor({
             disabled={save.isPending}
             onChange={(e) => set("liveMaxPerDay", e.target.value)}
           />
-          <span className="mt-1 block text-xs text-muted">Catalogue feed daily cap (BeautyFort ~40 SOAP budget).</span>
+          <span className="mt-1 block text-xs text-muted">
+            Catalogue feed daily cap (BeautyFort ~40 SOAP budget; BTS XML similarly capped).
+          </span>
         </label>
-
-        {vendor.slug === "wholesale-perfumes" ? (
-          <>
-            <label className="block text-sm">
-              <span className="font-medium text-ink">Store feed downloads / day</span>
-              <input
-                type="number"
-                step="1"
-                className={inputClass}
-                value={form.storeLiveMaxPerDay}
-                disabled={save.isPending}
-                onChange={(e) => set("storeLiveMaxPerDay", e.target.value)}
-              />
-              <span className="mt-1 block text-xs text-muted">
-                wholesale-perfumes price/stock XML — separate from the once-per-day catalog cap
-                (default 24).
-              </span>
-            </label>
-            <label className="block text-sm">
-              <span className="font-medium text-ink">Store feed min minutes</span>
-              <input
-                type="number"
-                step="1"
-                className={inputClass}
-                value={form.storeLiveMinMinutes}
-                disabled={save.isPending}
-                onChange={(e) => set("storeLiveMinMinutes", e.target.value)}
-              />
-              <span className="mt-1 block text-xs text-muted">
-                Minimum interval between wholesale-perfumes store downloads (default 60).
-              </span>
-            </label>
-          </>
-        ) : null}
 
         <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3 md:col-span-2">
           <Toggle
@@ -385,9 +368,8 @@ function VendorEditor({
       </div>
 
       <p className="mt-4 text-sm text-muted">
-        Changing the multiplier or VAT requires{" "}
-        <code className="font-mono text-xs">bun run sync -- --rewrite-all</code> (or the automatic
-        rewrite-only sync after save) to take effect, because sync hashes cover vendor data only.
+        Changing the multiplier or VAT starts a cache rewrite-only sync after save. CLI{" "}
+        <code className="font-mono text-xs">bun run sync -- --rewrite-all</code> is the escape hatch.
       </p>
 
       {confirmOpen && pendingPatch ? (

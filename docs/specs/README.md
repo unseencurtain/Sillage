@@ -3,8 +3,8 @@
 Each task below is self-contained: read `../CONTEXT.md`, then your row here, then the deep spec if
 one is linked. Acceptance criteria are what "done" means — not aspirations.
 
-**Operator reference:** [OPERATOR-DASHBOARD.md](../OPERATOR-DASHBOARD.md) — every dashboard tab,
-control, `sil_settings` key, and mismatch vs backend.
+**Operator reference:** [OPERATOR-DASHBOARD.md](../OPERATOR-DASHBOARD.md) — BeautyFort + BTS
+dashboard controls (Settings, Vendors, Sync, Orders). Parked WPF / dead knobs called out.
 
 ## Stage 1
 

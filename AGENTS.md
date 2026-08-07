@@ -1,11 +1,15 @@
 # Sillage — agent entry point
 
-Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce storefront.
+Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce storefront
+(**BeautyFort + BTS** retail; wholesale-perfumes is parked under `b2b-wholesale/`).
 
 **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet: container
 names, database credentials, WooCommerce schema quirks, and the complete list of tables we write
 to. Then read only the one spec under `docs/specs/` that covers your task. Do not go exploring —
 everything you need is in those two files.
+
+**Operator dashboard:** every Settings / Vendors / Sync / Orders control for this retail shop is
+documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
 
 ## Layout
 
