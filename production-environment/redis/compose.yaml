@@ -1,15 +1,6 @@
-name: valkey
-
-services:
-  valkey:
-    image: valkey/valkey:8-alpine
-    container_name: valkey
-    hostname: valkey
-    restart: unless-stopped
-    command: valkey-server --save "" --appendonly no
-    networks:
-      - redis_network
-
-networks:
-  redis_network:
-    external: true
+# Deprecated. Valkey now lives in production-environment/compose.yaml.
+#   cd .. && docker compose --env-file .env up -d valkey
+name: sillage
+include:
+  - path: ../compose.yaml
+    env_file: ../.env

@@ -16,68 +16,50 @@ You run everything from your **laptop** in a clone of this repo. The VPS never n
 | Product images CDN | `https://images.example.com/<file>` (optional `--images`) |
 | Passwords file (laptop only) | `.deploy/vps-dashboard-<ssh-host>.txt` |
 
-Stack: Caddy (TLS) → WordPress `:104` + `lps-media` `:105` + sillage-core `:4000`, MariaDB, Valkey, sillage-cron. Host bind-mount `ecom_sites/data/media/` into `lps-media`. Preferred image URLs use the images host (document root); shop `/lps-media/*` remains a fallback.
+**One compose + one env** on the VPS:
+
+| Path | Role |
+|---|---|
+| `~/sillage/compose.yaml` | Entire stack (ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron) |
+| `~/sillage/.env` | All secrets + image tags + domains |
+| `~/ecom_sites/data/{wp,wp-db,media}` | Host volumes (WP, MariaDB, product images) |
+| Host Caddy (`/etc/caddy/Caddyfile`) | TLS edge → `:104` / `:105` / `:4000` |
+
+Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`). Minimal rsync covers compose, config, plugin, and `image_overrides.json` only.
 
 ---
 
 ## Prerequisites (laptop)
 
-1. Git clone of this repo with vendor credentials ready:
+1. Git clone with vendor credentials:
 
    ```bash
-   cp production-environment/sillage-core/.env.example production-environment/sillage-core/.env
-   # Edit: BEAUTYFORT_USER, BEAUTYFORT_SECRET, BTS_JWT_TOKEN, endpoints if needed
+   cp production-environment/.env.example production-environment/.env
+   # Edit vendor keys + dashboard password placeholders
    ```
 
-2. SSH key that can log in as **root** on the new VPS (providers usually give you this at create time).
+2. SSH key that can log in as **root** on the new VPS (bootstrap), then as **ubuntu** (deploy).
 
-3. Two DNS names (A records) pointing at the VPS IP — either create them yourself, or use Porkbun API (below).
+3. Docker Hub login on the laptop (`docker login`) so `build-push-images.sh` can push.
 
-4. Optional — Porkbun API for `--dns`:
-
-   ```bash
-   mkdir -p .deploy
-   cat > .deploy/porkbun.env <<'EOF'
-   PORKBUN_API_KEY=pk1_...
-   PORKBUN_SECRET_KEY=sk1_...
-   EOF
-   chmod 600 .deploy/porkbun.env
-   ```
-
-   In Porkbun, enable **API access** for that domain.
+4. Two or three DNS names (A records) pointing at the VPS IP — or Porkbun API via `.deploy/porkbun.env` and `--dns`.
 
 ---
 
 ## Step 0 — Create the VPS
 
-At Hetzner / OVH / etc.:
-
-- Ubuntu 24.04+ (or 26.04)
-- ≥ 4 GB RAM, ≥ 40 GB disk
-- Attach your SSH public key
-- Note the **public IPv4**
-
-Firewall on the provider side: allow **22, 80, 443** (or leave open; the bootstrap script enables ufw the same way).
+At Hetzner / OVH / etc.: Ubuntu 24.04+, ≥ 4 GB RAM, ≥ 40 GB disk, SSH key attached.  
+Firewall: allow **22, 80, 443**.
 
 ---
 
 ## Step 1 — Bootstrap the host (as root, once)
 
-From the repo root on your laptop:
-
 ```bash
 ssh root@YOUR_VPS_IP 'bash -s' < production-environment/scripts/bootstrap-host.sh
 ```
 
-This installs and configures:
-
-- Docker Engine + Compose plugin  
-- Caddy  
-- ufw (22 / 80 / 443) + fail2ban  
-- user `ubuntu` (sudo NOPASSWD + docker group), copies root’s `authorized_keys`  
-- docker networks `ecom_network` and `redis_network`
-
-Add an SSH config alias for the deploy user:
+Installs Docker + Compose plugin, Caddy, ufw, fail2ban, `ubuntu` user, and networks `ecom_network` / `redis_network`.
 
 ```sshconfig
 Host my-sillage
@@ -87,35 +69,15 @@ Host my-sillage
     IdentitiesOnly yes
 ```
 
-Check:
-
-```bash
-ssh my-sillage 'docker --version && caddy version && groups'
-```
-
-You should see `docker` in `groups`.
-
 ---
 
 ## Step 2 — DNS
 
-Point both hostnames at `YOUR_VPS_IP` (TTL 600 is fine):
-
 | Name | Type | Value |
 |---|---|---|
-| `shop.example.com` (or a subdomain) | A | VPS IP |
+| `shop.example.com` | A | VPS IP |
 | `ops.example.com` | A | VPS IP |
 | `images.example.com` (optional CDN) | A | VPS IP |
-
-If using Porkbun + `.deploy/porkbun.env`, the next step’s `--dns` flag creates/updates these A records for you.
-
-After creating records, if your laptop still shows `ERR_NAME_NOT_RESOLVED`:
-
-```bash
-resolvectl flush-caches   # Linux systemd-resolved
-```
-
-Public resolvers (1.1.1.1 / 8.8.8.8) often see new names before your ISP cache does.
 
 ---
 
@@ -131,83 +93,87 @@ Public resolvers (1.1.1.1 / 8.8.8.8) often see new names before your ISP cache d
   --ip YOUR_VPS_IP
 ```
 
-Omit `--dns` if you already created the A records manually. Omit `--images` only if you will keep
-serving product files solely under `https://shop…/lps-media/`.
-
 ### What the script does
 
-1. Rsyncs `sillage-core`, `sillage-bridge`, redis compose, wordpress-image, grants SQL  
-2. **Builds `lime/wordpress:latest` on the VPS** (`wordpress:latest` + PHP Redis) — does not copy an image from another server  
-3. Writes remote `.env` files (DB passwords + dashboard password); mode `600`  
-4. Writes Caddyfile, runs `caddy fmt` / `validate` / `reload`  
-5. Starts Valkey → MariaDB → WordPress → sillage-core → sillage-cron  
-6. Fresh WordPress install (empty catalogue)  
-7. Installs WooCommerce, redis-cache, Blocksy from wordpress.org + activates sillage-bridge  
-8. Applies `ecom_sites/config/sillage-grants.sql`  
-9. Runs DB migrations  
-10. Saves logins to **`.deploy/vps-dashboard-my-sillage.txt`** on the laptop (gitignored)
+1. Builds and pushes `sillage-core` + `sillage-wordpress` to Docker Hub (`:<git-sha>` and `:latest`)
+2. Rsyncs `compose.yaml`, `ecom_sites/config/`, `sillage-bridge` plugin, `image_overrides.json`
+3. Writes `~/sillage/.env` once (preserves secrets on later runs)
+4. Writes host Caddyfile, `caddy validate` / `reload`
+5. `docker compose pull && up -d` for the whole stack
+6. Fresh WordPress install only when `wp-config.php` is missing (or `--fresh`)
+7. Grants + `bun run migrate`
+8. Saves dashboard login to **`.deploy/vps-dashboard-<host>.txt`**
 
-Expect ~5–15 minutes the first time (image pulls + builds).
+Expect ~5–15 minutes the first time (image builds + pulls).
+
+### Day-2 update (3–5 commands)
+
+```bash
+# from laptop / repo root
+./production-environment/scripts/build-push-images.sh
+./production-environment/scripts/deploy-vps.sh \
+  --host my-sillage \
+  --shop shop.example.com \
+  --dash ops.example.com \
+  --images images.example.com \
+  --skip-build   # if you already pushed
+```
+
+Or on the VPS after images are on Hub and compose/env are current:
+
+```bash
+ssh my-sillage 'cd ~/sillage && docker compose --env-file .env pull && docker compose --env-file .env up -d && docker exec sillage-core bun run migrate'
+```
 
 ---
 
 ## Step 4 — Verify
 
 ```bash
-# Passwords
 cat .deploy/vps-dashboard-my-sillage.txt
 
-# From laptop (after DNS works)
 curl -sS -o /dev/null -w "%{http_code}\n" https://shop.example.com/
 curl -sS -o /dev/null -w "%{http_code}\n" https://ops.example.com/
-# After media files exist on the host bind mount:
 curl -sS -o /dev/null -w "%{http_code}\n" https://images.example.com/<known-file>.jpg
 ```
-
-On the VPS:
 
 ```bash
 ssh my-sillage '
   docker ps
   curl -sS http://127.0.0.1:4000/health
-  docker exec sillage-core sh -c "mkdir -p /app/.feedscratch/cache && echo cache_ok"
+  docker inspect sillage-core --format "{{.Config.Image}}"
 '
 ```
 
 Checklist:
 
 - [ ] Shop and dashboard return **200** over HTTPS  
-- [ ] Dashboard login works (`admin` + password from the file)  
-- [ ] Overview page loads (not “Failed to load overview”)  
+- [ ] Dashboard login works  
+- [ ] Overview page loads  
 - [ ] Settings → **Orders dry-run** is **on** for demos  
-- [ ] Sync → live cards may say “Using cache / blocked” until the first successful live download  
+- [ ] `images.*` CDN serves files from `~/ecom_sites/data/media`  
 
 ---
 
-## Step 5 — First catalogue sync (optional)
-
-1. Open `https://ops.example.com` → Sync  
-2. Keep rate limits in mind (`live_feed_min_minutes`, daily caps in Settings)  
-3. Click **Run full sync** once to seed the feed cache (hits vendor APIs — respect caps)  
-4. Later runs use cache when live downloads are gated  
-
-**Stop all sync** aborts a running job and turns **Sync enabled** off. Turn Sync enabled back on (or press Run) to resume.
-
----
-
-## Updating an existing VPS
-
-Same command again (no need to re-bootstrap):
+## Local development (same compose)
 
 ```bash
-./production-environment/scripts/deploy-vps.sh \
-  --host my-sillage \
-  --shop shop.example.com \
-  --dash ops.example.com \
-  --ip YOUR_VPS_IP
+docker network create ecom_network
+docker network create redis_network
+
+cp production-environment/.env.example production-environment/.env
+# fill MYSQL_* / SILLAGE_* / vendor keys
+
+# optional: build local tags instead of pulling Hub
+docker build -t unseencurtain/sillage-wordpress:latest production-environment/wordpress-image
+docker build -t unseencurtain/sillage-core:latest production-environment/sillage-core
+
+cd production-environment
+docker compose --env-file .env --profile local up -d
+docker exec sillage-core bun run migrate
 ```
 
-This refreshes code/plugin/image. It does **not** wipe MariaDB / WordPress data unless you delete `~/ecom_sites/data` yourself.
+`shop-gateway` (profile `local`) serves `http://localhost` and `/lps-media/*`. VPS uses host Caddy instead — do not enable the local profile there.
 
 ---
 
@@ -215,11 +181,10 @@ This refreshes code/plugin/image. It does **not** wipe MariaDB / WordPress data 
 
 | Item | Expectation |
 |---|---|
-| Secrets | Only in remote `~/sillage-core/.env`, `~/ecom_sites/.env`, and laptop `.deploy/` — never commit |
-| Ports | Caddy :80/:443 public; sillage-core `127.0.0.1:4000`; MariaDB `127.0.0.1:3307` |
-| Firewall | ufw allows 22/80/443 only after bootstrap |
-| DB user `sillage` | Narrow grants on `earth.wp_*` — see `sillage-grants.sql` |
+| Secrets | Only in `~/sillage/.env` and laptop `.deploy/` — never commit |
+| Ports | Caddy :80/:443 public; app ports on `127.0.0.1` only |
 | Money | Vendor order APIs have no sandbox; keep dry-run on until intentional |
+| Images | Prefer Hub pulls; never commit Docker Hub tokens |
 
 ---
 
@@ -227,12 +192,11 @@ This refreshes code/plugin/image. It does **not** wipe MariaDB / WordPress data 
 
 | Symptom | Fix |
 |---|---|
-| `ERR_NAME_NOT_RESOLVED` | DNS not propagated / local cache — flush caches; confirm A records |
-| Dashboard “Failed to load overview” / SQL denied | Re-apply grants SQL as root against `ecom-db` |
-| Sync `EROFS` / read-only `.feedscratch` | Mount must be RW (deploy script does this; no `:ro`) |
-| `lime/wordpress` pull denied | Always **build** on the VPS via deploy (private tag) |
-| Stop sync “internal error” | Fixed on current `main` (`error_message` column); redeploy sillage-core if an old image |
-| Let’s Encrypt fail | DNS must already point at this VPS; ports 80/443 open |
+| `ERR_NAME_NOT_RESOLVED` | DNS / local cache |
+| Dashboard SQL denied | Re-run deploy (grants) or apply `ecom_sites/config/sillage-grants.sql` |
+| Image pull denied | `docker login` on laptop; confirm `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` in `.env` |
+| Let’s Encrypt fail | DNS must point here; 80/443 open |
+| Old split stack still running | Deploy stops `~/redis` + `~/ecom_sites` compose projects before starting `~/sillage` |
 
 ---
 
@@ -240,10 +204,11 @@ This refreshes code/plugin/image. It does **not** wipe MariaDB / WordPress data 
 
 | Script | Role |
 |---|---|
-| `production-environment/scripts/bootstrap-host.sh` | Fresh OS → Docker + Caddy + ubuntu user |
-| `production-environment/scripts/deploy-vps.sh` | App deploy / update |
-| `production-environment/scripts/porkbun-dns.sh` | A-record upsert (used by `--dns`) |
-| `production-environment/scripts/vps-bootstrap.sh` | Remote DB user + wp-config Sillage constants |
-| `production-environment/wordpress-image/Dockerfile` | `wordpress:latest` + Redis PHP extension |
+| `scripts/bootstrap-host.sh` | Fresh OS → Docker + Caddy + ubuntu user |
+| `scripts/build-push-images.sh` | Build/push Hub images |
+| `scripts/deploy-vps.sh` | App deploy / update |
+| `scripts/porkbun-dns.sh` | A-record upsert (`--dns`) |
+| `scripts/vps-bootstrap.sh` | Remote DB user + wp-config Sillage constants |
+| `wordpress-image/Dockerfile` | WordPress + Redis PHP extension |
 
-Canonical product facts: [`CONTEXT.md`](CONTEXT.md). High-level pointer: [`../README.md`](../README.md).
+Canonical product facts: [`CONTEXT.md`](CONTEXT.md).

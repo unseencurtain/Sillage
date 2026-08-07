@@ -17,12 +17,13 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 
 | Path | What it is |
 |---|---|
+| `production-environment/compose.yaml` | Single stack: ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron |
+| `production-environment/.env.example` | All required env keys (copy to `.env`) |
 | `production-environment/sillage-core/` | Sync engine, HTTP API, React dashboard |
-| `production-environment/ecom_sites/` | Compose: WordPress (`ecom`) + MariaDB (`ecom-db`) + sillage |
+| `production-environment/ecom_sites/` | Host data mounts + WP/nginx/MariaDB config |
 | `…/plugins/sillage-bridge/` | Only WordPress path that is versioned |
-| `production-environment/wordpress-image/` | Dockerfile: `wordpress:latest` + PHP Redis → `lime/wordpress:latest` |
-| `production-environment/redis/` | Valkey object cache |
-| `production-environment/scripts/` | One-click host bootstrap + VPS deploy |
+| `production-environment/wordpress-image/` | Dockerfile → `unseencurtain/sillage-wordpress` |
+| `production-environment/scripts/` | bootstrap, build-push, deploy |
 | `docs/` | Start with [`docs/CONTEXT.md`](docs/CONTEXT.md) |
 | `docs/CLIENT-FEATURE-WALKTHROUGH.md` | Client-facing feature tour |
 
@@ -61,8 +62,8 @@ Host my-sillage
 ### 2. Local secrets (laptop)
 
 ```bash
-cp production-environment/sillage-core/.env.example production-environment/sillage-core/.env
-# Fill BeautyFort + BTS credentials. Dashboard password is generated on deploy.
+cp production-environment/.env.example production-environment/.env
+# Fill BeautyFort + BTS credentials. Dashboard password is generated on deploy if missing remotely.
 ```
 
 Optional DNS automation:
@@ -79,24 +80,26 @@ chmod 600 .deploy/porkbun.env
 ### 3. Deploy
 
 ```bash
+cp production-environment/.env.example production-environment/.env   # vendor keys
 ./production-environment/scripts/deploy-vps.sh \
   --host my-sillage \
   --shop shop.example.com \
   --dash ops.example.com \
+  --images images.example.com \
   --dns \
   --ip YOUR_VPS_IP
 ```
 
 What that does:
 
-1. Builds **`lime/wordpress:latest` on the VPS** from `wordpress-image/` (not copied from another server)
-2. Starts Valkey, MariaDB, WordPress, sillage-core, sillage-cron
-3. Configures Caddy (`fmt` + `validate` + `reload`) with Let’s Encrypt
-4. Fresh WordPress install + WooCommerce / redis-cache / Blocksy from wordpress.org + sillage-bridge
-5. Applies canonical DB grants from `ecom_sites/config/sillage-grants.sql`
-6. Runs migrations; writes dashboard + WP admin passwords to **`.deploy/vps-dashboard-<host>.txt`** (mode `600`, gitignored)
+1. Builds/pushes **`unseencurtain/sillage-core`** and **`unseencurtain/sillage-wordpress`** to Docker Hub
+2. Rsyncs compose + config + plugin (not a full source tree)
+3. Starts the whole stack from `~/sillage/compose.yaml` + `~/sillage/.env`
+4. Configures host Caddy with Let’s Encrypt
+5. Fresh WordPress install only when needed; grants + migrate
+6. Writes dashboard passwords to **`.deploy/vps-dashboard-<host>.txt`** (gitignored)
 
-Re-run the same command to update code/plugin/image. It will not wipe an existing DB unless you intentionally clear `~/ecom_sites/data`.
+Re-run to update images/plugin. It will not wipe MariaDB / WordPress data unless you clear `~/ecom_sites/data`.
 
 ### 4. After deploy checklist
 
@@ -113,27 +116,25 @@ Re-run the same command to update code/plugin/image. It will not wipe an existin
 docker network create ecom_network
 docker network create redis_network
 
-cp production-environment/sillage-core/.env.example production-environment/sillage-core/.env
-cp production-environment/ecom_sites/.env.example production-environment/ecom_sites/.env
+cp production-environment/.env.example production-environment/.env
+# fill MYSQL_* / SILLAGE_* / vendor keys
 
-# Build the Redis-enabled WordPress image once
-docker build -t lime/wordpress:latest production-environment/wordpress-image
+docker build -t unseencurtain/sillage-wordpress:latest production-environment/wordpress-image
+docker build -t unseencurtain/sillage-core:latest production-environment/sillage-core
 
-cd production-environment/redis && docker compose up -d
-cd ../ecom_sites && docker compose up -d --build
+cd production-environment
+docker compose --env-file .env --profile local up -d
+docker exec sillage-core bun run migrate
 
-cd ../sillage-core
-bun install
-bun run migrate
+cd sillage-core && bun install
 bun run sync -- --source=local --vendor=all   # needs .feedscratch fixtures
-# bun run dev   # API + dashboard on :4000
 bun test
 ```
 
 | Service | URL |
 |---|---|
 | Dashboard | http://127.0.0.1:4000 |
-| Storefront | http://localhost (or host-mapped WP port) |
+| Storefront | http://localhost (shop-gateway profile) or http://127.0.0.1:104 |
 
 ## Security model (short)
 
