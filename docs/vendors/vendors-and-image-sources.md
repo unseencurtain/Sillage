@@ -25,8 +25,10 @@ pictures when enriching.
 ### Sillage connector (slug `wholesale-perfumes`, sku_prefix `WPF`, storefront `LPS03`)
 
 Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
-`src/orders/adapters/wholesale-perfumes.ts`. Seeded **inactive** by migration
-`013_wholesale_perfumes_vendor.sql` until an operator turns it on.
+`src/orders/adapters/wholesale-perfumes.ts`. Seeded inactive by migration
+`013_wholesale_perfumes_vendor.sql`; operator activates on the Vendors page.
+Storefront sell path matches BF/BTS (main `/shop/` → cart → checkout → Sillage); differentiator
+is per-vendor MOQ on cart. Optional `/b2b-wholesale/` is a filtered landing only — no B2B portal.
 
 - Catalog + store joined on vendor `id`. Store feed alone powers `fetchPriceStock`.
 - Live gates: catalog max 1/day and store hourly caps live on `sil_vendors`
@@ -48,7 +50,7 @@ Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
 
 | Field | Seeded value | Status |
 |---|---|---|
-| `min_order_value_eur` | `100` | Still a guess — shipping page does not state MOQ |
+| `min_order_value_eur` | `100` | Guessed amount; product decision = MOQ on cart (hard block). Confirm euros with operator |
 | `serviceable_countries` | see below | From [shipping-payment](https://www.wholesale-perfumes.eu/shipping-payment/) |
 | `vat_rate` | `0` | Deliberately unset — do not invent a rate |
 

@@ -307,7 +307,9 @@ function VendorEditor({
             onChange={(e) => set("minOrderValueEur", e.target.value)}
           />
           <span className="mt-1 block text-xs text-muted">
-            Stored in order_config.min_order_value_eur. Empty clears that key only.
+            Stored in order_config.min_order_value_eur. Bridge hard-blocks cart/checkout under this
+            floor (storefront-label message). Empty clears that key only. Independent of the global
+            small-order fee toggle.
           </span>
         </label>
 

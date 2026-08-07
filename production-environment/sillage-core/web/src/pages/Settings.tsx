@@ -46,19 +46,19 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   {
     key: "cart_min_enabled",
     label: "Small-order fee",
-    hint: "Foodpanda-style fee when cart (or a vendor portion) is under the minimum. Off by default.",
+    hint: "Optional Foodpanda-style fee when the cart subtotal is under the global minimum. Off by default. Does not replace per-vendor MOQ.",
     type: "bool",
   },
   {
     key: "cart_min_subtotal_eur",
     label: "Cart minimum (EUR)",
-    hint: "Global subtotal floor. Per-vendor floors live in each vendor's order_config.min_order_value_eur.",
+    hint: "Global subtotal floor for the fee above. Per-vendor MOQ is order_config.min_order_value_eur on each Vendors row (hard-blocks checkout).",
     type: "number",
   },
   {
     key: "cart_min_fee_eur",
     label: "Small-order fee (EUR)",
-    hint: "Charged once when any floor is unmet — never stacked.",
+    hint: "Charged once when the global floor is unmet — never stacked. Vendor MOQ shortfalls block checkout instead of adding this fee.",
     type: "number",
   },
   {
@@ -70,7 +70,7 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   {
     key: "cart_min_message",
     label: "Small-order fee message",
-    hint: "Shown on cart and checkout. Must include {remaining} (WooCommerce formats the amount).",
+    hint: "Shown on cart and checkout for the global fee. Must include {remaining} (WooCommerce formats the amount).",
     type: "text",
   },
   { key: "orders_dry_run", label: "Orders dry-run", hint: "When on, never spend money", type: "bool" },

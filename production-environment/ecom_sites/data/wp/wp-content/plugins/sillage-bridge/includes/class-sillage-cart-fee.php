@@ -1,11 +1,15 @@
 <?php
 /**
- * Foodpanda-style small-order cart fee.
+ * Cart minimums: global small-order fee + per-vendor MOQ hard block.
  *
- * Reads enable flag, global minimum, fee amount and message template from sillage.sil_settings,
- * and optional per-vendor floors from sil_vendors.order_config.min_order_value_eur. Adds at most
- * one fee per cart. Never blocks checkout. If sillage is unreachable or config is unusable, this
- * module is a no-op so a broken config cannot block a sale.
+ * Global floor (`cart_min_*` in sil_settings): Foodpanda-style fee when enabled. Never blocks
+ * checkout. If sillage is unreachable or that config is unusable, the fee is a no-op so a
+ * broken global config cannot block a sale.
+ *
+ * Per-vendor floor (`sil_vendors.order_config.min_order_value_eur`): hard block at cart/checkout
+ * with a shortfall notice using the storefront label. A shop fee cannot satisfy a wholesaler
+ * MOQ — dispatch would still reject — so vendor floors always surface and always block, even
+ * when the global fee toggle is off.
  *
  * @package Sillage_Bridge
  */
@@ -24,14 +28,15 @@ final class Sillage_Cart_Fee {
 
 	private const DEFAULT_FEE_LABEL = 'Small order fee';
 
-	/** @var array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null|false */
+	/** @var array{fee:array{enabled:bool,min:float,fee:float,label:string,message:string}|null,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null|false */
 	private $config = false;
 
 	public function register(): void {
 		add_action( 'woocommerce_cart_calculate_fees', array( $this, 'apply_fee' ), 20 );
 		add_action( 'woocommerce_before_cart', array( $this, 'maybe_notice' ) );
 		add_action( 'woocommerce_before_checkout_form', array( $this, 'maybe_notice' ), 5 );
-		add_action( 'woocommerce_check_cart_items', array( $this, 'maybe_notice' ) );
+		add_action( 'woocommerce_check_cart_items', array( $this, 'validate_vendor_moq' ) );
+		add_action( 'woocommerce_check_cart_items', array( $this, 'maybe_notice' ), 20 );
 	}
 
 	/**
@@ -45,7 +50,7 @@ final class Sillage_Cart_Fee {
 			return;
 		}
 
-		$assessment = $this->assess( $cart );
+		$assessment = $this->assess_fee( $cart );
 		if ( null === $assessment || ! $assessment['applies'] ) {
 			return;
 		}
@@ -57,6 +62,9 @@ final class Sillage_Cart_Fee {
 		);
 	}
 
+	/**
+	 * Soft notices for the optional global small-order fee (does not block checkout).
+	 */
 	public function maybe_notice(): void {
 		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
 			return;
@@ -67,7 +75,7 @@ final class Sillage_Cart_Fee {
 			return;
 		}
 
-		$assessment = $this->assess( WC()->cart );
+		$assessment = $this->assess_fee( WC()->cart );
 		if ( null === $assessment || ! $assessment['applies'] ) {
 			return;
 		}
@@ -80,26 +88,43 @@ final class Sillage_Cart_Fee {
 			$text      = str_replace( '{remaining}', $formatted, $assessment['message'] );
 			wc_add_notice( $text, 'notice' );
 		}
+	}
 
-		// Surface per-vendor shortfalls when a cart mixes suppliers (or when only a vendor
-		// floor is unmet). A single-vendor cart whose shortfall matches the template amount
-		// already has a clear "add X more" line above.
-		$multi_vendor = count( $assessment['vendors_in_cart'] ) > 1;
-		foreach ( $assessment['vendor_shortfalls'] as $slug => $shortfall ) {
+	/**
+	 * Hard-block checkout when any vendor subtotal is below that vendor's min_order_value_eur.
+	 */
+	public function validate_vendor_moq(): void {
+		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return;
+		}
+
+		static $shown = false;
+		if ( $shown ) {
+			return;
+		}
+
+		$shortfalls = $this->vendor_shortfalls( WC()->cart );
+		if ( empty( $shortfalls['shortfalls'] ) ) {
+			return;
+		}
+
+		$shown  = true;
+		$config = $this->load_config();
+		$labels = is_array( $config ) ? $config['vendor_labels'] : array();
+
+		foreach ( $shortfalls['shortfalls'] as $slug => $shortfall ) {
 			if ( $shortfall <= 0 ) {
 				continue;
 			}
-			if ( ! $multi_vendor && abs( $shortfall - $remaining ) < 0.0001 ) {
-				continue;
-			}
+			$label = $labels[ $slug ] ?? $slug;
 			wc_add_notice(
 				sprintf(
-					/* translators: 1: formatted money amount, 2: shop section label such as LPS01 */
-					__( 'Add %1$s more from %2$s to drop the small-order fee.', 'sillage-bridge' ),
+					/* translators: 1: formatted money amount, 2: shop section label such as LPS03 */
+					__( 'Add %1$s more from %2$s to meet the minimum order for that supplier.', 'sillage-bridge' ),
 					wp_strip_all_tags( wc_price( $shortfall ) ),
-					esc_html( $assessment['vendor_labels'][ $slug ] ?? $slug )
+					esc_html( $label )
 				),
-				'notice'
+				'error'
 			);
 		}
 	}
@@ -110,59 +135,67 @@ final class Sillage_Cart_Fee {
 	 *   fee: float,
 	 *   label: string,
 	 *   remaining: float,
-	 *   global_shortfall: float,
-	 *   vendor_shortfalls: array<string, float>,
-	 *   vendors_in_cart: list<string>,
-	 *   vendor_labels: array<string, string>,
 	 *   message: string
-	 * }|null Null when fee must not run (disabled, unreadable config, empty cart).
+	 * }|null Null when the global fee must not run.
 	 */
-	private function assess( WC_Cart $cart ): ?array {
+	private function assess_fee( WC_Cart $cart ): ?array {
 		$config = $this->load_config();
-		if ( null === $config || ! $config['enabled'] ) {
+		if ( null === $config || null === $config['fee'] || ! $config['fee']['enabled'] ) {
 			return null;
 		}
-		if ( $config['fee'] <= 0 ) {
+		$fee_cfg = $config['fee'];
+		if ( $fee_cfg['fee'] <= 0 ) {
 			return null;
 		}
 
 		$subtotals = $this->vendor_subtotals( $cart );
-		if ( empty( $subtotals['by_vendor'] ) && $subtotals['total'] <= 0 ) {
+		if ( $subtotals['total'] <= 0 ) {
 			return null;
 		}
 
-		$global_shortfall = 0.0;
-		if ( $config['min'] > 0 && $subtotals['total'] < $config['min'] ) {
-			$global_shortfall = $config['min'] - $subtotals['total'];
+		$remaining = 0.0;
+		if ( $fee_cfg['min'] > 0 && $subtotals['total'] < $fee_cfg['min'] ) {
+			$remaining = $fee_cfg['min'] - $subtotals['total'];
 		}
 
-		$vendor_shortfalls = array();
-		foreach ( $subtotals['by_vendor'] as $slug => $amount ) {
-			$min = $config['vendor_mins'][ $slug ] ?? 0.0;
-			if ( $min > 0 && $amount < $min ) {
-				$vendor_shortfalls[ $slug ] = $min - $amount;
-			}
+		if ( $remaining <= 0 ) {
+			return null;
 		}
-
-		$remaining = $global_shortfall;
-		foreach ( $vendor_shortfalls as $shortfall ) {
-			if ( $shortfall > $remaining ) {
-				$remaining = $shortfall;
-			}
-		}
-
-		$applies = $global_shortfall > 0 || ! empty( $vendor_shortfalls );
 
 		return array(
-			'applies'           => $applies,
-			'fee'               => $config['fee'],
-			'label'             => $config['label'],
-			'remaining'         => $remaining,
-			'global_shortfall'  => $global_shortfall,
-			'vendor_shortfalls' => $vendor_shortfalls,
-			'vendors_in_cart'   => array_keys( $subtotals['by_vendor'] ),
-			'vendor_labels'     => $config['vendor_labels'],
-			'message'           => $config['message'],
+			'applies'   => true,
+			'fee'       => $fee_cfg['fee'],
+			'label'     => $fee_cfg['label'],
+			'remaining' => $remaining,
+			'message'   => $fee_cfg['message'],
+		);
+	}
+
+	/**
+	 * @return array{shortfalls: array<string, float>, vendors_in_cart: list<string>}
+	 */
+	private function vendor_shortfalls( WC_Cart $cart ): array {
+		$config = $this->load_config();
+		$mins   = is_array( $config ) ? $config['vendor_mins'] : array();
+		if ( empty( $mins ) ) {
+			return array(
+				'shortfalls'      => array(),
+				'vendors_in_cart' => array(),
+			);
+		}
+
+		$subtotals = $this->vendor_subtotals( $cart );
+		$shortfalls = array();
+		foreach ( $subtotals['by_vendor'] as $slug => $amount ) {
+			$min = $mins[ $slug ] ?? 0.0;
+			if ( $min > 0 && $amount < $min ) {
+				$shortfalls[ $slug ] = $min - $amount;
+			}
+		}
+
+		return array(
+			'shortfalls'      => $shortfalls,
+			'vendors_in_cart' => array_keys( $subtotals['by_vendor'] ),
 		);
 	}
 
@@ -196,7 +229,7 @@ final class Sillage_Cart_Fee {
 	}
 
 	/**
-	 * @return array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
+	 * @return array{fee:array{enabled:bool,min:float,fee:float,label:string,message:string}|null,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
 	 */
 	private function load_config(): ?array {
 		if ( false !== $this->config ) {
@@ -206,7 +239,8 @@ final class Sillage_Cart_Fee {
 		$cached = wp_cache_get( self::CACHE_KEY, self::CACHE_GROUP );
 		if (
 			is_array( $cached )
-			&& isset( $cached['enabled'], $cached['min'], $cached['fee'], $cached['label'], $cached['message'], $cached['vendor_mins'], $cached['vendor_labels'] )
+			&& array_key_exists( 'fee', $cached )
+			&& isset( $cached['vendor_mins'], $cached['vendor_labels'] )
 		) {
 			$this->config = $cached;
 			return $this->config;
@@ -221,13 +255,17 @@ final class Sillage_Cart_Fee {
 	}
 
 	/**
-	 * @return array{enabled:bool,min:float,fee:float,label:string,message:string,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
+	 * @return array{fee:array{enabled:bool,min:float,fee:float,label:string,message:string}|null,vendor_mins:array<string,float>,vendor_labels:array<string,string>}|null
 	 */
 	private function fetch_config(): ?array {
 		global $wpdb;
 
 		$suppress = $wpdb->suppress_errors( true );
 		try {
+			$fee_cfg       = null;
+			$vendor_mins   = array();
+			$vendor_labels = array();
+
 			$settings_table = SILLAGE_DB . '.sil_settings';
 			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is a constant.
 			$rows = $wpdb->get_results(
@@ -244,40 +282,39 @@ final class Sillage_Cart_Fee {
 			);
 			// phpcs:enable
 
-			if ( null === $rows || '' !== (string) $wpdb->last_error ) {
-				return null;
-			}
-
-			$map = array();
-			foreach ( (array) $rows as $row ) {
-				if ( ! is_array( $row ) || ! isset( $row['setting_key'], $row['setting_value'] ) ) {
-					continue;
+			// Global fee settings are optional. Missing/broken rows leave fee_cfg null (no fee),
+			// but vendor MOQ below can still apply.
+			if ( null !== $rows && '' === (string) $wpdb->last_error ) {
+				$map = array();
+				foreach ( (array) $rows as $row ) {
+					if ( ! is_array( $row ) || ! isset( $row['setting_key'], $row['setting_value'] ) ) {
+						continue;
+					}
+					$map[ (string) $row['setting_key'] ] = (string) $row['setting_value'];
 				}
-				$map[ (string) $row['setting_key'] ] = (string) $row['setting_value'];
-			}
 
-			if ( ! isset( $map['cart_min_enabled'], $map['cart_min_subtotal_eur'], $map['cart_min_fee_eur'], $map['cart_min_message'] ) ) {
-				return null;
-			}
-
-			$enabled = ( '1' === $map['cart_min_enabled'] || 'true' === strtolower( $map['cart_min_enabled'] ) );
-			$min     = $this->parse_non_negative( $map['cart_min_subtotal_eur'] );
-			$fee     = $this->parse_non_negative( $map['cart_min_fee_eur'] );
-			if ( null === $min || null === $fee ) {
-				return null;
-			}
-
-			// Missing or blank label must not produce an unlabelled fee line — fall back.
-			$label = isset( $map['cart_min_fee_label'] ) ? trim( $map['cart_min_fee_label'] ) : '';
-			if ( '' === $label ) {
-				$label = self::DEFAULT_FEE_LABEL;
-			}
-
-			// An operator editing the wording must not be able to switch the feature off by
-			// dropping the placeholder, so fall back rather than disabling.
-			$message = trim( $map['cart_min_message'] );
-			if ( '' === $message || ! str_contains( $message, '{remaining}' ) ) {
-				$message = __( 'Add {remaining} more to your basket and the small-order fee disappears.', 'sillage-bridge' );
+				if ( isset( $map['cart_min_enabled'], $map['cart_min_subtotal_eur'], $map['cart_min_fee_eur'], $map['cart_min_message'] ) ) {
+					$enabled = ( '1' === $map['cart_min_enabled'] || 'true' === strtolower( $map['cart_min_enabled'] ) );
+					$min     = $this->parse_non_negative( $map['cart_min_subtotal_eur'] );
+					$fee     = $this->parse_non_negative( $map['cart_min_fee_eur'] );
+					if ( null !== $min && null !== $fee ) {
+						$label = isset( $map['cart_min_fee_label'] ) ? trim( $map['cart_min_fee_label'] ) : '';
+						if ( '' === $label ) {
+							$label = self::DEFAULT_FEE_LABEL;
+						}
+						$message = trim( $map['cart_min_message'] );
+						if ( '' === $message || ! str_contains( $message, '{remaining}' ) ) {
+							$message = __( 'Add {remaining} more to your basket and the small-order fee disappears.', 'sillage-bridge' );
+						}
+						$fee_cfg = array(
+							'enabled' => $enabled,
+							'min'     => $min,
+							'fee'     => $fee,
+							'label'   => $label,
+							'message' => $message,
+						);
+					}
+				}
 			}
 
 			$vendors_table = SILLAGE_DB . '.sil_vendors';
@@ -288,17 +325,23 @@ final class Sillage_Cart_Fee {
 			);
 			// phpcs:enable
 
-			// Per-vendor floors are an enhancement of the global rule. If they cannot be read,
-			// keep applying the global minimum instead of dropping the feature entirely.
-			$vendor_mins   = array();
-			$vendor_labels = array();
-			foreach ( (array) ( $vendor_rows ?? array() ) as $vrow ) {
+			if ( null === $vendor_rows || '' !== (string) $wpdb->last_error ) {
+				// Cannot read vendors at all — fail open for MOQ (same spirit as fee fail-open),
+				// but still return a usable shell so fee can apply if loaded.
+				return array(
+					'fee'           => $fee_cfg,
+					'vendor_mins'   => array(),
+					'vendor_labels' => array(),
+				);
+			}
+
+			foreach ( (array) $vendor_rows as $vrow ) {
 				if ( ! is_array( $vrow ) || ! isset( $vrow['slug'] ) ) {
 					continue;
 				}
 				$slug = strtolower( (string) $vrow['slug'] );
 
-				// Customers see the shop section label (LPS01 / LPS02), never a supplier name.
+				// Customers see the shop section label (LPS01 / LPS02 / LPS03), never a supplier name.
 				$label = isset( $vrow['storefront_label'] ) ? trim( (string) $vrow['storefront_label'] ) : '';
 				if ( '' !== $label ) {
 					$vendor_labels[ $slug ] = $label;
@@ -319,11 +362,7 @@ final class Sillage_Cart_Fee {
 			}
 
 			return array(
-				'enabled'       => $enabled,
-				'min'           => $min,
-				'fee'           => $fee,
-				'label'         => $label,
-				'message'       => $message,
+				'fee'           => $fee_cfg,
 				'vendor_mins'   => $vendor_mins,
 				'vendor_labels' => $vendor_labels,
 			);

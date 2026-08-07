@@ -7,21 +7,21 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | P0 | Missing product photos (`no_image` / placeholders) | **Done (stage 3):** cross-vendor EAN fill on full+fast sync; `hide_products_without_image` (default on) excludes unresolved placeholders. Overrides still via `image_overrides.json` / the python-analysis enricher. |
 | P0 | Theme compatibility (Astra / Blocksy / Elementor) | Bridge attachment filters (see `sillage-bridge`). |
 | P1 | Rename shop sections to **LPS01** (BTS) / **LPS02** (BeautyFort) | **Done (stage 3):** `sil_vendors.storefront_label`; root `product_cat` renamed in place. SKU prefix / slug formula unchanged. |
-| P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | **Done (connector):** slug `wholesale-perfumes`, sku `WPF`, LPS03, migration 013 (inactive). Confirm MOQ / countries / VAT / cart `code` before enable. See [`docs/vendors/vendors-and-image-sources.md`](vendors/vendors-and-image-sources.md). |
+| P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | **Done (sell path):** same WooCommerce cart → checkout → Sillage dispatch as BF/BTS; main shop includes WPF; differentiator = per-vendor MOQ (`order_config.min_order_value_eur`, hard block on cart). Cart `code` confirmed. Exact MOQ amount / countries / VAT still operator-confirmable guesses. See [`docs/vendors/vendors-and-image-sources.md`](vendors/vendors-and-image-sources.md). |
 | P1 | Brasty **Playwright image scrape** | Image source only (EAN → `image_overrides.json`). Tool: `tools/images/brasty/`. See `docs/specs/S3-images.md`. |
 | P2 | ~~Vendor **wholesale.brasty.com** (full catalogue + orders)~~ | **Dropped.** Brasty is photos-only; no catalogue/order connector. |
 | P2 | ~~Brasty shipping rules (26 kg/box, pallet >120 kg)~~ | **Dropped.** Kept as reference in [`vendors-and-image-sources.md`](vendors/vendors-and-image-sources.md); not wired. |
 | P2 | Tiered retail markup | **Done (stage 3):** `sil_settings.price_tiers` JSON; dashboard editor; empty `[]` keeps single multiplier. |
-| P2 | Cart minimum / small-order surcharge | **Done (stage 3):** Foodpanda-style fee under global / per-vendor minimum; dashboard knobs default off; bridge adds fee + “add X more” notice. |
-| P3 | B2B / higher-MOQ lane | **Partial:** page `/b2b-wholesale` + LPS03 `product_cat` exist; main shop excludes LPS03 products. Empty LPS03 is hidden from category widgets/menus until products exist. Full B2B UX (role/section) still TBD — do not activate `wholesale-perfumes` until MOQ/countries/VAT/cart `code` confirmed. |
+| P2 | Cart minimum / small-order surcharge | **Done:** global `cart_min_*` = optional Foodpanda-style fee; per-vendor `min_order_value_eur` = hard block + storefront-label shortfall on cart/checkout (independent of fee toggle). |
+| P3 | ~~B2B portal / higher-MOQ lane~~ | **Out of scope.** Operator: sell wholesaler products the same way as BF/BTS with MOQ only — no downloads/reorder/login portal. Optional `/b2b-wholesale/` filtered landing kept; main shop includes WPF. Never reintroduce LPS* as `product_cat`. |
 
 ## Staging / deploy notes (Aug 2026)
 
 | Fact | Value |
 |---|---|
 | Staging SSH | `ovhe` only — never deploy to production `ovh` without explicit approval |
-| B2B page | `https://<shop>/b2b-wholesale/` (`_sillage_b2b_shop` postmeta) |
-| LPS categories | LPS01 = BTS, LPS02 = BeautyFort, LPS03 = wholesale-perfumes (inactive → 0 products) |
+| Wholesaler landing (optional) | `https://<shop>/b2b-wholesale/` (`_sillage_b2b_shop` postmeta; WPF-only filter) |
+| Storefront labels | LPS01 = BTS, LPS02 = BeautyFort, LPS03 = wholesale-perfumes (`pa_vendor` / `storefront_label`; never `product_cat`) |
 | Image CDN | `sil_settings.image_cdn_base_url` / `LPS_MEDIA_BASE_URL` → `https://images.<domain>/…` via `lps-media` |
 | Unified deploy | `production-environment/compose.yaml` + `scripts/deploy-vps.sh` (build/push Hub tags, rsync plugin + overrides, remote `compose pull && up`) — see `docs/VPS-DEPLOY.md` |
 
@@ -37,5 +37,6 @@ python3 beautyfort-enriched/enrich.py --fetch-wholesale-perfumes --install-core
 ## Out of scope until scheduled
 
 Brasty catalogue/order connectors and shipping rules are dropped (image source only).
-Brasty Playwright bulk download remains P1 above. wholesale-perfumes is implemented but seeded
-inactive pending operator confirmation of MOQ, countries, VAT, and cart `code`.
+Brasty Playwright bulk download remains P1 above. wholesale-perfumes sells on the main shop
+with per-vendor MOQ; B2B portal extras stay out of scope. Exact MOQ euros / countries / VAT
+remain operator-confirmable.
