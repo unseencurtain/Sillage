@@ -9,6 +9,37 @@ Then read only the task below that you were asked to do.
 
 ---
 
+## 0. Naming and environments — do not assume
+
+Two things have already caused real mistakes. Both are settled; do not re-derive them.
+
+**There are exactly three vendors.** `bts`, `beautyfort`, and `wholesale-perfumes` (the B2B
+wholesaler at wholesale-perfumes.eu, legal entity SoleLuna). Everything else that produces pictures
+— **oceanfragrances** (a CSV), **Brasty**, the Shopify export, one vendor's photo filling another's
+product — is an *image source*: EAN → image URL, no stock, no prices, no orders. Do not add a fourth
+vendor row, connector, or SKU prefix for an image source. The full table is in `CONTEXT.md` §6 under
+"Vendors versus image sources"; read it before touching vendor code.
+
+"Ocean" means oceanfragrances, the image CSV, and nothing else. An earlier agent named the
+wholesaler `ocean`; that was wrong and was corrected in `568eb38`. Surviving `ocean` strings in the
+tree are deliberate image-source references — leave them.
+
+**Two VPS hosts exist and they are not interchangeable.**
+
+| SSH host | Hostname | Role | What you may do |
+|---|---|---|---|
+| `ovhe` | `ovh-experi` | Staging | Test freely: deploy, migrate, sync, restart |
+| `ovh` | `ovh` | **Production**, live shop | Read-only inspection. No deploy, no migrate, no restart, without explicit operator approval |
+
+Test on `ovhe` once local `bun test` / `bun run typecheck` are green. Regardless of host: never run
+`--source=live` against the wholesaler, and never dispatch a real vendor order — that spends real
+money and neither API has a sandbox.
+
+Applied-migration state, verified 7 Aug: local `007`, `ovhe` `008`, `ovh` `009`. Migrations `010`
+onward are unapplied everywhere, and `sil_vendors` holds only `beautyfort` and `bts`.
+
+---
+
 ## 1. Where things stand
 
 All Stage 3 work lives on branch `cursor/client-features-stage3` (commits below; tip may
@@ -23,6 +54,7 @@ advance — use `git log origin/cursor/client-features-stage3 --oneline`):
 | `725667f` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
 | `ca23d88` | This handoff spec (`docs/specs/S3-remaining-work.md`) |
 | `465c980` | Headless Brasty login (`BRASTY_EMAIL` / `BRASTY_PASSWORD` → `storageState.json`) |
+| `568eb38` | Renamed the wholesaler `ocean` → `wholesale-perfumes`, SKU prefix `OC` → `WPF` |
 
 The branch history is **linear**: it sits on top of `cursor/ocean-image-overrides`, which sits on top
 of `cursor/bf-image-pipeline-theme`, which sits on `main`. Merging `cursor/client-features-stage3`
