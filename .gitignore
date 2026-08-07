@@ -44,4 +44,5 @@ production-environment/python-analysis/beautyfort-enriched/products/
 production-environment/python-analysis/beautyfort-enriched/output/*.csv
 production-environment/python-analysis/beautyfort-enriched/output/image_overrides.json
 production-environment/python-analysis/beautyfort-enriched/__pycache__/
+production-environment/python-analysis/.env
 

@@ -1,13 +1,14 @@
 {
   "total_beautyfort_products": 9014,
   "products_with_barcode": 8991,
-  "products_with_image": 5090,
-  "products_no_image": 3901,
-  "image_match_rate": "56.5%",
-  "override_ean_keys": 6862,
+  "products_with_image": 5855,
+  "products_no_image": 3136,
+  "image_match_rate": "65.0%",
+  "override_ean_keys": 7931,
   "image_sources": {
     "overrides_precomputed": 5090,
-    "oceanfragrances_direct": 0,
+    "ocean_xml": 765,
+    "oceanfragrances_csv": 0,
     "shopify_direct": 0,
     "bts_cross_vendor": 0
   },

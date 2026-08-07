@@ -54,6 +54,8 @@ from enrich import (
     resolve_image_for_eans,
     expand_overrides_for_product,
 )
+from fetch_ocean import parse_ocean_catalog, collect_eans, pick_image
+import xml.etree.ElementTree as ET
 
 
 # ============================================================
@@ -170,6 +172,43 @@ eq(fan.get("111"), url, "fan-out maps hit EAN")
 eq(fan.get("333"), url, "fan-out maps sibling EAN without source hit")
 eq(fan.get("444"), url, "fan-out maps all product EANs")
 eq(len(fan), 3, "fan-out wrote three keys")
+
+# ============================================================
+print("\n--- Ocean XML multi-EAN parsing ---")
+# ============================================================
+
+fixture = os.path.join(ROOT, "fixtures", "ocean_catalog_sample.xml")
+ocean_map = parse_ocean_catalog(fixture)
+eq(
+    ocean_map.get("1231231231234"),
+    "https://images.elsvc.net/xml/HQlgckCAqXUZdlXzHgtlzQ.jpg",
+    "primary EAN maps to flask_front",
+)
+eq(
+    ocean_map.get("4564564564567"),
+    "https://images.elsvc.net/xml/HQlgckCAqXUZdlXzHgtlzQ.jpg",
+    "sibling all_eans EAN maps to same image",
+)
+eq(
+    ocean_map.get("7897897897891"),
+    "https://images.elsvc.net/xml/HQlgckCAqXUZdlXzHgtlzQ.jpg",
+    "third all_eans EAN maps to same image",
+)
+eq("9999999999999" in ocean_map, False, "placeholder flask_front skipped")
+eq(
+    ocean_map.get("1111111111111"),
+    "https://images.elsvc.net/xml/fallback-only.jpg",
+    "fallback picture used when no flask_front",
+)
+
+tree = ET.parse(fixture)
+products = [el for el in tree.getroot() if el.tag.endswith("product") or el.tag == "product"]
+eq(len(collect_eans(products[0])), 3, "collect_eans returns three unique EANs")
+eq(
+    pick_image(products[0]).endswith("HgtlzQ.jpg") or "HQlgck" in pick_image(products[0]),
+    True,
+    "pick_image prefers flask_front",
+)
 
 # ============================================================
 print("\n--- CSV output file validation ---")

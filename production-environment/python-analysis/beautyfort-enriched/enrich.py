@@ -2,13 +2,14 @@
 """
 Cross-vendor BeautyFort image enrichment.
 
-Matches every barcode on a BeautyFort product against OceanFragrances, Shopify, and BTS
-image indexes. When any EAN hits, all EANs on that product map to the same URL so Bun's
-`data/image_overrides.json` lookup works regardless of which EAN is primary on the offer.
+Matches every barcode on a BeautyFort product against Ocean XML, OceanFragrances CSV,
+Shopify, and BTS image indexes. When any EAN hits, all EANs on that product map to the
+same URL so Bun's `data/image_overrides.json` lookup works regardless of which EAN is
+primary on the offer.
 
 Usage:
   python3 enrich.py
-  python3 enrich.py --install-core   # also write ../../sillage-core/data/image_overrides.json
+  python3 enrich.py --fetch-ocean --install-core
 """
 from __future__ import annotations
 
@@ -18,7 +19,6 @@ import json
 import os
 import shutil
 import sys
-
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PRODUCTS = os.path.join(ROOT, "products")
 OVERRIDES_SEED = os.path.join(ROOT, "data", "image_overrides.json")
@@ -119,7 +119,8 @@ def load_seed_overrides(path):
     return out
 
 
-def load_ocean_index(path):
+def load_ocean_csv_index(path):
+    """Legacy semicolon CSV (oceanfragrances.csv)."""
     index = {}
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter=";")
@@ -134,6 +135,15 @@ def load_ocean_index(path):
                     index[ean] = image
     return index
 
+
+# Back-compat alias used by older tests / callers
+load_ocean_index = load_ocean_csv_index
+
+
+def load_ocean_xml_index(path):
+    from fetch_ocean import parse_ocean_catalog
+
+    return parse_ocean_catalog(path)
 
 def load_shopify_index(path):
     index = {}
@@ -178,44 +188,60 @@ def load_bts_index(path):
     return index
 
 
-def run(install_core=False):
+def run(install_core=False, fetch_ocean=False, force_ocean=False):
     os.makedirs(OUTPUT, exist_ok=True)
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
 
     bf_path = os.path.join(PRODUCTS, "beautyfort.json")
-    ocean_path = os.path.join(PRODUCTS, "oceanfragrances.csv")
+    ocean_csv_path = os.path.join(PRODUCTS, "oceanfragrances.csv")
+    ocean_xml_path = os.path.join(PRODUCTS, "ocean_catalog.xml")
     shopify_path = os.path.join(PRODUCTS, "products_export_1.csv")
     bts_path = os.path.join(PRODUCTS, "bts_wholeseller.json")
 
-    for required in (bf_path, ocean_path, shopify_path, bts_path):
+    for required in (bf_path, ocean_csv_path, shopify_path, bts_path):
         if not os.path.isfile(required):
             print(f"missing input: {required}", file=sys.stderr)
             sys.exit(1)
 
-    print("[1/5] Loading BeautyFort products...")
+    if fetch_ocean:
+        from fetch_ocean import fetch_and_index
+
+        print("[0/6] Fetching Ocean catalog XML...")
+        fetch_and_index(force=force_ocean)
+
+    print("[1/6] Loading BeautyFort products...")
     with open(bf_path, encoding="utf-8") as f:
         beautyfort = json.load(f)
     print(f"  {len(beautyfort)} products")
 
-    print("[2/5] Loading seed image overrides...")
+    print("[2/6] Loading seed image overrides...")
     overrides = load_seed_overrides(OVERRIDES_SEED)
     print(f"  {len(overrides)} EAN -> image mappings")
 
-    print("[3/5] Building oceanfragrances EAN index...")
-    ocean_ean_to_image = load_ocean_index(ocean_path)
-    print(f"  {len(ocean_ean_to_image)} unique EANs")
+    print("[3/6] Building Ocean wholesale-perfumes XML index...")
+    ocean_xml_ean_to_image = {}
+    if os.path.isfile(ocean_xml_path):
+        ocean_xml_ean_to_image = load_ocean_xml_index(ocean_xml_path)
+        print(f"  {len(ocean_xml_ean_to_image)} unique EANs from XML")
+    else:
+        print("  (no products/ocean_catalog.xml — skip; run with --fetch-ocean)")
 
-    print("[4/5] Building shopify EAN index...")
+    print("[4/6] Building oceanfragrances CSV EAN index...")
+    ocean_csv_ean_to_image = load_ocean_csv_index(ocean_csv_path)
+    print(f"  {len(ocean_csv_ean_to_image)} unique EANs")
+
+    print("[5/6] Building shopify EAN index...")
     shopify_ean_to_image = load_shopify_index(shopify_path)
     print(f"  {len(shopify_ean_to_image)} unique EANs")
 
-    print("[5/5] Building BTS EAN index...")
+    print("[6/6] Building BTS EAN index...")
     bts_ean_to_image = load_bts_index(bts_path)
     print(f"  {len(bts_ean_to_image)} unique EANs")
 
     sources = [
         ("overrides", overrides),
-        ("oceanfragrances", ocean_ean_to_image),
+        ("ocean_xml", ocean_xml_ean_to_image),
+        ("oceanfragrances", ocean_csv_ean_to_image),
         ("shopify", shopify_ean_to_image),
         ("bts", bts_ean_to_image),
     ]
@@ -226,6 +252,7 @@ def run(install_core=False):
         "total": len(beautyfort),
         "has_barcode": 0,
         "image_from_overrides": 0,
+        "image_from_ocean_xml": 0,
         "image_from_oceanfragrances": 0,
         "image_from_shopify": 0,
         "image_from_bts": 0,
@@ -261,6 +288,8 @@ def run(install_core=False):
 
             if image_source == "overrides":
                 stats["image_from_overrides"] += 1
+            elif image_source == "ocean_xml":
+                stats["image_from_ocean_xml"] += 1
             elif image_source == "oceanfragrances":
                 stats["image_from_oceanfragrances"] += 1
             elif image_source == "shopify":
@@ -340,7 +369,8 @@ def run(install_core=False):
         "override_ean_keys": stats["override_ean_keys"],
         "image_sources": {
             "overrides_precomputed": stats["image_from_overrides"],
-            "oceanfragrances_direct": stats["image_from_oceanfragrances"],
+            "ocean_xml": stats["image_from_ocean_xml"],
+            "oceanfragrances_csv": stats["image_from_oceanfragrances"],
             "shopify_direct": stats["image_from_shopify"],
             "bts_cross_vendor": stats["image_from_bts"],
         },
@@ -368,7 +398,8 @@ def run(install_core=False):
     print()
     print("  Image sources:")
     print(f"    overrides (seed / prior):      {stats['image_from_overrides']}")
-    print(f"    oceanfragrances (direct):      {stats['image_from_oceanfragrances']}")
+    print(f"    ocean XML (wholesale-perfumes): {stats['image_from_ocean_xml']}")
+    print(f"    oceanfragrances CSV:           {stats['image_from_oceanfragrances']}")
     print(f"    shopify (direct):              {stats['image_from_shopify']}")
     print(f"    bts (cross-vendor):            {stats['image_from_bts']}")
     print()
@@ -390,9 +421,22 @@ def main(argv=None):
         action="store_true",
         help="Copy output/image_overrides.json into sillage-core/data/",
     )
+    parser.add_argument(
+        "--fetch-ocean",
+        action="store_true",
+        help="Download wholesale-perfumes.eu catalog XML before enriching",
+    )
+    parser.add_argument(
+        "--force-ocean",
+        action="store_true",
+        help="Re-download Ocean catalog even if cache is fresh",
+    )
     args = parser.parse_args(argv)
-    run(install_core=args.install_core)
-
+    run(
+        install_core=args.install_core,
+        fetch_ocean=args.fetch_ocean,
+        force_ocean=args.force_ocean,
+    )
 
 if __name__ == "__main__":
     main()
