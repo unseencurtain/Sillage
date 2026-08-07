@@ -46,3 +46,26 @@ production-environment/python-analysis/beautyfort-enriched/output/image_override
 production-environment/python-analysis/beautyfort-enriched/__pycache__/
 production-environment/python-analysis/.env
 
+# Brasty Playwright image tool — session, secrets, downloads, findings (never commit images)
+tools/brasty-images/node_modules/
+tools/brasty-images/dist/
+tools/brasty-images/.env
+tools/brasty-images/storageState.json
+tools/brasty-images/output/
+tools/brasty-images/watermarked/
+tools/brasty-images/findings/*
+!tools/brasty-images/findings/.gitkeep
+tools/brasty-images/logs/*
+!tools/brasty-images/logs/.gitkeep
+tools/brasty-images/*.jpg
+tools/brasty-images/*.jpeg
+tools/brasty-images/*.png
+tools/brasty-images/*.webp
+tools/brasty-images/*.csv
+
+# Timestamped backups build-overrides.ts writes next to the tracked overrides file
+production-environment/sillage-core/data/image_overrides.json.bak-*
+
+# Scratch DB left behind by the standalone BTS reference client
+/data/
+
