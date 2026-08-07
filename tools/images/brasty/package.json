@@ -12,6 +12,7 @@
     "login": "tsx src/login.ts",
     "investigate": "tsx src/investigate.ts",
     "download": "tsx src/download-images.ts",
+    "crawl-catalog": "tsx src/crawl-catalog.ts",
     "watermark": "tsx src/watermark.ts",
     "build-overrides": "tsx src/build-overrides.ts"
   },

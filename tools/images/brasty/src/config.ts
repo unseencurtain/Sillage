@@ -87,6 +87,17 @@ export interface AppConfig {
   brastyEmail: string;
   /** Wholesale account password — from BRASTY_PASSWORD only. Never logged. */
   brastyPassword: string;
+  /**
+   * Full-catalog crawl stock filter: in_stock | out_of_stock | all
+   * (all = IN STOCK first, then OUT OF STOCK).
+   */
+  catalogStockFilter: string;
+  /** 1-based page to start from (overrides checkpoint when > 1). */
+  catalogStartPage: number;
+  /** Cap pages for a trial run; 0 = no cap. */
+  catalogMaxPages: number;
+  /** Resume checkpoint for paginated catalog crawl. */
+  catalogCheckpointPath: string;
 }
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -130,6 +141,12 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     brastyBaseUrl: envString("BRASTY_BASE_URL", "https://wholesale.brasty.com/"),
     brastyEmail: envString("BRASTY_EMAIL", ""),
     brastyPassword: envString("BRASTY_PASSWORD", ""),
+    catalogStockFilter: envString("CATALOG_STOCK_FILTER", "in_stock"),
+    catalogStartPage: Math.max(1, envInt("CATALOG_START_PAGE", 1)),
+    catalogMaxPages: envInt("CATALOG_MAX_PAGES", 0),
+    catalogCheckpointPath: resolvePath(
+      envString("CATALOG_CHECKPOINT_PATH", "./logs/catalog-checkpoint.json"),
+    ),
     ...overrides,
   };
 

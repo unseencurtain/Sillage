@@ -98,16 +98,17 @@ export async function hoverProductImage(
     imageResponse,
     page
       .waitForFunction(
-        () => {
+        // String form avoids tsx/esbuild injecting __name into the browser bundle.
+        `(() => {
           const imgs = Array.from(document.querySelectorAll("img"));
           return imgs.some((img) => {
             const src = img.currentSrc || img.src || "";
-            if (/\/images\/w60\//i.test(src) || /no-image/i.test(src)) return false;
+            if (/\\/images\\/w60\\//i.test(src) || /no-image/i.test(src)) return false;
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
             return w >= 300 && h >= 300 && img.offsetParent !== null;
           });
-        },
+        })()`,
         undefined,
         { timeout: 10_000 },
       )
