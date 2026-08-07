@@ -2,12 +2,21 @@
  * Authenticated dashboard API. The single source of truth for configuration and ops actions.
  */
 import { Hono } from "hono";
-import { sil, wp } from "../../config/env.ts";
+import { env, sil, wp } from "../../config/env.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendors, setSetting } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
-import { destinationAddress, readWooOrder, updateWooShippingAddress } from "../../orders/ingest.ts";
+import {
+  loadCompanyBilling,
+  parseCompanyBilling,
+  parseOrderAddress,
+  resolveBillingAddress,
+  resolveDeliveryAddress,
+  saveCompanyBilling,
+} from "../../orders/addresses.ts";
+import { destinationAddress, readWooOrder } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
+import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
 import type { OrderAddress } from "../../orders/types.ts";
@@ -214,43 +223,103 @@ api.get("/orders/:id", async (c) => {
     query<RowDataPacket>(`SELECT * FROM ${sil("sil_vendor_order_tracking")} WHERE vendor_order_id = ?`, [id]),
   ]);
   const woo = await readWooOrder(Number(order.wc_order_id));
-  const address = woo ? destinationAddress(woo) : null;
-  return c.json({ order, address, items, events, tracking });
+  const wooAddress = woo ? destinationAddress(woo) : null;
+  const deliveryAddress = resolveDeliveryAddress(
+    order.delivery_address_json,
+    wooAddress,
+    String(order.destination_country ?? ""),
+  );
+  const billingAddress = await resolveBillingAddress(
+    order.billing_address_json,
+    String(order.vendor),
+  );
+  const companyBilling = await loadCompanyBilling(String(order.vendor));
+  const wpAdminUrl = `${env.wordpress.baseUrl}/wp-admin/admin.php?page=wc-orders&action=edit&id=${order.wc_order_id}`;
+  return c.json({
+    order,
+    // Backward-compatible alias for the editable delivery address.
+    address: deliveryAddress,
+    wooAddress,
+    deliveryAddress,
+    billingAddress,
+    companyBilling,
+    wpAdminUrl,
+    items,
+    events,
+    tracking,
+  });
 });
 
 api.put("/orders/:id/address", async (c) => {
   const id = Number(c.req.param("id"));
-  const [order] = await query<RowDataPacket & { status: string; wc_order_id: number }>(
-    `SELECT id, status, wc_order_id FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
+  const [order] = await query<
+    RowDataPacket & { status: string; wc_order_id: number; dry_run: number; vendor: string }
+  >(
+    `SELECT v.id, v.status, v.wc_order_id, v.dry_run, ven.slug AS vendor
+       FROM ${sil("sil_vendor_orders")} v
+       JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
+      WHERE v.id = ?`,
     [id],
   );
   if (!order) return c.json({ ok: false, error: "not found" }, 404);
 
   const editable = new Set(["received", "approved", "needs_attention", "submitted"]);
-  // Allow editing ship-to on dry-run submitted rows so ops can fix the address before live.
   if (!editable.has(order.status)) {
     return c.json({ ok: false, error: `cannot edit address in status ${order.status}` }, 409);
   }
-  if (order.status === "submitted") {
-    const [row] = await query<RowDataPacket & { dry_run: number }>(
-      `SELECT dry_run FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
-      [id],
-    );
-    if (row && Number(row.dry_run) === 0) {
-      return c.json({ ok: false, error: "cannot edit address after a live submit" }, 409);
+  if (order.status === "submitted" && Number(order.dry_run) === 0) {
+    return c.json({ ok: false, error: "cannot edit address after a live submit" }, 409);
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    address?: OrderAddress;
+    delivery?: OrderAddress;
+    billing?: OrderAddress & { vat?: string };
+    resetDeliveryFromWoo?: boolean;
+    useCompanyBilling?: boolean;
+  };
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (body.resetDeliveryFromWoo) {
+    const woo = await readWooOrder(Number(order.wc_order_id));
+    if (!woo) return c.json({ ok: false, error: "WooCommerce order not found" }, 404);
+    const snap = destinationAddress(woo);
+    sets.push("delivery_address_json = ?", "destination_country = ?");
+    params.push(JSON.stringify(snap), snap.country.toUpperCase());
+  } else {
+    const deliveryRaw = body.delivery ?? body.address;
+    if (deliveryRaw) {
+      const delivery = parseOrderAddress(deliveryRaw);
+      if (!delivery) {
+        return c.json({ ok: false, error: "delivery.address1 and delivery.country are required" }, 400);
+      }
+      sets.push("delivery_address_json = ?", "destination_country = ?");
+      params.push(JSON.stringify(delivery), delivery.country.toUpperCase());
     }
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as { address?: OrderAddress };
-  if (!body.address?.address1 || !body.address?.country) {
-    return c.json({ ok: false, error: "address.address1 and address.country are required" }, 400);
+  if (body.useCompanyBilling) {
+    const company = await loadCompanyBilling(order.vendor);
+    sets.push("billing_address_json = ?");
+    params.push(JSON.stringify(company));
+  } else if (body.billing) {
+    const billing = parseCompanyBilling(body.billing);
+    if (!billing.address1 || !billing.country) {
+      return c.json({ ok: false, error: "billing.address1 and billing.country are required" }, 400);
+    }
+    sets.push("billing_address_json = ?");
+    params.push(JSON.stringify(billing));
   }
 
-  await updateWooShippingAddress(Number(order.wc_order_id), body.address);
-  await execute(
-    `UPDATE ${sil("sil_vendor_orders")} SET destination_country = ?, updated_at = NOW() WHERE id = ?`,
-    [body.address.country.toUpperCase(), id],
-  );
+  if (sets.length === 0) {
+    return c.json({ ok: false, error: "nothing to update" }, 400);
+  }
+
+  sets.push("updated_at = NOW()");
+  params.push(id);
+  await execute(`UPDATE ${sil("sil_vendor_orders")} SET ${sets.join(", ")} WHERE id = ?`, params);
   await execute(
     `INSERT INTO ${sil("sil_order_events")} (vendor_order_id, from_status, to_status, message, context)
      VALUES (?, ?, ?, ?, ?)`,
@@ -258,11 +327,93 @@ api.put("/orders/:id/address", async (c) => {
       id,
       order.status,
       order.status,
-      "ship-to address updated from dashboard",
-      JSON.stringify({ country: body.address.country }),
+      body.resetDeliveryFromWoo
+        ? "delivery reset from WooCommerce"
+        : body.useCompanyBilling
+          ? "billing set from saved company profile"
+          : "delivery/billing address updated from dashboard",
+      JSON.stringify({
+        resetDeliveryFromWoo: Boolean(body.resetDeliveryFromWoo),
+        useCompanyBilling: Boolean(body.useCompanyBilling),
+        hasDelivery: Boolean(body.delivery ?? body.address),
+        hasBilling: Boolean(body.billing),
+      }),
     ],
   );
   return c.json({ ok: true });
+});
+
+const OPERATIONAL_STAGES = [
+  "received",
+  "approved",
+  "submitted",
+  "confirmed",
+  "dispatched",
+  "delivered",
+] as const;
+
+api.post("/orders/:id/status", async (c) => {
+  const id = Number(c.req.param("id"));
+  const [order] = await query<RowDataPacket & { status: string; dry_run: number; wc_order_id: number }>(
+    `SELECT id, status, dry_run, wc_order_id FROM ${sil("sil_vendor_orders")} WHERE id = ?`,
+    [id],
+  );
+  if (!order) return c.json({ ok: false, error: "not found" }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as { status?: string; confirm?: boolean };
+  const next = body.status;
+  if (!next || !(OPERATIONAL_STAGES as readonly string[]).includes(next)) {
+    return c.json(
+      { ok: false, error: `status must be one of: ${OPERATIONAL_STAGES.join(", ")}` },
+      400,
+    );
+  }
+
+  // Same edit window as address: pre-live or dry-run submitted. After live submit require confirm.
+  const lockedAfterLive =
+    Number(order.dry_run) === 0 &&
+    ["submitted", "confirmed", "dispatched", "delivered"].includes(order.status);
+  if (lockedAfterLive && !body.confirm) {
+    return c.json(
+      {
+        ok: false,
+        error: "confirm required to change status after a live submit",
+        needsConfirm: true,
+      },
+      409,
+    );
+  }
+
+  const from = order.status;
+  await execute(
+    `UPDATE ${sil("sil_vendor_orders")}
+        SET status = ?,
+            approved_at   = IF(? = 'approved'   AND approved_at   IS NULL, NOW(), approved_at),
+            submitted_at  = IF(? = 'submitted'  AND submitted_at  IS NULL, NOW(), submitted_at),
+            dispatched_at = IF(? = 'dispatched' AND dispatched_at IS NULL, NOW(), dispatched_at),
+            delivered_at  = IF(? = 'delivered'  AND delivered_at  IS NULL, NOW(), delivered_at),
+            updated_at = NOW()
+      WHERE id = ?`,
+    [next, next, next, next, next, id],
+  );
+  await execute(
+    `INSERT INTO ${sil("sil_order_events")} (vendor_order_id, from_status, to_status, message, context)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      id,
+      from,
+      next,
+      "manual status override",
+      JSON.stringify({ confirm: Boolean(body.confirm) }),
+    ],
+  );
+
+  if (next === "delivered" || from === "delivered") {
+    const settings = await loadSettings();
+    await maybeCompleteWooOrder(Number(order.wc_order_id), settings.ordersNotifyCustomer);
+  }
+
+  return c.json({ ok: true, status: next });
 });
 
 api.post("/orders/:id/approve", async (c) => {
@@ -283,6 +434,10 @@ api.post("/orders/:id/dispatch", async (c) => {
 
 api.get("/settings", async (c) => {
   const s = await loadSettings();
+  const [bfBilling, btsBilling] = await Promise.all([
+    loadCompanyBilling("beautyfort"),
+    loadCompanyBilling("bts"),
+  ]);
   return c.json({
     sync_enabled: s.syncEnabled ? "1" : "0",
     fast_sync_minutes: String(s.fastSyncMinutes),
@@ -302,6 +457,8 @@ api.get("/settings", async (c) => {
     live_feed_min_minutes: String(s.liveFeedMinMinutes),
     beautyfort_live_max_per_day: String(s.beautyfortLiveMaxPerDay),
     bts_live_max_per_day: String(s.btsLiveMaxPerDay),
+    company_billing_beautyfort: JSON.stringify(bfBilling),
+    company_billing_bts: JSON.stringify(btsBilling),
   });
 });
 
@@ -326,6 +483,8 @@ api.put("/settings", async (c) => {
     "live_feed_min_minutes",
     "beautyfort_live_max_per_day",
     "bts_live_max_per_day",
+    "company_billing_beautyfort",
+    "company_billing_bts",
   ]);
   // Settings that change what we write to WooCommerce. Hashes only see vendor feed data, so a
   // multiplier edit would otherwise look like "nothing changed" forever.
@@ -337,6 +496,17 @@ api.put("/settings", async (c) => {
   let touchContent = false;
   for (const [key, value] of Object.entries(body)) {
     if (!allowed.has(key) || typeof value !== "string") continue;
+    if (key === "company_billing_beautyfort" || key === "company_billing_bts") {
+      try {
+        const parsed = parseCompanyBilling(JSON.parse(value));
+        const slug = key === "company_billing_bts" ? "bts" : "beautyfort";
+        await saveCompanyBilling(slug, parsed);
+      } catch {
+        continue;
+      }
+      n++;
+      continue;
+    }
     await setSetting(key, value);
     n++;
     if (priceKeys.has(key)) touchPrice = true;

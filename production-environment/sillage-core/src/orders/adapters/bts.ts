@@ -130,7 +130,39 @@ export class BtsOrderAdapter implements VendorOrderAdapter {
       state_code: addr.state || undefined,
     };
 
-    const requestPayload = { ourReference: order.ourReference, params, quote: chosen, itemsCost };
+    // BTS ship-to only — account invoice is whatever is on the BTS portal. Surface company
+    // billing in the recorded payload so ops can verify the tax invoice separately.
+    const requestPayload = {
+      ourReference: order.ourReference,
+      params,
+      quote: chosen,
+      itemsCost,
+      delivery: {
+        client_name: params.client_name,
+        address: params.address,
+        postal_code: params.postal_code,
+        city: params.city,
+        country_code: params.country_code,
+        telephone: params.telephone,
+        state_code: params.state_code,
+      },
+      companyBillingNote:
+        "BTS API has no separate invoice address; account billing is configured in the BTS portal.",
+      companyBilling: order.billing
+        ? {
+            company: order.billing.address.company,
+            vat: order.billing.vat,
+            name: `${order.billing.address.firstName} ${order.billing.address.lastName}`.trim(),
+            address1: order.billing.address.address1,
+            address2: order.billing.address.address2,
+            city: order.billing.address.city,
+            postcode: order.billing.address.postcode,
+            country: order.billing.country,
+            email: order.billing.address.email,
+            phone: order.billing.address.phone,
+          }
+        : null,
+    };
 
     if (dryRun) {
       return {

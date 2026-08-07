@@ -148,47 +148,6 @@ export function destinationAddress(order: WooOrder): OrderAddress {
   return order.shipping.address1 !== "" && order.shipping.country !== "" ? order.shipping : order.billing;
 }
 
-/** Upsert the HPOS shipping address used at dispatch time. */
-export async function updateWooShippingAddress(orderId: number, address: OrderAddress): Promise<void> {
-  const existing = await query<AddressRow>(
-    `SELECT * FROM ${wp("wc_order_addresses")} WHERE order_id = ? AND address_type = 'shipping'`,
-    [orderId],
-  );
-
-  const fields = [
-    address.firstName,
-    address.lastName,
-    address.company,
-    address.address1,
-    address.address2,
-    address.city,
-    address.state,
-    address.postcode,
-    address.country.toUpperCase(),
-    address.email,
-    address.phone,
-  ];
-
-  if (existing.length > 0) {
-    await execute(
-      `UPDATE ${wp("wc_order_addresses")}
-          SET first_name=?, last_name=?, company=?, address_1=?, address_2=?,
-              city=?, state=?, postcode=?, country=?, email=?, phone=?
-        WHERE order_id = ? AND address_type = 'shipping'`,
-      [...fields, orderId],
-    );
-    return;
-  }
-
-  await execute(
-    `INSERT INTO ${wp("wc_order_addresses")}
-       (order_id, address_type, first_name, last_name, company, address_1, address_2,
-        city, state, postcode, country, email, phone)
-     VALUES (?, 'shipping', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [orderId, ...fields],
-  );
-}
-
 interface OfferRow extends RowDataPacket {
   wp_post_id: number;
   offer_id: number;
@@ -334,8 +293,8 @@ export async function ingestOrder(orderId: number): Promise<IngestResult> {
       const [insert] = await conn.execute<ResultSetHeader>(
         `INSERT IGNORE INTO ${sil("sil_vendor_orders")}
            (wc_order_id, wc_order_number, vendor_id, status, our_reference, currency,
-            destination_country, items_cost, revenue)
-         VALUES (?, ?, ?, 'received', ?, ?, ?, ?, ?)`,
+            destination_country, delivery_address_json, items_cost, revenue)
+         VALUES (?, ?, ?, 'received', ?, ?, ?, ?, ?, ?)`,
         [
           order.id,
           String(order.id),
@@ -343,6 +302,7 @@ export async function ingestOrder(orderId: number): Promise<IngestResult> {
           reference,
           order.currency,
           destination.country,
+          JSON.stringify(destination),
           itemsCost.toFixed(2),
           revenue.toFixed(2),
         ],

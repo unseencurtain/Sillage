@@ -69,10 +69,24 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  updateOrderAddress: (id: number, address: OrderAddress) =>
+  updateOrderAddress: (
+    id: number,
+    body: {
+      address?: OrderAddress;
+      delivery?: OrderAddress;
+      billing?: CompanyBillingAddress;
+      resetDeliveryFromWoo?: boolean;
+      useCompanyBilling?: boolean;
+    },
+  ) =>
     request<{ ok: boolean }>(`/api/orders/${id}/address`, {
       method: "PUT",
-      body: JSON.stringify({ address }),
+      body: JSON.stringify(body),
+    }),
+  updateOrderStatus: (id: number, status: string, confirm?: boolean) =>
+    request<{ ok: boolean; status: string; needsConfirm?: boolean }>(`/api/orders/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status, confirm }),
     }),
   logs: (level?: string) =>
     request<{ events: LogEvent[] }>(`/api/logs${level ? `?level=${level}` : ""}`),
@@ -162,6 +176,10 @@ export interface OrderAddress {
   phone: string;
 }
 
+export interface CompanyBillingAddress extends OrderAddress {
+  vat: string;
+}
+
 export interface OrderLineItem {
   id: number;
   sku: string;
@@ -190,6 +208,11 @@ export interface OrderTracking {
 export interface OrderDetail {
   order: VendorOrder & Record<string, unknown>;
   address?: OrderAddress;
+  wooAddress?: OrderAddress | null;
+  deliveryAddress?: OrderAddress;
+  billingAddress?: CompanyBillingAddress;
+  companyBilling?: CompanyBillingAddress;
+  wpAdminUrl?: string;
   items: OrderLineItem[];
   events: OrderEvent[];
   tracking: OrderTracking[];
@@ -207,6 +230,11 @@ export const emptyAddress = (): OrderAddress => ({
   country: "",
   email: "",
   phone: "",
+});
+
+export const emptyCompanyBilling = (): CompanyBillingAddress => ({
+  ...emptyAddress(),
+  vat: "",
 });
 
 export interface LogEvent {

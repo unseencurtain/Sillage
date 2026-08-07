@@ -12,6 +12,7 @@ import { loadSettings, loadVendor, recordEvent, type GlobalSettings } from "../d
 import { logger } from "../lib/log.ts";
 import type { VendorOrderAdapter, VendorOrderResult } from "./adapter.ts";
 import { createOrderAdapter } from "./adapters/index.ts";
+import { resolveBillingAddress, resolveDeliveryAddress } from "./addresses.ts";
 import { readWooOrder, destinationAddress } from "./ingest.ts";
 import {
   checkCoverage,
@@ -44,6 +45,8 @@ interface VendorOrderRow extends RowDataPacket {
   vendor_order_number: string | null;
   currency: string;
   destination_country: string;
+  delivery_address_json: string | Record<string, unknown> | null;
+  billing_address_json: string | Record<string, unknown> | null;
   items_cost: string;
   shipping_cost: string | null;
   total_cost: string | null;
@@ -251,7 +254,12 @@ export async function dispatchVendorOrder(
     return { id, status: "failed", dryRun, vendorOrderNumber: null, reason: "wc order missing" };
   }
 
-  const dest = destinationAddress(woo);
+  const dest = resolveDeliveryAddress(
+    row.delivery_address_json,
+    destinationAddress(woo),
+    row.destination_country,
+  );
+  const billingAddr = await resolveBillingAddress(row.billing_address_json, vendor.slug);
   const coverage = checkCoverage(dest.country || row.destination_country, vendor.serviceableCountries);
   if (!coverage.ok) {
     await transition(id, "approved", "failed", coverage.reason, {
@@ -275,6 +283,11 @@ export async function dispatchVendorOrder(
       ourReference: row.our_reference,
       wcOrderId: row.wc_order_id,
       destination: { address: dest, country: dest.country || row.destination_country },
+      billing: {
+        address: billingAddr,
+        country: billingAddr.country || dest.country || row.destination_country,
+        vat: billingAddr.vat || undefined,
+      },
       items: items.map((i) => ({
         sku: i.sku,
         vendorProductId: i.vendor_product_id,

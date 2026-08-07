@@ -194,12 +194,14 @@ export async function pollVendorOrder(id: number): Promise<{
   return { id, status: next ?? row.status, parcels: fresh.length, pushed };
 }
 
-async function maybeCompleteWooOrder(wcOrderId: number, notify: boolean): Promise<void> {
+/** Complete the WC order only when every live vendor row is delivered or cancelled. */
+export async function maybeCompleteWooOrder(wcOrderId: number, notify: boolean): Promise<void> {
+  // WC completed = goods in customer hands. Keep processing through dispatched.
   const rows = await query<RowDataPacket & { pending: number }>(
     `SELECT COUNT(*) AS pending FROM ${sil("sil_vendor_orders")}
       WHERE wc_order_id = ?
         AND dry_run = 0
-        AND status NOT IN ('dispatched','delivered','cancelled')`,
+        AND status NOT IN ('delivered','cancelled')`,
     [wcOrderId],
   );
   if (Number(rows[0]?.pending ?? 1) > 0) return;
@@ -208,7 +210,7 @@ async function maybeCompleteWooOrder(wcOrderId: number, notify: boolean): Promis
     order_id: wcOrderId,
     status: "completed",
     notify_customer: notify,
-    note: "Sillage: all vendor shipments dispatched.",
+    note: "Sillage: all vendor shipments delivered.",
   });
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, emptyCompanyBilling, type CompanyBillingAddress } from "@/lib/api";
 import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
+import { cn } from "@/lib/utils";
 
 const NUMERIC_KEYS = new Set([
   "fast_sync_minutes",
@@ -73,8 +74,32 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
   },
 ];
 
+const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; wide?: boolean }> = [
+  { key: "company", label: "Company", wide: true },
+  { key: "vat", label: "VAT / BTW", wide: true },
+  { key: "firstName", label: "First name" },
+  { key: "lastName", label: "Last name" },
+  { key: "address1", label: "Address line 1", wide: true },
+  { key: "address2", label: "Address line 2", wide: true },
+  { key: "city", label: "City" },
+  { key: "state", label: "State / region" },
+  { key: "postcode", label: "Postcode" },
+  { key: "country", label: "Country (ISO)" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+];
+
 function isTruthy(v: string | undefined) {
   return v === "1" || v === "true";
+}
+
+function parseBilling(raw: string | undefined): CompanyBillingAddress {
+  if (!raw) return emptyCompanyBilling();
+  try {
+    return { ...emptyCompanyBilling(), ...JSON.parse(raw) };
+  } catch {
+    return emptyCompanyBilling();
+  }
 }
 
 export function Settings() {
@@ -82,13 +107,23 @@ export function Settings() {
   const { toast } = useToast();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [form, setForm] = useState<Record<string, string>>({});
+  const [bfBilling, setBfBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
+  const [btsBilling, setBtsBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
 
   useEffect(() => {
-    if (data) setForm(data);
+    if (!data) return;
+    setForm(data);
+    setBfBilling(parseBilling(data.company_billing_beautyfort));
+    setBtsBilling(parseBilling(data.company_billing_bts));
   }, [data]);
 
   const save = useMutation({
-    mutationFn: () => api.saveSettings(form),
+    mutationFn: () =>
+      api.saveSettings({
+        ...form,
+        company_billing_beautyfort: JSON.stringify(bfBilling),
+        company_billing_bts: JSON.stringify(btsBilling),
+      }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["settings"] });
       toast("Settings saved", "ok");
@@ -143,6 +178,56 @@ export function Settings() {
             </label>
           ),
         )}
+      </div>
+
+      <section className="space-y-4 rounded-xl border border-line bg-panel p-5 shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Company billing profiles</h2>
+          <p className="text-sm text-muted">
+            Used as the vendor invoice address (BeautyFort InvoiceAddress). BTS has no billing API —
+            keep this for ops reference and dry-run payloads.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <BillingEditor
+            title="BeautyFort"
+            value={bfBilling}
+            disabled={save.isPending}
+            onChange={setBfBilling}
+          />
+          <BillingEditor title="BTS" value={btsBilling} disabled={save.isPending} onChange={setBtsBilling} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BillingEditor({
+  title,
+  value,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  value: CompanyBillingAddress;
+  onChange: (v: CompanyBillingAddress) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-line/70 bg-canvas/30 p-4">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {BILLING_FIELDS.map((f) => (
+          <label key={f.key} className={cn("block text-sm", f.wide && "sm:col-span-2")}>
+            <span className="text-xs text-muted">{f.label}</span>
+            <input
+              className="mt-1 w-full rounded-lg border border-line bg-panel px-2.5 py-1.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+              value={value[f.key]}
+              disabled={disabled}
+              onChange={(e) => onChange({ ...value, [f.key]: e.target.value })}
+            />
+          </label>
+        ))}
       </div>
     </div>
   );
