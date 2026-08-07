@@ -6,11 +6,13 @@ local `.env` (`python-analysis/`, `tools/images/brasty/`) — not for compose/de
 
 See also CONTEXT §6 “Vendors versus image sources”.
 
-## wholesale-perfumes.eu (SoleLuna spol. s.r.o.) — vendor
+## wholesale-perfumes.eu (SoleLuna spol. s.r.o.) — vendor (parked B2B)
 
-This is the **B2B wholesaler**, not a consumer shop and not oceanfragrances. Auth is HTTP Basic
-`WHOLESALE_PERFUMES_USER` (e-shop email) + `WHOLESALE_PERFUMES_TOKEN` (API token from their portal
-user settings). There is no separate shop password for Sillage — the token is the credential.
+This is the **B2B wholesaler**, not a consumer shop and not oceanfragrances. **Not sold on the
+main LPS retail storefront** — parked for a separate site under repo `b2b-wholesale/`. Auth is
+HTTP Basic `WHOLESALE_PERFUMES_USER` (e-shop email) + `WHOLESALE_PERFUMES_TOKEN` (API token from
+their portal user settings). There is no separate shop password for Sillage — the token is the
+credential.
 
 `oceanfragrances.csv` is an offline **image** index only (see below); prefer this catalog XML for
 pictures when enriching.
@@ -26,10 +28,10 @@ pictures when enriching.
 
 Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
 `src/orders/adapters/wholesale-perfumes.ts`. Seeded inactive by migration
-`013_wholesale_perfumes_vendor.sql`; operator activates on the Vendors page.
-Listed on `/b2b-wholesale/` only (excluded from main `/shop/` and search; singular product URLs
-still work). Same cart → checkout → Sillage dispatch as BF/BTS; differentiator is per-vendor MOQ
-on cart. No B2B portal. `product_cat` = feed product **type**; brands map to `product_brand`.
+`013_wholesale_perfumes_vendor.sql`; forced parked again by `016_park_wholesale_perfumes_b2b.sql`.
+Excluded from `--vendor=all` via `PARKED_B2B_VENDOR_SLUGS`. Do **not** activate on the cosmetic
+shop. Scaffold + API notes: `b2b-wholesale/`. `product_cat` = feed product **type**; brands map to
+`product_brand`.
 
 - Catalog + store joined on vendor `id`. Store feed alone powers `fetchPriceStock`.
 - Live gates: catalog max 1/day and store hourly caps live on `sil_vendors`
@@ -45,7 +47,7 @@ on cart. No B2B portal. `product_cat` = feed product **type**; brands map to `pr
   needs_attention rails as BTS (decision 25). Submit sends optional `note` = our `SIL-*`
   reference. JSON bodies use application-level `error` codes (0 = OK) even on HTTP 200.
 - Cart line `code` = catalog product `id` (not EAN), per the vendor B2B API doc
-  (`docs/vendors/wholesale-perfumes-api.md`). Isolated in `wholesalePerfumesCartCode()`.
+  (`b2b-wholesale/docs/wholesale-perfumes-api.md`). Isolated in `wholesalePerfumesCartCode()`.
 
 ### Operator-confirmable seed guesses (migration 013)
 
@@ -61,7 +63,8 @@ on cart. No B2B portal. `product_cat` = feed product **type**; brands map to `pr
 Package rules from that page: max **25 kg** / box, ~60 perfume bottles per box, EU delivery typically 3–5 working days; payment is proforma / advance (COD only CZ/SK/PL).
 
 Docs: https://www.wholesale-perfumes.eu/api/docs/ · https://www.wholesale-perfumes.eu/xml-export/  
-Sanitized cart/order notes (no secrets): [`wholesale-perfumes-api.md`](wholesale-perfumes-api.md).
+Sanitized cart/order notes (no secrets):
+[`b2b-wholesale/docs/wholesale-perfumes-api.md`](../../b2b-wholesale/docs/wholesale-perfumes-api.md).
 
 Env placeholders: `WHOLESALE_PERFUMES_USER`, `WHOLESALE_PERFUMES_TOKEN`,
 `WHOLESALE_PERFUMES_CATALOG_URL`, `WHOLESALE_PERFUMES_STOCK_URL`,

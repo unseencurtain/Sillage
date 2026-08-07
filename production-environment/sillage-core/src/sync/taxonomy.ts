@@ -1,4 +1,4 @@
-import { env, sil, wp } from "../config/env.ts";
+import { sil, wp } from "../config/env.ts";
 import { execute, query, transaction, type PoolConnection, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, slugify, uniqueTermSlug } from "../lib/slugify.ts";
@@ -454,87 +454,94 @@ export async function loadFlatTermMapFromDb(taxonomy: string): Promise<Map<strin
 }
 
 /**
- * Ensure the WordPress landing page that lists only wholesale-perfumes.
- * Main shop / search exclude that vendor; `/b2b-wholesale/` is the listing.
- * The bridge scopes `[products]` here by `_sillage_vendor=wholesale-perfumes`
- * (not by a product_cat lane — vendor identity must stay off product categories).
+ * Park wholesale-perfumes on this (LPS retail) storefront: force vendor inactive, unpublish
+ * `/b2b-wholesale/`, and exclude WPF products from catalog + search via product_visibility.
+ *
+ * B2B lives on a future separate site — see repo `b2b-wholesale/`. Idempotent; safe every sync.
  */
-export async function ensureB2bShopPage(): Promise<{ pageId: number; created: boolean } | null> {
-  // Presence check: do not create a B2B page when the vendor row is missing entirely.
-  const vendorRows = await query<RowDataPacket>(
-    `SELECT 1 FROM ${sil("sil_vendors")} WHERE slug = ? LIMIT 1`,
+export async function parkWholesalePerfumesFromMainStorefront(): Promise<{
+  vendorDeactivated: boolean;
+  pagesUnpublished: number;
+  productsHidden: number;
+}> {
+  const vendorResult = await execute(
+    `UPDATE ${sil("sil_vendors")} SET active = 0 WHERE slug = ? AND active <> 0`,
     [B2B_VENDOR_SLUG],
   );
-  if (vendorRows.length === 0) return null;
 
-  const shortcode = `[products limit="24" columns="4" paginate="true"]`;
-  const title = "B2B Wholesale";
-  const content = `<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
-  const marker = "sillage-b2b-products";
-
-  const existing = await query<RowDataPacket & { ID: number; post_content: string }>(
-    `SELECT ID, post_content FROM ${wp("posts")}
-      WHERE post_type = 'page' AND post_name = ? AND post_status IN ('publish','draft','private')
-      LIMIT 1`,
+  const pageResult = await execute(
+    `UPDATE ${wp("posts")}
+        SET post_status = 'draft',
+            post_modified = NOW(),
+            post_modified_gmt = UTC_TIMESTAMP()
+      WHERE post_type = 'page'
+        AND post_name = ?
+        AND post_status IN ('publish','private')`,
     [B2B_PAGE_SLUG],
   );
 
-  if (existing[0]) {
-    const pageId = existing[0].ID;
-    const stale =
-      existing[0].post_content.includes('category="') ||
-      !existing[0].post_content.includes("[products");
-    if (stale || !existing[0].post_content.includes(marker)) {
-      // Embed an HTML comment marker so we can detect the vendor-meta-based page content.
-      const stamped =
-        `<!-- ${marker} -->\n<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
-      await execute(
-        `UPDATE ${wp("posts")}
-            SET post_content = ?, post_title = ?, post_status = 'publish',
-                post_modified = NOW(), post_modified_gmt = UTC_TIMESTAMP()
-          WHERE ID = ?`,
-        [stamped, title, pageId],
-      );
-    }
-    const meta = await query<RowDataPacket>(
-      `SELECT meta_id FROM ${wp("postmeta")} WHERE post_id = ? AND meta_key = '_sillage_b2b_shop' LIMIT 1`,
-      [pageId],
-    );
-    if (meta.length === 0) {
-      await execute(
-        `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value) VALUES (?, '_sillage_b2b_shop', '1')`,
-        [pageId],
-      );
-    }
-    return { pageId, created: false };
-  }
+  const visibility = await loadVisibilityTerms();
+  const catalogTt = visibility["exclude-from-catalog"]!.ttId;
+  const searchTt = visibility["exclude-from-search"]!.ttId;
 
-  const stamped =
-    `<!-- ${marker} -->\n<!-- wp:shortcode -->\n${shortcode}\n<!-- /wp:shortcode -->`;
-  const result = await execute(
-    `INSERT INTO ${wp("posts")}
-       (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt,
-        post_status, comment_status, ping_status, post_password, post_name,
-        to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered,
-        post_parent, guid, menu_order, post_type, post_mime_type, comment_count)
-     VALUES
-       (1, NOW(), UTC_TIMESTAMP(), ?, ?, '',
-        'publish', 'closed', 'closed', '', ?,
-        '', '', NOW(), UTC_TIMESTAMP(), '',
-        0, '', 0, 'page', '', 0)`,
-    [stamped, title, B2B_PAGE_SLUG],
+  // Hide every published WPF product from shop + search (singular URLs may still resolve).
+  const hideResult = await execute(
+    `INSERT IGNORE INTO ${wp("term_relationships")} (object_id, term_taxonomy_id, term_order)
+     SELECT p.ID, vis.tt_id, 0
+       FROM ${wp("posts")} p
+       INNER JOIN ${wp("postmeta")} pm
+         ON pm.post_id = p.ID
+        AND pm.meta_key = '_sillage_vendor'
+        AND pm.meta_value = ?
+       CROSS JOIN (
+         SELECT ? AS tt_id UNION ALL SELECT ?
+       ) vis
+      WHERE p.post_type = 'product'
+        AND p.post_status = 'publish'`,
+    [B2B_VENDOR_SLUG, catalogTt, searchTt],
   );
-  const pageId = result.insertId;
-  await execute(`UPDATE ${wp("posts")} SET guid = CONCAT(?, '/?page_id=', ID) WHERE ID = ?`, [
-    env.wordpress.baseUrl.replace(/\/$/, ""),
-    pageId,
-  ]);
+
+  // Keep _visibility meta aligned for admin lists / some theme paths.
   await execute(
-    `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value) VALUES (?, '_sillage_b2b_shop', '1')`,
-    [pageId],
+    `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value)
+     SELECT p.ID, '_visibility', 'hidden'
+       FROM ${wp("posts")} p
+       INNER JOIN ${wp("postmeta")} pm
+         ON pm.post_id = p.ID
+        AND pm.meta_key = '_sillage_vendor'
+        AND pm.meta_value = ?
+      WHERE p.post_type = 'product'
+        AND p.post_status = 'publish'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${wp("postmeta")} existing
+           WHERE existing.post_id = p.ID AND existing.meta_key = '_visibility'
+        )`,
+    [B2B_VENDOR_SLUG],
   );
-  log.info(`created B2B shop page id=${pageId} slug=${B2B_PAGE_SLUG} (vendor meta filter)`);
-  return { pageId, created: true };
+  await execute(
+    `UPDATE ${wp("postmeta")} pm
+       INNER JOIN ${wp("postmeta")} vendor
+         ON vendor.post_id = pm.post_id
+        AND vendor.meta_key = '_sillage_vendor'
+        AND vendor.meta_value = ?
+        SET pm.meta_value = 'hidden'
+      WHERE pm.meta_key = '_visibility'
+        AND pm.meta_value <> 'hidden'`,
+    [B2B_VENDOR_SLUG],
+  );
+
+  const out = {
+    vendorDeactivated: vendorResult.affectedRows > 0,
+    pagesUnpublished: pageResult.affectedRows,
+    productsHidden: hideResult.affectedRows,
+  };
+  if (out.vendorDeactivated || out.pagesUnpublished > 0 || out.productsHidden > 0) {
+    log.info(
+      `parked wholesale-perfumes from main storefront: ` +
+        `vendorOff=${out.vendorDeactivated} pages=${out.pagesUnpublished} hideRels=${out.productsHidden}`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -694,11 +701,9 @@ export async function attributeTaxonomyExists(taxonomy: string): Promise<boolean
  *
  * WooCommerce counts only published products, and the storefront hides products carrying
  * `exclude-from-catalog`, so those are excluded here too — otherwise category counts overstate
- * what a shopper can actually see.
- *
- * For `product_cat` only, also exclude wholesale-perfumes products: they are hidden from the
- * main shop/search, so shop sidebar counts should reflect BF/BTS browse inventory. The B2B
- * page computes its own WPF-scoped counts.
+ * what a shopper can actually see. Parked WPF products get that visibility term via
+ * `parkWholesalePerfumesFromMainStorefront`, so BF/BTS sidebar counts stay honest without a
+ * vendor-meta carve-out.
  */
 export async function recountTerms(taxonomies: string[]): Promise<void> {
   if (taxonomies.length === 0) return;
@@ -710,55 +715,24 @@ export async function recountTerms(taxonomies: string[]): Promise<void> {
   );
   const hiddenTtId = excluded[0]?.term_taxonomy_id ?? 0;
 
-  const cats = taxonomies.filter((t) => t === CATEGORY_TAXONOMY);
-  const others = taxonomies.filter((t) => t !== CATEGORY_TAXONOMY);
-
-  if (cats.length > 0) {
-    await execute(
-      `UPDATE ${wp("term_taxonomy")} tt
-          SET tt.count = (
-            SELECT COUNT(DISTINCT p.ID)
-              FROM ${wp("term_relationships")} tr
-              JOIN ${wp("posts")} p ON p.ID = tr.object_id
-             WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
-               AND p.post_type = 'product'
-               AND p.post_status = 'publish'
-               AND NOT EXISTS (
-                 SELECT 1 FROM ${wp("term_relationships")} hidden
-                  WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
-               )
-               AND NOT EXISTS (
-                 SELECT 1 FROM ${wp("postmeta")} pm_wpf
-                  WHERE pm_wpf.post_id = p.ID
-                    AND pm_wpf.meta_key = '_sillage_vendor'
-                    AND pm_wpf.meta_value = ?
-               )
-          )
-        WHERE tt.taxonomy = ?`,
-      [hiddenTtId, B2B_VENDOR_SLUG, CATEGORY_TAXONOMY],
-    );
-  }
-
-  if (others.length > 0) {
-    const placeholders = others.map(() => "?").join(",");
-    await execute(
-      `UPDATE ${wp("term_taxonomy")} tt
-          SET tt.count = (
-            SELECT COUNT(DISTINCT p.ID)
-              FROM ${wp("term_relationships")} tr
-              JOIN ${wp("posts")} p ON p.ID = tr.object_id
-             WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
-               AND p.post_type = 'product'
-               AND p.post_status = 'publish'
-               AND NOT EXISTS (
-                 SELECT 1 FROM ${wp("term_relationships")} hidden
-                  WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
-               )
-          )
-        WHERE tt.taxonomy IN (${placeholders})`,
-      [hiddenTtId, ...others],
-    );
-  }
+  const placeholders = taxonomies.map(() => "?").join(",");
+  await execute(
+    `UPDATE ${wp("term_taxonomy")} tt
+        SET tt.count = (
+          SELECT COUNT(DISTINCT p.ID)
+            FROM ${wp("term_relationships")} tr
+            JOIN ${wp("posts")} p ON p.ID = tr.object_id
+           WHERE tr.term_taxonomy_id = tt.term_taxonomy_id
+             AND p.post_type = 'product'
+             AND p.post_status = 'publish'
+             AND NOT EXISTS (
+               SELECT 1 FROM ${wp("term_relationships")} hidden
+                WHERE hidden.object_id = p.ID AND hidden.term_taxonomy_id = ?
+             )
+        )
+      WHERE tt.taxonomy IN (${placeholders})`,
+    [hiddenTtId, ...taxonomies],
+  );
 
   log.info(`recounted ${taxonomies.join(", ")}`);
 }

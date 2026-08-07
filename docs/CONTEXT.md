@@ -223,15 +223,16 @@ This is a closed list. If a task seems to require adding write logic here, it be
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (global `cart_min_*`) and hard-block cart/checkout when a
    vendor subtotal is below that vendor's `order_config.min_order_value_eur` (storefront-label
-   shortfall message). Same cart/checkout path as BF/BTS plus MOQ; no B2B portal extras.
-9. Catalog helpers: main `/shop` is BeautyFort + BTS only — exclude wholesale-perfumes from shop /
-   search / category archives via a fast `NOT EXISTS` on `_sillage_vendor` (never a WP
-   `meta_query` — that shape hangs ~60k products). Vendor lanes are never `product_cat` — use
-   `_sillage_vendor` + `pa_vendor` (never LPS*). Enforce catalog visibility, strip legacy LPS*
-   cats from widgets/`get_terms`/nav, hide empty feed cats, rebuild Blocksy's taxonomy lookup via
-   SQL on finalize, and force Blocksy category filters to hierarchical so the shop sidebar shows
-   feed browse roots (Makeup, Hair, …) not a flat brand A–Z or starter-site demos. Optional
-   image-safety CSS. (Wholesaler/B2B storefront is a separate site — not this shop.)
+   shortfall message). Same cart/checkout path for BF/BTS plus per-vendor MOQ.
+9. Catalog helpers for the **LPS retail** shop (BF/BTS): enforce WooCommerce catalog visibility
+   (`exclude-from-catalog`), strip legacy LPS* cats from widgets/`get_terms`/nav, hide empty
+   feed cats, rebuild Blocksy's taxonomy lookup via SQL on finalize, and keep Blocksy category
+   filters hierarchical so the shop sidebar shows feed browse roots (Makeup, Hair, …) not a flat
+   brand A–Z or starter-site demos. Optional image-safety CSS. Vendor lanes are never
+   `product_cat` — use `_sillage_vendor` + `pa_vendor`. There is **no** dual-catalog /
+   `/b2b-wholesale/` UI in this plugin — B2B is parked for a separate site (`b2b-wholesale/`).
+   WPF products on this install are hidden via `product_visibility` from sillage-core, not via
+   vendor-meta query hacks.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.
@@ -277,14 +278,20 @@ Getting this wrong has already cost a rename. Two different kinds of external sy
 are **not** interchangeable.
 
 A **vendor** is a supplier we buy from. It has a row in `sil_vendors`, a `VendorConnector`, a SKU
-prefix, stock and prices, and an order path that spends real money. **There are exactly three, and
-adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
+prefix, stock and prices, and an order path that spends real money. **There are exactly three in
+code, and adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
 
-| Vendor | Slug | SKU prefix | Storefront label | What it is |
+**This storefront (LPS retail / cosmetic shop) sells BeautyFort + BTS only.** The third vendor,
+wholesale-perfumes (B2B), is **decoupled** to a future separate website. Scaffolding and API notes
+live under repo top-level `b2b-wholesale/`. The connector remains in sillage-core for history and
+that future site, but is forced `active = 0`, listed in `PARKED_B2B_VENDOR_SLUGS` (excluded from
+`--vendor=all`), and its products are exclude-from-catalog on this WordPress install.
+
+| Vendor | Slug | SKU prefix | Storefront label | On this shop |
 |---|---|---|---|---|
-| BTS Wholesaler | `bts` | `BTS` | LPS01 | REST + JWT |
-| BeautyFort | `beautyfort` | `BF` | LPS02 | SOAP v4 |
-| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | B2B wholesaler: catalog + stock XML, cart order API |
+| BTS Wholesaler | `bts` | `BTS` | LPS01 | **Yes** — REST + JWT |
+| BeautyFort | `beautyfort` | `BF` | LPS02 | **Yes** — SOAP v4 |
+| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | **No** — parked B2B; see `b2b-wholesale/` |
 
 An **image source** only ever produces `EAN → image URL` pairs. It has no vendor row, no connector,
 no stock, no prices and no order path. Images are matched to products by EAN alone, so any source
@@ -341,9 +348,10 @@ bug-fixed versions live in `sillage-core/src/vendors/`.
   30-minute sync keeps fresh.
 - **wholesale-perfumes cart `code` is the catalog product `id`** (not EAN). Cart is account-global;
   dry-run must not touch it. JSON responses use application-level `error` (0 = OK) on HTTP 200;
-  see `docs/vendors/wholesale-perfumes-api.md`.
-- **Neither vendor has a sandbox.** `orders_dry_run` defaults to `1` and `orders_auto_dispatch` to
-  `0`. A live submit requires both an explicit `--live` (or setting change) and `--force` / auto-dispatch.
+  see `b2b-wholesale/docs/wholesale-perfumes-api.md`. Not used on this retail shop while parked.
+- **Neither live retail vendor has a sandbox.** `orders_dry_run` defaults to `1` and
+  `orders_auto_dispatch` to `0`. A live submit requires both an explicit `--live` (or setting
+  change) and `--force` / auto-dispatch.
 
 ---
 
