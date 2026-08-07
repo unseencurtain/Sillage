@@ -284,12 +284,8 @@ export async function purgeVendorProductCatLanes(
     `DELETE FROM ${wp("term_taxonomy")} WHERE taxonomy = ? AND term_id IN (${idPh})`,
     [CATEGORY_TAXONOMY, ...ids],
   );
-  await execute(
-    `DELETE t FROM ${wp("terms")} t
-      WHERE t.term_id IN (${idPh})
-        AND NOT EXISTS (SELECT 1 FROM ${wp("term_taxonomy")} tt WHERE tt.term_id = t.term_id)`,
-    ids,
-  );
+  // No alias — MariaDB rejects `DELETE t FROM db.table t` when the pool has no default schema.
+  await execute(`DELETE FROM ${wp("terms")} WHERE term_id IN (${idPh})`, ids);
   await execute(
     `DELETE FROM ${sil("sil_term_map")} WHERE taxonomy = ? AND source_key LIKE 'vendor:%'`,
     [CATEGORY_TAXONOMY],
