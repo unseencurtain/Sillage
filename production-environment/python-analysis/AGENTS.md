@@ -27,7 +27,7 @@ PUBLIC_URL_BASE=https://cosmetic.slilverbelt.xyz/lps-media \
 
 After `--install-core` / hosting rewrites, run a **fast / rewrite sync** on the shop so
 `_external_thumbnail_url` updates for existing products. Rsync `ecom_sites/data/media/` to
-the VPS when using self-hosted URLs.
+the VPS host path (bind-mounted into the `lps-media` container) when using self-hosted URLs.
 
 wholesale-perfumes catalog etiquette: download at most once per day (script caches ~20h).
 

@@ -136,17 +136,16 @@ Builds an EAN → public URL map from `watermarked/` (or `output/` if empty) and
 **merges** into `production-environment/sillage-core/data/image_overrides.json`
 without clobbering existing BeautyFort/wholesale-perfumes keys. Backs up the file first.
 
-## 6. Hosting recommendation (`/lps-media/`)
+## 6. Hosting (`/lps-media/`)
 
 Keep media **out of** `production-environment/ecom_sites/data/wp/` (hard agent rule).
 
-Recommended arrangement (describe-only — do **not** edit `compose.yaml` from this tool):
+Stack (owned by `ecom_sites/compose.yaml` + deploy script — do not reinvent from this tool):
 
-1. Create a host directory, e.g. `production-environment/ecom_sites/data/media/`.  
-2. Copy watermarked (or original) `EAN.jpg` files there.  
-3. Bind-mount that directory **read-only** into the `ecom` container, e.g.
-   `./data/media:/var/www/lps-media:ro`.  
-4. Configure the web server / WordPress stack to serve that path at **`/lps-media/`**.  
+1. Host directory: `production-environment/ecom_sites/data/media/` (bind-mount, not a Docker volume).
+2. Copy watermarked (or original) `EAN.jpg` files there — served immediately by `lps-media`.
+3. Dedicated `lps-media` (`nginx:alpine`) mounts that path as its document root.
+4. Public URL path stays **`/lps-media/`** via edge proxy (`shop-gateway` locally, host Caddy on VPS).
 5. Set `PUBLIC_URL_BASE=https://<shop-host>/lps-media` before `build-overrides`.
 
 ## 7. Storefront sync

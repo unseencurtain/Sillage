@@ -13,7 +13,7 @@ everything you need is in those two files.
 |---|---|
 | `production-environment/sillage-core/` | Bun/TypeScript sync engine, HTTP API, React dashboard |
 | `production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/` | Thin WooCommerce plugin |
-| `production-environment/ecom_sites/` | Docker stack: WordPress (`ecom`) + MariaDB (`ecom-db`) |
+| `production-environment/ecom_sites/` | Docker stack: WordPress (`ecom`) + MariaDB (`ecom-db`) + static images (`lps-media`) |
 | `production-environment/redis/` | Valkey container, separate compose project |
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |

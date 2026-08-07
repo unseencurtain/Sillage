@@ -116,6 +116,7 @@ fi
 if [[ -f "$ROOT/production-environment/ecom_sites/config/php.ini" ]]; then
   "${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/php.ini" "$HOST:~/ecom_sites/config/php.ini"
 fi
+"${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/nginx-lps-media.conf" "$HOST:~/ecom_sites/config/nginx-lps-media.conf"
 "${SCP[@]}" "$ROOT/production-environment/scripts/vps-bootstrap.sh" "$HOST:~/vps-bootstrap.sh"
 "${SCP[@]}" "$ROOT/production-environment/ecom_sites/config/sillage-grants.sql" "$HOST:~/ecom_sites/config/sillage-grants.sql"
 "${SSH[@]}" "$HOST" 'mkdir -p ~/wordpress-image'
@@ -228,6 +229,7 @@ collation-server                = utf8mb4_unicode_ci
 CNF
 
 WP_PORT=104
+MEDIA_PORT=105
 
 cat > ~/ecom_sites/compose.yaml <<EOF
 name: wordpress-ecom
@@ -251,11 +253,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  # Static images only. Host bind-mount ./data/media (not a named volume).
+  lps-media:
+    container_name: lps-media
+    image: nginx:alpine
+    networks: [ecom_network]
+    ports: ["127.0.0.1:${MEDIA_PORT}:80"]
+    restart: always
+    volumes:
+      - ./data/media:/usr/share/nginx/html:ro
+      - ./config/nginx-lps-media.conf:/etc/nginx/conf.d/default.conf:ro
   ecom:
     container_name: ecom
     image: lime/wordpress:latest
     networks: [ecom_network, redis_network]
-    ports: ["${WP_PORT}:80"]
+    ports: ["127.0.0.1:${WP_PORT}:80"]
     restart: always
     depends_on:
       ecom-db:
@@ -263,8 +275,6 @@ services:
     volumes:
       - ./data/wp:/var/www/html
       - ./config/php.ini:/usr/local/etc/php/conf.d/conf.ini:ro
-      - ./data/media:/var/www/lps-media:ro
-      - ./config/apache-lps-media.conf:/etc/apache2/conf-enabled/lps-media.conf:ro
     environment:
       WORDPRESS_DB_HOST: ecom-db
       WORDPRESS_DB_USER: \${MYSQL_USER}
@@ -273,7 +283,7 @@ services:
   x-sillage-common: &sillage-common
     build:
       context: /home/ubuntu/sillage-core
-    image: sillage-core:latest
+      image: sillage-core:latest
     networks: [ecom_network, redis_network]
     restart: unless-stopped
     depends_on:
@@ -310,12 +320,13 @@ networks:
 EOF
 
 sudo mkdir -p /home/ubuntu/ecom_sites/data/media
+# Remove legacy Apache alias mount if a prior deploy left the conf behind.
+rm -f /home/ubuntu/ecom_sites/config/apache-lps-media.conf
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
-	# Watermarked Brasty/LPS images (host files; not inside WordPress uploads).
+	# Product images: host dir → lps-media container (not WordPress/Apache).
 	handle_path /lps-media/* {
-		root * /home/ubuntu/ecom_sites/data/media
-		file_server
+		reverse_proxy localhost:${MEDIA_PORT}
 	}
 	reverse_proxy localhost:${WP_PORT}
 }
@@ -357,7 +368,7 @@ if [[ -f /tmp/sillage-clone.sql ]]; then
   rm -f /tmp/sillage-clone.sql
 fi
 
-docker compose up -d ecom
+docker compose up -d lps-media ecom
 echo "Waiting for WordPress files..."
 for i in $(seq 1 90); do
   if [[ -f "$HOME/ecom_sites/data/wp/wp-config.php" ]]; then
@@ -475,7 +486,7 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
 # Plugin download above cds to /tmp — compose.yaml lives in ecom_sites.
 cd ~/ecom_sites
 docker compose build sillage-core
-docker compose up -d sillage-core sillage-cron ecom
+docker compose up -d lps-media ecom sillage-core sillage-cron
 docker exec sillage-core bun run migrate
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
   -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;"

@@ -11,13 +11,23 @@ Two independent Docker Compose projects.
 
 | Container | Image | Role | Ports |
 |---|---|---|---|
-| `ecom` | `lime/wordpress:latest` (WordPress 7.0.3, PHP 8.3.33, Apache) | Storefront | `80:80` |
+| `shop-gateway` | `caddy:2-alpine` | Local edge only (`/lps-media` → media, else → ecom). VPS uses host Caddy instead. | `80:80` (local) |
+| `ecom` | `lime/wordpress:latest` (WordPress 7.0.3, PHP 8.3.33, Apache) | Storefront (no product-image serving) | internal `80` locally; VPS `127.0.0.1:104→80` |
+| `lps-media` | `nginx:alpine` | Static product images only | internal locally; VPS `127.0.0.1:105→80` |
 | `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | Database | `127.0.0.1:3307:3306` |
 | `valkey` | `valkey/valkey:8-alpine` | Object cache (ephemeral) | internal only |
 | `sillage-core` | built from `sillage-core/Dockerfile` (Bun) | Sync scheduler (supercronic) | internal only |
 
 Networks are **external** and must exist before `docker compose up`:
-`ecom_network` (ecom ↔ ecom-db ↔ sillage-core) and `redis_network` (ecom ↔ valkey ↔ sillage-core).
+`ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
+`redis_network` (ecom ↔ valkey ↔ sillage-core).
+
+**Product images (`/lps-media/`).** Host directory `production-environment/ecom_sites/data/media/`
+is bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
+Docker volume — operators and download scripts drop files on the host path). Public URLs stay
+`https://<shop>/lps-media/<file>`. Locally `shop-gateway` strips the prefix; on VPS host Caddy
+`handle_path /lps-media/*` reverse-proxies to `lps-media`. WordPress/`ecom` does not serve these
+files. Sync still stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`).
 
 ```bash
 docker network create ecom_network
