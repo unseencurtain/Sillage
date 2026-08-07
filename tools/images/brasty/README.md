@@ -23,7 +23,7 @@ without hover is wrong. The registered strategy is `list-row-hover-large`.
 ```bash
 cd tools/images/brasty
 cp .env.example .env
-# edit .env — set BRASTY_EMAIL, BRASTY_PASSWORD, CSV path, PUBLIC_URL_BASE, etc.
+# edit .env — set BRASTY_EMAIL, BRASTY_PASSWORD, CSV path, LPS_MEDIA_BASE_URL, etc.
 
 npm install
 # Fresh VPS / no display: install Chromium + OS deps (one-time):
@@ -127,8 +127,8 @@ missing, this step **no-ops** with a clear message.
 ## 5. Build overrides (merge into Sillage)
 
 ```bash
-# PUBLIC_URL_BASE must match how the shop will serve the files, e.g.
-# PUBLIC_URL_BASE=https://your-shop.example/lps-media
+# LPS_MEDIA_BASE_URL must match the public images host, e.g.
+# LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz
 npm run build-overrides
 ```
 
@@ -136,7 +136,7 @@ Builds an EAN → public URL map from `watermarked/` (or `output/` if empty) and
 **merges** into `production-environment/sillage-core/data/image_overrides.json`
 without clobbering existing BeautyFort/wholesale-perfumes keys. Backs up the file first.
 
-## 6. Hosting (`/lps-media/`)
+## 6. Hosting (images CDN / `lps-media`)
 
 Keep media **out of** `production-environment/ecom_sites/data/wp/` (hard agent rule).
 
@@ -145,8 +145,9 @@ Stack (owned by `ecom_sites/compose.yaml` + deploy script — do not reinvent fr
 1. Host directory: `production-environment/ecom_sites/data/media/` (bind-mount, not a Docker volume).
 2. Copy watermarked (or original) `EAN.jpg` files there — served immediately by `lps-media`.
 3. Dedicated `lps-media` (`nginx:alpine`) mounts that path as its document root.
-4. Public URL path stays **`/lps-media/`** via edge proxy (`shop-gateway` locally, host Caddy on VPS).
-5. Set `PUBLIC_URL_BASE=https://<shop-host>/lps-media` before `build-overrides`.
+4. Preferred public URL: `https://images.<domain>/<EAN>.jpg` (Caddy images site → media root).
+5. Shop `/lps-media/` remains a fallback. Set `LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz`
+   before `build-overrides` (aliases: `IMAGE_HOST_BASE_URL`, `PUBLIC_URL_BASE`).
 
 ## 7. Storefront sync
 
@@ -160,7 +161,7 @@ WooCommerce product images update. Overrides alone do not push pixels to the sho
 cd tools/images/brasty
 # one-time on a fresh box:
 npm install && npx playwright install --with-deps chromium
-cp .env.example .env   # set BRASTY_EMAIL, BRASTY_PASSWORD, paths, PUBLIC_URL_BASE
+cp .env.example .env   # set BRASTY_EMAIL, BRASTY_PASSWORD, paths, LPS_MEDIA_BASE_URL
 
 npm run login            # headless; writes storageState.json
 npm run investigate      # gate — register ExtractionStrategy from findings

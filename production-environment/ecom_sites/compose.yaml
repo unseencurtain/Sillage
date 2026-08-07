@@ -102,6 +102,8 @@ services:
     volumes:
       - ../sillage-core/logs:/app/logs
       - ../../.feedscratch:/app/.feedscratch
+      # Live override map — rsync/host edits must not require an image rebuild.
+      - ../sillage-core/data/image_overrides.json:/app/data/image_overrides.json:ro
 
   # Webhooks from the storefront, plus the dashboard. The plugin resolves this by hostname over
   # ecom_network; port 4000 is published on loopback for a human's browser.

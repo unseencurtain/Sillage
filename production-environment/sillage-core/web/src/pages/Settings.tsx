@@ -31,6 +31,12 @@ const fields: Array<{ key: string; label: string; hint?: string; type: "bool" | 
     type: "number",
   },
   { key: "global_stock_threshold", label: "Stock threshold", type: "number" },
+  {
+    key: "image_cdn_base_url",
+    label: "Image CDN base URL",
+    hint: "Public origin for self-hosted files (e.g. https://images.slilverbelt.xyz). Does not rewrite existing product URLs — update image_overrides.json / tool PUBLIC_URL_BASE, then sync with --rewrite-all.",
+    type: "text",
+  },
   { key: "orders_dry_run", label: "Orders dry-run", hint: "When on, never spend money", type: "bool" },
   { key: "orders_auto_dispatch", label: "Auto-dispatch", hint: "Off = human approval required", type: "bool" },
   { key: "orders_max_value_eur", label: "Max order value EUR", type: "number" },
