@@ -1,43 +1,22 @@
-# B2B wholesale — parked for its own site
+# B2B moved — use the dedicated repo
 
-Operator decision: **decouple B2B onto its own website.** This folder is the parking lot for
-wholesale-perfumes / SoleLuna work that must not live in the main LPS retail mental model.
+Operator decision: B2B is **not** a forever folder in this retail tree.
 
-## What this storefront is *not*
+**Canonical project:** [github.com/unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
 
-The main Sillage + cosmetic shop (`cosmetic.slilverbelt.xyz` / this repo’s WordPress site) sells
-**BeautyFort + BTS only**. Wholesale-perfumes products must not appear on `/shop`, search, or a
-`/b2b-wholesale/` page on that site.
+That repo holds:
 
-## What’s here
+- `docs/wholesale-perfumes-api.md`
+- `env/.env.example` (`WHOLESALE_PERFUMES_*`)
+- Extracted connector / order adapter / tests / migrations under `sillage-vendor/`
 
-| Path | Purpose |
-|---|---|
-| `docs/wholesale-perfumes-api.md` | Sanitized cart/order API notes (no secrets) |
-| `sillage-vendor/README.md` | Pointers to the connector still living in sillage-core |
-| This README | Scaffold for a future separate WP / compose project |
+## This retail shop
 
-## Connector status in main sillage-core
+Sillage + `cosmetic.slilverbelt.xyz` sell **BeautyFort + BTS only**. wholesale-perfumes stays
+parked (`active=0`, excluded from `--vendor=all`). Do not re-enable it here.
 
-Implementation remains in git under:
+A copy of the connector may still exist under `production-environment/sillage-core/` for history
+and offline tests until it is deleted in a follow-up. Prefer the **sillage-b2b** tree for all new
+B2B work.
 
-- `production-environment/sillage-core/src/vendors/wholesale-perfumes/`
-- `production-environment/sillage-core/src/orders/adapters/wholesale-perfumes.ts`
-
-On the **main** storefront it is:
-
-1. Forced **`active = 0`** in `sil_vendors` (migration `016_park_wholesale_perfumes_b2b.sql`)
-2. **Excluded from `--vendor=all`** via `PARKED_B2B_VENDOR_SLUGS` in `src/vendors/registry.ts`
-3. Opt-in only with an explicit `--vendor=wholesale-perfumes` (for a future B2B site / offline tests)
-
-Do not re-enable it on the retail shop without an explicit product decision.
-
-## Next project (out of scope here)
-
-Stand up a separate WordPress + Sillage stack that:
-
-- Syncs only `wholesale-perfumes`
-- Owns its own domain and catalogue
-- Reuses the parked API doc and connector code (copy or shared package — decide then)
-
-Until that exists, treat this folder as documentation + scaffolding only.
+Split from tag `pre-scratch-20260808` on this repo.

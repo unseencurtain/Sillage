@@ -1,8 +1,9 @@
 # Operator dashboard — BeautyFort + BTS
 
 Live UI: `https://sillage.slilverbelt.xyz` (staging `ovhe`). This retail shop syncs **BeautyFort**
-and **BTS** only. wholesale-perfumes is parked for a separate B2B site (`b2b-wholesale/`) — inactive,
-excluded from `--vendor=all`, `/b2b-wholesale` draft, not editable here.
+and **BTS** only. wholesale-perfumes is parked for
+[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — inactive, excluded from
+`--vendor=all`, not editable here.
 
 Source of truth for ops knobs: `sillage.sil_settings` / `sillage.sil_vendors`, edited through this
 dashboard (or SQL). Auth is HTTP session cookies against `DASHBOARD_USER` / `DASHBOARD_PASSWORD`
@@ -165,7 +166,7 @@ Not editable: `slug`, `sku_prefix`, `currency`, API credentials (env).
 
 ### Parked: wholesale-perfumes
 
-Shown as a **read-only** dashed card: “parked for `b2b-wholesale/` site”. No store-feed knobs, no
+Shown as a **read-only** dashed card: parked for the separate [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) site. No store-feed knobs, no
 Active toggle, no Save. Sync forces `active=0` every run. Do not activate on this shop.
 
 ---

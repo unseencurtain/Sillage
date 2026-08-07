@@ -1,7 +1,8 @@
 # Sillage — agent entry point
 
 Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce storefront
-(**BeautyFort + BTS** retail; wholesale-perfumes is parked under `b2b-wholesale/`).
+(**BeautyFort + BTS** retail; wholesale-perfumes B2B lives in
+[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)).
 
 **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet: container
 names, database credentials, WooCommerce schema quirks, and the complete list of tables we write
@@ -22,7 +23,7 @@ documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |
 | `docs/` | Context, decisions, data profile, task specs |
-| `b2b-wholesale/` | Parked B2B / wholesale-perfumes site scaffold (not this storefront) |
+| `b2b-wholesale/` | Thin pointer → [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |
 | `tools/images/` | Offline image tools (Brasty Playwright scrape, etc.) |
 
 ## Hard rules
