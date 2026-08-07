@@ -223,14 +223,15 @@ This is a closed list. If a task seems to require adding write logic here, it be
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (global `cart_min_*`) and hard-block cart/checkout when a
    vendor subtotal is below that vendor's `order_config.min_order_value_eur` (storefront-label
-   shortfall message). Portal/B2B extras are out of scope — same sell path as BF/BTS plus MOQ.
-9. Catalog helpers: all vendors (including wholesale-perfumes) appear on the main shop like
-   BF/BTS. Optional `/b2b-wholesale/` (`_sillage_b2b_shop`) stays a filtered landing that scopes
-   `[products]` to `_sillage_vendor=wholesale-perfumes`. Vendor lanes are never `product_cat` —
-   use `_sillage_vendor` + `pa_vendor` instead. Also enforce catalog visibility (hide
-   `exclude-from-catalog`) on product listing/search queries, strip legacy LPS* product_cat
-   terms from category widgets/`get_terms`/nav, and hide empty feed categories. Optional safety
-   CSS so external thumbs cannot stretch product cards.
+   shortfall message). Same cart/checkout path as BF/BTS plus MOQ; no B2B portal extras.
+9. Catalog helpers: exclude wholesale-perfumes from main shop / search / category archives via a
+   fast `NOT EXISTS` on `_sillage_vendor` (never a WP `meta_query` — that shape hangs ~60k
+   products). Singular product URLs stay reachable. `/b2b-wholesale/` (`_sillage_b2b_shop`) is
+   the only WPF listing; its sidebar shows top-level WPF *type* `product_cat` terms (not brands —
+   brands are `product_brand`). Vendor lanes are never `product_cat` — use `_sillage_vendor` +
+   `pa_vendor`. Also enforce catalog visibility, strip legacy LPS* cats from widgets/`get_terms`/
+   nav, hide empty feed cats, and rebuild Blocksy's taxonomy lookup via SQL on finalize (the
+   theme's `wc_get_products(-1)` regen OOMs on this catalogue). Optional image-safety CSS.
 
 **The plugin must not depend on the active theme.** It is Blocksy today and Astra soon. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.

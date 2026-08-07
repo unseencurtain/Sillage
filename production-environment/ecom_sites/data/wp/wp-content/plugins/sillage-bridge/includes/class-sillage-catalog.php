@@ -1,7 +1,7 @@
 <?php
 /**
- * Storefront catalog helpers: optional wholesaler landing page, catalog visibility,
- * and external product image safety.
+ * Storefront catalog filters: hide B2B wholesaler products from the main shop,
+ * and keep external product images from blowing out of their containers.
  *
  * @package Sillage_Bridge
  */
@@ -19,11 +19,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  * storefront facets) — never on `product_cat`. Marketplace connectors treat product categories
  * as browse taxonomy; LPS01/LPS02/LPS03 must not appear there.
  *
- * All active vendors (including wholesale-perfumes) appear on the main shop, search, and
- * category archives like BF/BTS. Optional page `/b2b-wholesale/` (`_sillage_b2b_shop` postmeta)
- * remains a filtered landing that lists only wholesale-perfumes, with a sidebar of feed
- * browse categories. Differentiator for that vendor is per-vendor MOQ at cart/checkout, not
- * a separate B2B portal.
+ * wholesale-perfumes (B2B) products appear only on the dedicated B2B page
+ * (`_sillage_b2b_shop` postmeta). Main shop, search, category archives, and related loops
+ * exclude them via a single NOT EXISTS clause (not a WP meta_query — that OR/NOT EXISTS
+ * shape times out on ~60k products). Singular product requests are never filtered, so
+ * direct WPF product URLs keep working.
  *
  * Legacy LPS* `product_cat` terms (from an earlier mistaken lane) are stripped from category
  * widgets / `get_terms` / nav if they still exist. Empty feed categories are hidden too.
@@ -34,17 +34,19 @@ final class Sillage_Catalog {
 	private const B2B_PAGE_META   = '_sillage_b2b_shop';
 	private const VENDOR_META     = '_sillage_vendor';
 	private const B2B_CAT_QUERY   = 'b2b_cat';
+	private const EXCLUDE_FLAG    = 'sillage_exclude_b2b';
 	private const INCLUDE_FLAG    = 'sillage_include_b2b';
 
 	/** @var string[] Legacy product_cat slugs that must never appear in browse UI. */
 	private const LEGACY_VENDOR_CAT_SLUGS = array( 'lps01', 'lps02', 'lps03' );
 
 	public function register(): void {
-		add_action( 'pre_get_posts', array( $this, 'ensure_main_catalog_visibility' ), 20 );
-		add_action( 'woocommerce_product_query', array( $this, 'ensure_wc_catalog_visibility' ), 20 );
+		add_action( 'pre_get_posts', array( $this, 'exclude_b2b_from_main_catalog' ), 20 );
+		add_action( 'woocommerce_product_query', array( $this, 'exclude_b2b_from_wc_query' ), 20 );
 		// Blocksy live search uses WP REST /wp/v2/search (not the main query). After Blocksy's
-		// rest_post_search_query (priority 999) so we keep its visibility/tax patches.
-		add_filter( 'rest_post_search_query', array( $this, 'ensure_rest_search_visibility' ), 1000, 2 );
+		// rest_post_search_query (priority 999) so we keep its visibility/tax patches and still
+		// exclude B2B the same way the search results page does.
+		add_filter( 'rest_post_search_query', array( $this, 'exclude_b2b_from_rest_search' ), 1000, 2 );
 		add_filter( 'woocommerce_shortcode_products_query', array( $this, 'filter_b2b_shortcode_products' ), 20, 3 );
 		add_filter( 'posts_clauses', array( $this, 'filter_posts_clauses' ), 20, 2 );
 		add_filter( 'query_vars', array( $this, 'register_query_vars' ) );
@@ -95,10 +97,11 @@ final class Sillage_Catalog {
 	/**
 	 * @param WP_Query $query Main query.
 	 */
-	public function ensure_main_catalog_visibility( $query ): void {
+	public function exclude_b2b_from_main_catalog( $query ): void {
 		if ( is_admin() || ! $query instanceof WP_Query || ! $query->is_main_query() ) {
 			return;
 		}
+		// Never touch single-product (or any singular) lookups — meta exclusion here 404s WPF URLs.
 		if ( $query->is_singular() ) {
 			return;
 		}
@@ -106,6 +109,10 @@ final class Sillage_Catalog {
 			return;
 		}
 		$this->ensure_catalog_visibility( $query );
+		if ( $this->should_allow_b2b() ) {
+			return;
+		}
+		$this->mark_b2b_exclusion( $query );
 	}
 
 	/**
@@ -113,7 +120,7 @@ final class Sillage_Catalog {
 	 *
 	 * @param WP_Query $query Product query.
 	 */
-	public function ensure_wc_catalog_visibility( $query ): void {
+	public function exclude_b2b_from_wc_query( $query ): void {
 		if ( is_admin() || ! $query instanceof WP_Query ) {
 			return;
 		}
@@ -121,16 +128,20 @@ final class Sillage_Catalog {
 			return;
 		}
 		$this->ensure_catalog_visibility( $query );
+		if ( $this->should_allow_b2b() ) {
+			return;
+		}
+		$this->mark_b2b_exclusion( $query );
 	}
 
 	/**
-	 * Enforce catalog visibility on Blocksy/WP REST live search.
+	 * Exclude B2B from Blocksy/WP REST live search so dropdown matches /?s= results.
 	 *
 	 * @param array           $args    WP_Query args for the search.
 	 * @param WP_REST_Request $request REST request.
 	 * @return array
 	 */
-	public function ensure_rest_search_visibility( $args, $request ) {
+	public function exclude_b2b_from_rest_search( $args, $request ) {
 		if ( ! is_array( $args ) ) {
 			return $args;
 		}
@@ -143,11 +154,18 @@ final class Sillage_Catalog {
 		}
 
 		unset( $request );
-		return $this->ensure_catalog_visibility_args( $args );
+		$args = $this->ensure_catalog_visibility_args( $args );
+
+		if ( $this->should_allow_b2b() ) {
+			return $args;
+		}
+
+		$args[ self::EXCLUDE_FLAG ] = 1;
+		return $args;
 	}
 
 	/**
-	 * On the optional wholesaler landing page, `[products]` shortcodes list only wholesale-perfumes.
+	 * On the B2B page, `[products]` shortcodes list only wholesale-perfumes.
 	 * Optional `?b2b_cat=<product_cat slug>` further scopes to a feed browse category.
 	 *
 	 * @param array  $query_args Shortcode query args.
@@ -157,7 +175,7 @@ final class Sillage_Catalog {
 	 */
 	public function filter_b2b_shortcode_products( $query_args, $attributes = array(), $_type = '' ) {
 		unset( $attributes, $_type );
-		if ( ! is_array( $query_args ) || ! $this->is_b2b_landing_page() ) {
+		if ( ! is_array( $query_args ) || ! $this->should_allow_b2b() ) {
 			return $query_args;
 		}
 
@@ -180,7 +198,7 @@ final class Sillage_Catalog {
 	}
 
 	/**
-	 * Fast wholesale-perfumes include on the optional landing page without WP's OR meta_query.
+	 * Fast B2B vendor include/exclude without WP's OR meta_query (which hangs the shop).
 	 *
 	 * @param array    $clauses SQL clauses.
 	 * @param WP_Query $query   Query.
@@ -191,19 +209,32 @@ final class Sillage_Catalog {
 			return $clauses;
 		}
 
+		global $wpdb;
+		$exclude = (bool) $query->get( self::EXCLUDE_FLAG );
 		$include = (bool) $query->get( self::INCLUDE_FLAG );
-		if ( ! $include ) {
+		if ( ! $exclude && ! $include ) {
 			return $clauses;
 		}
 
-		global $wpdb;
-		$marker = 'sillage_b2b_incl';
+		// Idempotent: both pre_get_posts and woocommerce_product_query may mark the same query.
+		$marker = $exclude ? 'sillage_b2b_excl' : 'sillage_b2b_incl';
 		if ( isset( $clauses['where'] ) && is_string( $clauses['where'] ) && false !== strpos( $clauses['where'], $marker ) ) {
 			return $clauses;
 		}
 
+		if ( $include ) {
+			$clauses['where'] .= $wpdb->prepare(
+				" AND EXISTS ( /* {$marker} */ SELECT 1 FROM {$wpdb->postmeta} pm_sillage_b2b"
+				. " WHERE pm_sillage_b2b.post_id = {$wpdb->posts}.ID"
+				. ' AND pm_sillage_b2b.meta_key = %s AND pm_sillage_b2b.meta_value = %s )',
+				self::VENDOR_META,
+				self::B2B_VENDOR_SLUG
+			);
+			return $clauses;
+		}
+
 		$clauses['where'] .= $wpdb->prepare(
-			" AND EXISTS ( /* {$marker} */ SELECT 1 FROM {$wpdb->postmeta} pm_sillage_b2b"
+			" AND NOT EXISTS ( /* {$marker} */ SELECT 1 FROM {$wpdb->postmeta} pm_sillage_b2b"
 			. " WHERE pm_sillage_b2b.post_id = {$wpdb->posts}.ID"
 			. ' AND pm_sillage_b2b.meta_key = %s AND pm_sillage_b2b.meta_value = %s )',
 			self::VENDOR_META,
@@ -219,7 +250,7 @@ final class Sillage_Catalog {
 	 * @return string
 	 */
 	public function wrap_b2b_page_content( $content ) {
-		if ( is_admin() || ! is_string( $content ) || ! $this->is_b2b_landing_page() ) {
+		if ( is_admin() || ! is_string( $content ) || ! $this->should_allow_b2b() ) {
 			return $content;
 		}
 		if ( ! in_the_loop() || ! is_main_query() ) {
@@ -232,7 +263,7 @@ final class Sillage_Catalog {
 
 		$sidebar = $this->render_b2b_categories_html();
 		return '<div class="sillage-b2b-layout">'
-			. '<aside class="sillage-b2b-sidebar" aria-label="' . esc_attr__( 'Wholesale categories', 'sillage-bridge' ) . '">'
+			. '<aside class="sillage-b2b-sidebar" aria-label="' . esc_attr__( 'B2B categories', 'sillage-bridge' ) . '">'
 			. $sidebar
 			. '</aside>'
 			. '<div class="sillage-b2b-main">' . $content . '</div>'
@@ -245,7 +276,7 @@ final class Sillage_Catalog {
 	 */
 	public function shortcode_b2b_categories( $atts = array() ): string {
 		unset( $atts );
-		if ( ! $this->is_b2b_landing_page() ) {
+		if ( ! $this->should_allow_b2b() ) {
 			return '';
 		}
 		return $this->render_b2b_categories_html();
@@ -274,8 +305,8 @@ final class Sillage_Catalog {
 		return false;
 	}
 
-	/** True on the optional wholesale-perfumes landing page only. */
-	private function is_b2b_landing_page(): bool {
+	/** True on the dedicated B2B wholesale page only. */
+	private function should_allow_b2b(): bool {
 		if ( function_exists( 'is_page' ) && is_page() ) {
 			$page_id = (int) get_queried_object_id();
 			if ( $page_id > 0 && '1' === (string) get_post_meta( $page_id, self::B2B_PAGE_META, true ) ) {
@@ -295,6 +326,16 @@ final class Sillage_Catalog {
 		}
 		$cat = sanitize_title( (string) $cat );
 		return $cat;
+	}
+
+	/**
+	 * @param WP_Query $query Query to mutate.
+	 */
+	private function mark_b2b_exclusion( WP_Query $query ): void {
+		if ( $query->get( self::EXCLUDE_FLAG ) ) {
+			return;
+		}
+		$query->set( self::EXCLUDE_FLAG, 1 );
 	}
 
 	/**
@@ -392,12 +433,15 @@ final class Sillage_Catalog {
 	}
 
 	/**
-	 * product_cat terms that have at least one published wholesale-perfumes product.
+	 * Top-level product_cat terms that have at least one published wholesale-perfumes product.
+	 *
+	 * The WPF feed's browse taxonomy is product *type* (Eau de Parfum, Blush, …). Brands belong
+	 * on `product_brand`, not here — nested brand product_cat rows are ignored (parent != 0).
 	 *
 	 * @return array<int, array{term_id:int,name:string,slug:string,count:int}>
 	 */
 	private function get_b2b_category_terms(): array {
-		$cached = get_transient( 'sillage_b2b_cats_v1' );
+		$cached = get_transient( 'sillage_b2b_cats_v2' );
 		if ( is_array( $cached ) ) {
 			return $cached;
 		}
@@ -409,7 +453,7 @@ final class Sillage_Catalog {
 				"SELECT t.term_id, t.name, t.slug, COUNT(DISTINCT p.ID) AS wpf_count
 				FROM {$wpdb->terms} t
 				INNER JOIN {$wpdb->term_taxonomy} tt
-					ON tt.term_id = t.term_id AND tt.taxonomy = 'product_cat'
+					ON tt.term_id = t.term_id AND tt.taxonomy = 'product_cat' AND tt.parent = 0
 				INNER JOIN {$wpdb->term_relationships} tr
 					ON tr.term_taxonomy_id = tt.term_taxonomy_id
 				INNER JOIN {$wpdb->posts} p
@@ -420,7 +464,7 @@ final class Sillage_Catalog {
 				GROUP BY t.term_id, t.name, t.slug
 				HAVING wpf_count > 0
 				ORDER BY t.name ASC
-				LIMIT 200",
+				LIMIT 500",
 				self::VENDOR_META,
 				self::B2B_VENDOR_SLUG
 			),
@@ -443,7 +487,7 @@ final class Sillage_Catalog {
 			}
 		}
 
-		set_transient( 'sillage_b2b_cats_v1', $terms, 15 * MINUTE_IN_SECONDS );
+		set_transient( 'sillage_b2b_cats_v2', $terms, 15 * MINUTE_IN_SECONDS );
 		return $terms;
 	}
 

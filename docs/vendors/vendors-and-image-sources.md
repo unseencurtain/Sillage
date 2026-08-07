@@ -27,8 +27,9 @@ pictures when enriching.
 Implemented in `sillage-core/src/vendors/wholesale-perfumes/` +
 `src/orders/adapters/wholesale-perfumes.ts`. Seeded inactive by migration
 `013_wholesale_perfumes_vendor.sql`; operator activates on the Vendors page.
-Storefront sell path matches BF/BTS (main `/shop/` → cart → checkout → Sillage); differentiator
-is per-vendor MOQ on cart. Optional `/b2b-wholesale/` is a filtered landing only — no B2B portal.
+Listed on `/b2b-wholesale/` only (excluded from main `/shop/` and search; singular product URLs
+still work). Same cart → checkout → Sillage dispatch as BF/BTS; differentiator is per-vendor MOQ
+on cart. No B2B portal. `product_cat` = feed product **type**; brands map to `product_brand`.
 
 - Catalog + store joined on vendor `id`. Store feed alone powers `fetchPriceStock`.
 - Live gates: catalog max 1/day and store hourly caps live on `sil_vendors`

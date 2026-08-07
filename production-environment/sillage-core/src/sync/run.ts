@@ -17,6 +17,7 @@ import {
   BRAND_TAXONOMY,
   ensureB2bShopPage,
   purgeVendorProductCatLanes,
+  purgeWholesalePerfumesBrandProductCats,
   loadCategoryMapsFromDb,
   loadFlatTermMapFromDb,
   rebuildCategoryLookup,
@@ -335,6 +336,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       // Vendor lanes belong on pa_vendor / _sillage_vendor — strip any LPS* product_cat leftovers.
       if (!options.dryRun) {
         await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+        await purgeWholesalePerfumesBrandProductCats();
         await ensureB2bShopPage();
       }
 
@@ -484,6 +486,7 @@ async function buildRewriteWriteContext(
   const storefrontLabels: Record<string, string> = {};
   for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
   await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+  await purgeWholesalePerfumesBrandProductCats();
   await ensureB2bShopPage();
   return buildWriteContext(settings, allVendors, categoryMaps, brandMap, attributeMaps);
 }
