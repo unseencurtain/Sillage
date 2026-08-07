@@ -75,7 +75,7 @@ Spot-checked on `ovhe` after the lock fix. Re-check with the SQL below if you ch
 | **Vendor MOQ** | BF/BTS `order_config` has **no** `min_order_value_eur`; WPF has 100 but parked | OK — no hard MOQ on retail lanes |
 | **Orders dry-run / auto** | `orders_dry_run=1`, `orders_auto_dispatch=0` | OK — keep unless intentional live spend |
 | **Order ceilings** | max/daily 10000 EUR; poll 15m; notify on | OK — rails only |
-| **Schedule** | sync on; fast 60m; full on hour 1 UTC; source `live` | OK — cron still gated to :00/:30 |
+| **Schedule** | sync on; fast 60m; full hour + `schedule_timezone` (default UTC); source `live` | OK — cron still gated to :00/:30; set operator TZ in Settings for human-local full-sync hour + dashboard clocks |
 | **Live feed gate** | min 60m; BF cap 20/day, BTS 48 | OK — do **not** use live Fast sync just to reprice |
 | **Description / volume** | `none` / `ranges` | OK — Save of these kicks **full/cache** content rewrite (heavier) |
 | **Shop / CDN URLs** | `wp_base_url` + `image_cdn_base_url` set | Shop URL hot-applies. **Image CDN does not rewrite existing product image URLs** — needs overrides + content rewrite |
@@ -150,6 +150,10 @@ stock) → automatic **rewrite-only** price write from `sil_offers` (no live API
 already running, a follow-up is queued — do not mash Run fast sync. Retail is stored in Woo
 `_price` / `_regular_price` on purpose (cart/sort/filters); cost stays in offers. See
 [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) “Why shop prices are stored”.
+
+**Operator timezone:** Settings → `schedule_timezone` (IANA, default `UTC`). Full-sync hour is
+local to that zone; Sync/Orders/Logs clocks follow it. MariaDB and vendor APIs stay UTC.
+Changing TZ alone does not rewrite the catalogue.
 
 ### Secrets overlay (vendor API keys)
 

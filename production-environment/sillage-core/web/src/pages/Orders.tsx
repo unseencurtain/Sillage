@@ -13,7 +13,7 @@ import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { cn, eur, fmtDate } from "@/lib/utils";
+import { cn, eur, useFmtDate } from "@/lib/utils";
 
 const ADDRESS_FIELDS: Array<{ key: keyof OrderAddress; label: string; wide?: boolean }> = [
   { key: "firstName", label: "First name" },
@@ -54,6 +54,7 @@ function formatAddress(a: OrderAddress | null | undefined): string {
 export function Orders() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const fmtDate = useFmtDate();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<number | null>(null);
   const [confirmLiveId, setConfirmLiveId] = useState<number | null>(null);

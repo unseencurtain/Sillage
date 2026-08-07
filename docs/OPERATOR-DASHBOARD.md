@@ -255,9 +255,10 @@ caps with Fast sync just to reprice.
 | UI label | Key | Effect |
 |---|---|---|
 | Sync enabled | `sync_enabled` | Off → scheduled catalogue sync skipped. Stop sets off; Run / toggling on clears abort |
+| Operator timezone | `schedule_timezone` | IANA zone (default `UTC`). Full-sync hour + dashboard timestamps (Sync / Orders / Logs / Overview). MariaDB stays UTC. Does **not** rewrite the catalogue or change WooCommerce customer TZ |
 | Fast sync minutes | `fast_sync_minutes` | Minutes since last success before a fast sync is due (:00/:30 windows only) |
 | Full sync enabled | `full_sync_enabled` | Nightly full attempt |
-| Full sync hour (UTC) | `full_sync_hour` | Database hour (UTC on this stack) |
+| Full sync hour | `full_sync_hour` | Hour 0–23 **in `schedule_timezone`** (UI shows ≈ UTC clock for today) |
 | Sync source | `sync_source` | `live` \| `local` (fixtures) |
 | Min minutes between live downloads | `live_feed_min_minutes` | Advanced: hard gate for BF/BTS; cache until elapsed. Daily caps on Vendors |
 

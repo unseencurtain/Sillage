@@ -258,7 +258,8 @@ cadence is a settings edit, not a rebuild.
 | `sync_enabled` | `1` | Master kill switch. Manual runs still work when off |
 | `fast_sync_minutes` | `30` | Minutes between price/stock syncs |
 | `full_sync_enabled` | `1` | Whether the nightly full sync runs |
-| `full_sync_hour` | `3` | Hour of day (0–23, database time zone) for the full sync |
+| `schedule_timezone` | `UTC` | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
+| `full_sync_hour` | `3` | Hour of day (0–23) in `schedule_timezone` for the full sync |
 | `sync_source` | `live` | `live` hits the vendor APIs, `local` replays fixtures |
 
 Rules, all evaluated by the database so no clock skew is possible:

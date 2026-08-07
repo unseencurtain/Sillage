@@ -8,6 +8,7 @@ import { clearSecret, listSecretStatus, loadSecretsOverlay, setSecret } from "..
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
+import { resolveTimeZone } from "../../lib/timezone.ts";
 import {
   loadCompanyBilling,
   parseCompanyBilling,
@@ -128,6 +129,7 @@ api.get("/overview", async (c) => {
       syncEnabled: settings.syncEnabled,
       hideProductsWithoutImage: settings.hideProductsWithoutImage,
       stockThreshold: settings.stockThreshold,
+      scheduleTimezone: settings.scheduleTimezone,
     },
     secrets: (() => {
       loadSecretsOverlay();
@@ -714,6 +716,7 @@ api.get("/settings", async (c) => {
     fast_sync_minutes: String(s.fastSyncMinutes),
     full_sync_enabled: s.fullSyncEnabled ? "1" : "0",
     full_sync_hour: String(s.fullSyncHour),
+    schedule_timezone: s.scheduleTimezone,
     sync_source: s.syncSource,
     global_price_multiplier: String(s.priceMultiplier),
     price_tiers: JSON.stringify(s.priceTiers),
@@ -747,6 +750,7 @@ api.put("/settings", async (c) => {
     "fast_sync_minutes",
     "full_sync_enabled",
     "full_sync_hour",
+    "schedule_timezone",
     "sync_source",
     "global_price_multiplier",
     "price_tiers",
@@ -813,6 +817,8 @@ api.put("/settings", async (c) => {
       // Persist the canonical sorted/validated form so the dashboard round-trips cleanly.
       const parsed = parsePriceTiers(value);
       persist = JSON.stringify(parsed.tiers);
+    } else if (key === "schedule_timezone") {
+      persist = resolveTimeZone(value);
     }
     const changed = prior.get(key) !== persist;
     if (!changed) continue;

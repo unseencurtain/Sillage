@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Layout } from "@/components/Layout";
+import { TimezoneProvider } from "@/components/TimezoneProvider";
 import { Login } from "@/pages/Login";
 import { Overview } from "@/pages/Overview";
 import { Sync } from "@/pages/Sync";
@@ -37,7 +38,13 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<RequireAuth />}>
-            <Route element={<Layout />}>
+            <Route
+              element={
+                <TimezoneProvider>
+                  <Layout />
+                </TimezoneProvider>
+              }
+            >
               <Route index element={<Overview />} />
               <Route path="sync" element={<Sync />} />
               <Route path="products" element={<Products />} />

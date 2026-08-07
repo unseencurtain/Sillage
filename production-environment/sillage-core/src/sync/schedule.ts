@@ -14,6 +14,7 @@ import { applyRuntimeUrls, sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, recordEvent, type GlobalSettings } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
+import { todayAtHourUtc, toMysqlUtc } from "../lib/timezone.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
@@ -48,8 +49,13 @@ interface TimingRow extends RowDataPacket {
  *
  * `minutes_since_any` counts from the last run of *either* mode, because a full sync also refreshes
  * every price and stock level — running a fast sync two minutes later would be wasted work.
+ *
+ * Full-sync window start is “today at fullSyncHour:00” in `scheduleTimezone`, converted to UTC
+ * in JS (MariaDB stays UTC; no CONVERT_TZ dependency).
  */
-async function loadTiming(fullSyncHour: number): Promise<ScheduleTiming> {
+async function loadTiming(fullSyncHour: number, scheduleTimezone: string): Promise<ScheduleTiming> {
+  const hour = normaliseHour(fullSyncHour);
+  const windowStartSql = toMysqlUtc(todayAtHourUtc(scheduleTimezone, hour));
   const rows = await query<TimingRow>(
     `SELECT
        (SELECT TIMESTAMPDIFF(MINUTE, MAX(started_at), NOW())
@@ -58,9 +64,9 @@ async function loadTiming(fullSyncHour: number): Promise<ScheduleTiming> {
        (SELECT COUNT(*)
           FROM ${sil("sil_sync_runs")}
          WHERE mode = 'full'
-           AND started_at >= TIMESTAMP(CURDATE(), MAKETIME(?, 0, 0))) AS full_runs_since_window,
-       (NOW() >= TIMESTAMP(CURDATE(), MAKETIME(?, 0, 0))) AS window_open`,
-    [fullSyncHour, fullSyncHour],
+           AND started_at >= ?) AS full_runs_since_window,
+       (NOW() >= ?) AS window_open`,
+    [windowStartSql, windowStartSql],
   );
   const row = rows[0]!;
   return {
@@ -119,7 +125,10 @@ export async function decideSchedule(settings: GlobalSettings): Promise<Schedule
     };
   }
 
-  return decide(settings, await loadTiming(normaliseHour(settings.fullSyncHour)));
+  return decide(
+    settings,
+    await loadTiming(normaliseHour(settings.fullSyncHour), settings.scheduleTimezone),
+  );
 }
 
 /** One cron tick. Returns the summary when a sync ran, or null when nothing was due. */

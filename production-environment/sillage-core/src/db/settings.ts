@@ -1,5 +1,6 @@
 import { sil } from "../config/env.ts";
 import { logger } from "../lib/log.ts";
+import { resolveTimeZone } from "../lib/timezone.ts";
 import { parsePriceTiers, type PriceTier } from "../sync/pricing.ts";
 import { execute, query, type RowDataPacket } from "./pool.ts";
 
@@ -71,8 +72,13 @@ export interface GlobalSettings {
   syncEnabled: boolean;
   fastSyncMinutes: number;
   fullSyncEnabled: boolean;
-  /** Hour of day, 0-23, in the database server's time zone. */
+  /**
+   * Hour of day, 0–23, in `scheduleTimezone` (not raw MariaDB UTC).
+   * Scheduler converts “today at H:00” in that zone to a UTC instant.
+   */
   fullSyncHour: number;
+  /** IANA zone for full-sync hour + dashboard clocks. Default UTC. */
+  scheduleTimezone: string;
   syncSource: "live" | "local";
   /** Exclude products whose resolved image is still a placeholder. */
   hideProductsWithoutImage: boolean;
@@ -151,6 +157,12 @@ export async function loadSettings(): Promise<GlobalSettings> {
     fastSyncMinutes: num("fast_sync_minutes", 30),
     fullSyncEnabled: flag("full_sync_enabled", true),
     fullSyncHour: num("full_sync_hour", 3),
+    scheduleTimezone: (() => {
+      const raw = (map.get("schedule_timezone") ?? "").trim();
+      const resolved = resolveTimeZone(raw || "UTC");
+      if (raw && resolved !== raw) log.warn(`invalid schedule_timezone "${raw}", using ${resolved}`);
+      return resolved;
+    })(),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
     hideProductsWithoutImage: flag("hide_products_without_image", true),
     imageCdnBaseUrl: (() => {
