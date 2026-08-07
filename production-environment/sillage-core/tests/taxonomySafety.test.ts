@@ -6,10 +6,13 @@ import { join } from "node:path";
  * Guardrail: rewrite-only used to pass empty categoryMaps / brand maps into the writer,
  * which deletes every product_cat and brand relationship on a full rewrite.
  * Decision 29 — maps must be reloaded from sil_category_map / sil_term_map.
+ *
+ * Decision 28 — vendor lanes (LPS*) must never be written as product_cat.
  */
 describe("rewrite-only taxonomy safety", () => {
   const runSrc = readFileSync(join(import.meta.dir, "../src/sync/run.ts"), "utf8");
   const taxonomySrc = readFileSync(join(import.meta.dir, "../src/sync/taxonomy.ts"), "utf8");
+  const writerSrc = readFileSync(join(import.meta.dir, "../src/sync/writer.ts"), "utf8");
 
   test("exports loaders used to rebuild maps without a feed fetch", () => {
     expect(taxonomySrc).toContain("export async function loadCategoryMapsFromDb");
@@ -23,7 +26,8 @@ describe("rewrite-only taxonomy safety", () => {
     expect(runSrc).toContain("buildRewriteWriteContext");
     expect(runSrc).toContain("loadCategoryMapsFromDb");
     expect(runSrc).toContain("loadFlatTermMapFromDb");
-    expect(runSrc).toContain("ensureVendorShopCategories");
+    expect(runSrc).toContain("purgeVendorProductCatLanes");
+    expect(runSrc).toContain("ensureB2bShopPage");
   });
 
   test("rewrite-only does not construct empty categoryMaps inline", () => {
@@ -33,5 +37,16 @@ describe("rewrite-only taxonomy safety", () => {
     expect(rewriteBlock).not.toBeNull();
     expect(rewriteBlock![0]).not.toContain("new Map<number, Map<string, TermRef>>()");
     expect(rewriteBlock![0]).toContain("buildRewriteWriteContext");
+  });
+
+  test("writer does not assign vendor lanes onto product_cat", () => {
+    expect(writerSrc).not.toContain("vendorShopCategories");
+    expect(writerSrc).toContain('_sillage_vendor');
+    expect(writerSrc).toContain('attributes["vendor"]');
+  });
+
+  test("taxonomy purge removes vendor product_cat lanes", () => {
+    expect(taxonomySrc).toContain("export async function purgeVendorProductCatLanes");
+    expect(taxonomySrc).not.toContain("export async function ensureVendorShopCategories");
   });
 });

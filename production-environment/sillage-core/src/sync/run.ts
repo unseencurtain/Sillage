@@ -16,7 +16,7 @@ import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
   ensureB2bShopPage,
-  ensureVendorShopCategories,
+  purgeVendorProductCatLanes,
   loadCategoryMapsFromDb,
   loadFlatTermMapFromDb,
   rebuildCategoryLookup,
@@ -215,6 +215,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
     // Settings-driven rewrites: products are already dirty; do not touch vendor APIs.
     // Must rebuild taxonomy maps from DB — empty maps + full mode wipe product_cat / brands.
+    // Also purges any leftover LPS* product_cat vendor lanes (Decision 28).
     if (options.rewriteOnly) {
       await throwIfSyncAborted();
       const ctx = await buildRewriteWriteContext(settings, allVendors);
@@ -331,10 +332,10 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
       const storefrontLabels: Record<string, string> = {};
       for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
-      const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
-      summary.termsCreated += vendorShop.created;
+      // Vendor lanes belong on pa_vendor / _sillage_vendor — strip any LPS* product_cat leftovers.
       if (!options.dryRun) {
-        await ensureB2bShopPage(vendorShop.bySlug);
+        await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+        await ensureB2bShopPage();
       }
 
       await resolveProductIdentities(settings);
@@ -351,7 +352,6 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
           categoryMaps,
           brands.map,
           attributeMaps,
-          vendorShop.bySlug,
         );
         const written = await writePendingProducts(ctx, "full", (done, total) =>
           log.progress(`writing ${done}/${total}`),
@@ -483,16 +483,9 @@ async function buildRewriteWriteContext(
   }
   const storefrontLabels: Record<string, string> = {};
   for (const v of allVendors) storefrontLabels[v.slug] = vendorStorefrontLabel(v);
-  const vendorShop = await ensureVendorShopCategories(allVendors, storefrontLabels);
-  await ensureB2bShopPage(vendorShop.bySlug);
-  return buildWriteContext(
-    settings,
-    allVendors,
-    categoryMaps,
-    brandMap,
-    attributeMaps,
-    vendorShop.bySlug,
-  );
+  await purgeVendorProductCatLanes(allVendors, storefrontLabels);
+  await ensureB2bShopPage();
+  return buildWriteContext(settings, allVendors, categoryMaps, brandMap, attributeMaps);
 }
 
 async function lastSuccessfulRun(vendorId: number): Promise<Date> {
