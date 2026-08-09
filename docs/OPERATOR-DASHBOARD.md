@@ -104,23 +104,30 @@ intentional.
 
 ## Sync / Runs
 
+Operator model (two actions only):
+
+1. **Rebuild catalogue** — empty shop / full structure (`mode:full`, live). Creates products, taxonomy, vanish, park WPF.
+2. **Update prices & stock** — ongoing (`mode:fast`, live). Touches changed offers only.
+
 | Control | API | Effect |
 |---|---|---|
-| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` | Primary CTA. While active shows spinner + **Syncing…** and disables other start buttons. Toast on start + finish; polls runs every 2s while active. If a run is already active, API returns `started:false` / `alreadyRunning:true` (honest status — not a fake “queued”) |
-| **Stop sync** | `POST /api/sync/stop` | **Enabled only while a run is active** (idle: grey + tooltip “No sync running”). Aborts between batches; sets **`sync_enabled=0`** until Sync enabled or Run |
-| Run fast sync (More sync modes) | same, `mode:"fast"` | Price/stock refresh for all active retail vendors. One-line help in UI |
-| Run full sync (More sync modes) | same, `mode:"full"` | Full catalogue path (taxonomy, vanish, park WPF, etc.). Heavier; usually overnight |
-| Live API cards (BF / BTS) | `GET /api/sync/live-status` | Read-only gate status for the two retail vendors |
-| Runs table + pagination | `GET /api/sync/runs` | History |
+| **Update prices & stock** | `POST /api/sync/run` `{mode:"fast", source:"live", vendors:["beautyfort","bts"]}` | Primary CTA on Sync + Overview. Disabled while a run is active **or** vendor cooldown is active |
+| **Rebuild catalogue** | same, `mode:"full"` | Button on Sync (not Settings-only / not “nightly only”) |
+| **Stop** | `POST /api/sync/stop` | Only while a run is active; sets `sync_enabled=0` |
+| Cooldown status | `GET /api/sync/live-status` | `retryInMinutes`, daily remaining per vendor — **no** “cache age” |
+| Runs table | `GET /api/sync/runs` | History; UI labels Rebuild / Prices & stock / rewrites |
 
-**Pricing Save vs Run sync:** multiplier / tiers / vendor FX·VAT changes use
-`rewriteOnly` + `source=cache` (from `sil_offers`). They do **not** wait on live feed rate limits.
-If a catalogue sync is already running, Save sets `pending_price_rewrite` and a rewrite-only
-follow-up starts when the lock frees.
+**Cooldown:** Settings **Minutes between syncs** writes both `live_feed_min_minutes` and
+`fast_sync_minutes` (default **60** — BeautyFort daily cap). After a live Rebuild or Update,
+buttons stay disabled until that many minutes pass. If the gate blocks, the API returns
+`started:false` / `cooldown:true` — it does **not** silently reuse a stale on-disk feed.
 
-**Schedule (not a button):** cron every 5 minutes → only opens catalogue sync in the **:00 / :30**
-windows, then applies `sync_enabled`, `full_sync_*`, `fast_sync_minutes`, `sync_source`. Order
-housekeeping (approve/dispatch/poll) runs **every** tick regardless of sync window.
+**“Cache” is not an operator mode.** Disk feed files are internal. Pricing Save still uses
+invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignores cooldown).
+
+**Schedule:** cron every 5 minutes; catalogue sync opens in **:00 / :30** windows when due and
+not in cooldown. Optional nightly rebuild is under Settings → Advanced. Order housekeeping runs
+every tick.
 
 `--vendor=all` never includes parked wholesale-perfumes.
 
@@ -254,13 +261,12 @@ caps with Fast sync just to reprice.
 
 | UI label | Key | Effect |
 |---|---|---|
-| Sync enabled | `sync_enabled` | Off → scheduled catalogue sync skipped. Stop sets off; Run / toggling on clears abort |
-| Operator timezone | `schedule_timezone` | IANA zone (default `UTC`). Full-sync hour + dashboard timestamps (Sync / Orders / Logs / Overview). MariaDB stays UTC. Does **not** rewrite the catalogue or change WooCommerce customer TZ |
-| Fast sync minutes | `fast_sync_minutes` | Minutes since last success before a fast sync is due (:00/:30 windows only) |
-| Full sync enabled | `full_sync_enabled` | Nightly full attempt |
-| Full sync hour | `full_sync_hour` | Hour 0–23 **in `schedule_timezone`** (UI shows ≈ UTC clock for today) |
-| Sync source | `sync_source` | `live` \| `local` (fixtures) |
-| Min minutes between live downloads | `live_feed_min_minutes` | Advanced: hard gate for BF/BTS; cache until elapsed. Daily caps on Vendors |
+| Sync enabled | `sync_enabled` | Off → scheduled price/stock sync skipped. Stop sets off; starting a sync clears abort |
+| Operator timezone | `schedule_timezone` | IANA zone for nightly hour + dashboard clocks. MariaDB stays UTC |
+| Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Vendor API cooldown + schedule cadence (default 60) |
+| Nightly rebuild (Advanced) | `full_sync_enabled` | Optional; prefer Sync → Rebuild catalogue button |
+| Nightly rebuild hour (Advanced) | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not 30 — that is minutes) |
+| Sync source | `sync_source` | Hidden from main UI; keep `live` in production (`local` = fixtures) |
 
 ### Pricing & catalogue visibility
 

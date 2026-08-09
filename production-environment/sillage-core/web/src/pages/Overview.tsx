@@ -24,21 +24,33 @@ export function Overview() {
     refetchInterval: 15_000,
   });
 
+  const live = useQuery({
+    queryKey: ["live-status"],
+    queryFn: api.liveStatus,
+    refetchInterval: 15_000,
+  });
+
   const syncRunning = isRunActive(data?.lastSync);
+  const onCooldown = Boolean(live.data && !live.data.allow);
+  const cooldownMin = live.data?.retryInMinutes ?? 0;
   const run = useMutation({
-    mutationFn: () => api.runSync("fast", { vendors: ["beautyfort", "bts"] }),
+    mutationFn: () =>
+      api.runSync("fast", { vendors: ["beautyfort", "bts"], source: "live" }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["overview"] });
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      qc.invalidateQueries({ queryKey: ["live-status"] });
       if (res.alreadyRunning || res.started === false) {
         toast(
           res.detail ??
-            "Sync already running — watch progress on Sync. Pricing Save queues a rewrite when the current run finishes.",
+            (res.cooldown
+              ? `Wait ${res.retryInMinutes ?? "…"} min before the next sync.`
+              : "Sync already running — watch progress on Sync."),
           "info",
         );
         return;
       }
-      toast("Sync started — BeautyFort + BTS. Open Sync for live progress.", "ok");
+      toast("Price & stock sync started — open Sync for progress.", "ok");
     },
     onError: (err: Error) => toast(err.message, "error"),
   });
@@ -55,6 +67,7 @@ export function Overview() {
   const busy = run.isPending || syncRunning;
   const secretsReady = data.secrets?.ready !== false;
   const missingSecrets = data.secrets?.missing ?? [];
+  const actionsDisabled = busy || onCooldown || !secretsReady;
 
   return (
     <div className="space-y-6">
@@ -62,23 +75,36 @@ export function Overview() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-muted">
-            Primary path: Secrets → Run sync now → Products. Catalogue only — never places vendor
-            orders.
+            Secrets → Rebuild catalogue (once) → Update prices &amp; stock. Never places vendor
+            orders.{" "}
+            <Link to="/sync" className="font-medium text-accent hover:underline">
+              Sync
+            </Link>
           </p>
         </div>
         <button
           type="button"
           aria-busy={busy}
-          title="Fast catalogue sync for BeautyFort + BTS (prices/stock). Not orders."
+          title={
+            onCooldown
+              ? `Available in ${cooldownMin} min`
+              : "Update prices & stock for BeautyFort + BTS. Not orders."
+          }
           className={cn(
-            "inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:cursor-not-allowed",
-            syncRunning ? "ring-2 ring-accent/30 ring-offset-2" : "disabled:opacity-50",
+            "inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:cursor-not-allowed disabled:opacity-50",
+            syncRunning && "ring-2 ring-accent/30 ring-offset-2",
           )}
-          disabled={busy}
+          disabled={actionsDisabled}
           onClick={() => run.mutate()}
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          {syncRunning ? "Syncing…" : run.isPending ? "Starting…" : "Run sync now"}
+          {syncRunning
+            ? "Syncing…"
+            : run.isPending
+              ? "Starting…"
+              : onCooldown
+                ? `Update in ${cooldownMin}m`
+                : "Update prices & stock"}
         </button>
       </header>
 
@@ -88,16 +114,15 @@ export function Overview() {
           <Link to="/secrets" className="font-medium underline underline-offset-2">
             Open Secrets
           </Link>{" "}
-          then come back and Run sync now.
+          then open Sync and Rebuild catalogue.
         </div>
       ) : (
         <div className="rounded-xl border border-teal-200 bg-teal-50/60 px-4 py-3 text-sm text-muted">
-          <strong className="text-ink">Demo path:</strong> Secrets look set → press Run sync now →
-          watch{" "}
+          <strong className="text-ink">Path:</strong> Secrets set →{" "}
           <Link to="/sync" className="font-medium text-accent hover:underline">
             Sync
           </Link>{" "}
-          → check{" "}
+          → Rebuild catalogue (empty shop) or Update prices &amp; stock →{" "}
           <Link to="/products" className="font-medium text-accent hover:underline">
             Products
           </Link>

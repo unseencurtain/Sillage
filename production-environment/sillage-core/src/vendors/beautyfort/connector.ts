@@ -71,18 +71,10 @@ export class BeautyfortConnector extends VendorConnector {
       return rows;
     }
 
-    // `live` — hard-gated. Prefer disk cache when the min interval or daily cap blocks us.
+    // `live` — hard-gated. Do not silently reuse disk; operator/schedule must wait for cooldown.
     const resolved = await resolveLiveOrCache("beautyfort", "live");
-    if (resolved.mode === "cache") {
-      const cached = await readFeedCache("beautyfort");
-      if (cached) {
-        const rows = feedCacheProducts(cached);
-        progress?.(
-          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${rows.length} rows)`,
-        );
-        return rows;
-      }
-      log.warn("live gated and no cache — forcing one BeautyFort download");
+    if (resolved.mode === "blocked") {
+      throw new Error(resolved.gate?.reason ?? "beautyfort live fetch blocked");
     }
 
     progress?.("downloading stock file (SOAP, whole catalogue, no pagination)");

@@ -465,33 +465,35 @@ async function fastSyncVendor(
   runId: number,
   summary: SyncSummary,
 ): Promise<number> {
-  if (connector.fetchPriceStock && options.source === "live") {
-    // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock — do not apply the
-    // catalog once-per-day gate here or fast syncs would stall after the first catalog pull.
-    const sharedGate = vendor.slug !== "wholesale-perfumes";
-    const gate = sharedGate
-      ? await checkLiveGate(vendor.slug as CacheVendor)
-      : { allow: true, reason: "wholesale-perfumes store self-gated", retryInMinutes: 0 };
+  if (options.source === "live" && vendor.slug !== "wholesale-perfumes") {
+    const gate = await checkLiveGate(vendor.slug as CacheVendor);
     if (!gate.allow) {
-      log.warn(`${vendor.slug}: skipping live delta — ${gate.reason}`);
-    } else {
-      const since = await lastSuccessfulRun(vendor.id);
-      try {
-        const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
-        log.progressEnd();
-        if (updates) {
-          if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
-          summary.fetched += updates.length;
-          const changed = await applyPriceStockDelta(vendor.id, updates);
-          summary.updated += changed;
-          return changed;
-        }
-      } catch (err) {
-        log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
-      }
+      // Do not fall back to a stale on-disk feed — operator/schedule must wait out the cooldown.
+      log.warn(`${vendor.slug}: skipping live price/stock sync — ${gate.reason}`);
+      return 0;
     }
   }
-  // Fallback and BeautyFort's normal path: pull the full feed and diff by checksum.
+
+  if (connector.fetchPriceStock && options.source === "live") {
+    // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock.
+    const sharedGate = vendor.slug !== "wholesale-perfumes";
+    const since = await lastSuccessfulRun(vendor.id);
+    try {
+      const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
+      log.progressEnd();
+      if (updates) {
+        if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
+        summary.fetched += updates.length;
+        const changed = await applyPriceStockDelta(vendor.id, updates);
+        summary.updated += changed;
+        return changed;
+      }
+    } catch (err) {
+      log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
+    }
+  }
+  // BeautyFort (and delta miss): pull the full feed and diff by checksum.
+  // source=local|cache reads fixtures/disk; source=live hits the vendor (gate already checked).
   await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
   const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
   log.progressEnd();
