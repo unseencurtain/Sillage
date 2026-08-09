@@ -256,11 +256,12 @@ cadence is a settings edit, not a rebuild.
 | Setting | Default | Meaning |
 |---|---|---|
 | `sync_enabled` | `1` | Master kill switch. Manual runs still work when off |
-| `fast_sync_minutes` | `30` | Minutes between price/stock syncs |
-| `full_sync_enabled` | `1` | Whether the nightly full sync runs |
+| `fast_sync_minutes` | `60` | Schedule cadence; kept equal to `live_feed_min_minutes` from Settings |
+| `live_feed_min_minutes` | `60` | Vendor API cooldown; dashboard disables Rebuild/Update until elapsed |
+| `full_sync_enabled` | `1` | Optional nightly full rebuild (prefer Sync → Rebuild button) |
 | `schedule_timezone` | `UTC` | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
-| `full_sync_hour` | `3` | Hour of day (0–23) in `schedule_timezone` for the full sync |
-| `sync_source` | `live` | `live` hits the vendor APIs, `local` replays fixtures |
+| `full_sync_hour` | `3` | Hour of day (0–23) in `schedule_timezone` for optional nightly full |
+| `sync_source` | `live` | `live` hits vendors (no silent disk fallback when gated); `local` = fixtures; `cache` = rewrite-only internal |
 
 Rules, all evaluated by the database so no clock skew is possible:
 

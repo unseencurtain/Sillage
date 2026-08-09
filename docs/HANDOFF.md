@@ -75,8 +75,8 @@ Spot-checked on `ovhe` after the lock fix. Re-check with the SQL below if you ch
 | **Vendor MOQ** | BF/BTS `order_config` has **no** `min_order_value_eur`; WPF has 100 but parked | OK — no hard MOQ on retail lanes |
 | **Orders dry-run / auto** | `orders_dry_run=1`, `orders_auto_dispatch=0` | OK — keep unless intentional live spend |
 | **Order ceilings** | max/daily 10000 EUR; poll 15m; notify on | OK — rails only |
-| **Schedule** | sync on; fast 60m; full hour + `schedule_timezone` (default UTC); source `live` | OK — cron still gated to :00/:30; set operator TZ in Settings for human-local full-sync hour + dashboard clocks |
-| **Live feed gate** | min 60m; BF cap 20/day, BTS 48 | OK — do **not** use live Fast sync just to reprice |
+| **Schedule** | Sync page: **Rebuild catalogue** + **Update prices & stock**; Settings **Minutes between syncs** (one cooldown, default 60). Optional nightly rebuild under Advanced (hour 0–23). | Buttons disabled during cooldown; no silent disk “cache” sync |
+| **Live feed gate** | same minutes as schedule; BF cap 20/day, BTS 48 | OK — do **not** burn live sync just to reprice (use Settings multiplier Save) |
 | **Description / volume** | `none` / `ranges` | OK — Save of these kicks **full/cache** content rewrite (heavier) |
 | **Shop / CDN URLs** | `wp_base_url` + `image_cdn_base_url` set | Shop URL hot-applies. **Image CDN does not rewrite existing product image URLs** — needs overrides + content rewrite |
 | **Company billing** | BF + BTS profiles **empty** | Gap for **live** BeautyFort invoice address — fill before first live BF dispatch |
@@ -142,7 +142,8 @@ Full recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md). Dashboard login file: `.deploy/vp
 
 ### Sync (operator)
 
-Dashboard **Overview** or **Sync** → **Run sync now** (`POST /api/sync/run`, BF+BTS fast sync).
+Dashboard **Sync**: **Rebuild catalogue** (full, first import) or **Update prices & stock** (fast).
+Both respect **Minutes between syncs** cooldown. Overview’s button is Update prices & stock.
 CLI offline: `cd production-environment/sillage-core && bun run sync -- --source=local --vendor=all`.
 
 **Pricing Save:** Settings (global multiplier/tiers) or Vendors (per-vendor multiplier/FX/VAT/min

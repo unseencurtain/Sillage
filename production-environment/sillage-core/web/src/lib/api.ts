@@ -41,6 +41,9 @@ export const api = {
       ok: boolean;
       started?: boolean;
       alreadyRunning?: boolean;
+      cooldown?: boolean;
+      retryInMinutes?: number;
+      nextAllowedAt?: string | null;
       detail?: string;
       mode?: string;
       source?: string;
@@ -66,9 +69,28 @@ export const api = {
     }),
   liveStatus: () =>
     request<{
+      cooldownMinutes: number;
       liveFeedMinMinutes: number;
-      beautyfort: { allow: boolean; reason: string; maxPerDay: number; cacheAgeMinutes: number | null };
-      bts: { allow: boolean; reason: string; maxPerDay: number; cacheAgeMinutes: number | null };
+      allow: boolean;
+      retryInMinutes: number;
+      nextAllowedAt: string | null;
+      reason: string;
+      beautyfort: {
+        allow: boolean;
+        reason: string;
+        retryInMinutes: number;
+        maxPerDay: number;
+        usedToday: number;
+        dailyRemaining: number;
+      };
+      bts: {
+        allow: boolean;
+        reason: string;
+        retryInMinutes: number;
+        maxPerDay: number;
+        usedToday: number;
+        dailyRemaining: number;
+      };
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),

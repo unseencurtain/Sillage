@@ -69,20 +69,11 @@ export class BtsConnector extends VendorConnector {
       }
     } else {
       const resolved = await resolveLiveOrCache("bts", "live");
-      if (resolved.mode === "cache") {
-        const cached = await readFeedCache("bts");
-        const cats = cached ? feedCacheCategories(cached) : null;
-        if (Array.isArray(cats) && cats.length > 0) {
-          progress?.(`live gated — cached BTS categories (${cats.length})`);
-          raw = cats as Category[];
-        } else {
-          progress?.("fetching category tree (no category cache)");
-          raw = await this.client().getListCategories(env.bts.language);
-        }
-      } else {
-        progress?.("fetching category tree");
-        raw = await this.client().getListCategories(env.bts.language);
+      if (resolved.mode === "blocked") {
+        throw new Error(resolved.gate?.reason ?? "bts live fetch blocked");
       }
+      progress?.("fetching category tree");
+      raw = await this.client().getListCategories(env.bts.language);
     }
 
     for (const node of raw) {
@@ -122,16 +113,8 @@ export class BtsConnector extends VendorConnector {
     }
 
     const resolved = await resolveLiveOrCache("bts", "live");
-    if (resolved.mode === "cache") {
-      const cached = await readFeedCache("bts");
-      if (cached) {
-        const rows = feedCacheProducts(cached);
-        progress?.(
-          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${rows.length} rows)`,
-        );
-        return rows;
-      }
-      log.warn("live gated and no cache — forcing one BTS download");
+    if (resolved.mode === "blocked") {
+      throw new Error(resolved.gate?.reason ?? "bts live fetch blocked");
     }
 
     progress?.("downloading catalogue (paginated, 500/page)");

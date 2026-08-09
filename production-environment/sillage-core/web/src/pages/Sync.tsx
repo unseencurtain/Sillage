@@ -19,6 +19,14 @@ function isRunFinished(run: SyncRun) {
   return ["success", "partial", "error"].includes(run.status);
 }
 
+function modeLabel(mode: string, source: string) {
+  if (source === "cache" && mode === "fast") return "Price rewrite";
+  if (source === "cache" && mode === "full") return "Content rewrite";
+  if (mode === "full") return "Rebuild catalogue";
+  if (mode === "fast") return "Prices & stock";
+  return `${mode}/${source}`;
+}
+
 export function Sync() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -56,28 +64,31 @@ export function Sync() {
   const newest = latest.data?.runs?.[0];
   const syncRunning = isRunActive(newest);
   const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set);
+  const cooldownMin = live.data?.retryInMinutes ?? 0;
+  const onCooldown = (live.data && !live.data.allow) || cooldownMin > 0;
 
   const run = useMutation({
-    mutationFn: (opts: { mode: "fast" | "full"; demo?: boolean }) =>
-      api.runSync(opts.mode, opts.demo ? { vendors: ["beautyfort", "bts"] } : undefined),
+    mutationFn: (opts: { mode: "fast" | "full" }) =>
+      api.runSync(opts.mode, { vendors: ["beautyfort", "bts"], source: "live" }),
     onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
+      qc.invalidateQueries({ queryKey: ["live-status"] });
       if (res.alreadyRunning || res.started === false) {
         toast(
           res.detail ??
-            "Sync already running — your new prices will apply when it finishes (or open Sync to watch progress).",
+            (res.cooldown
+              ? `Wait ${res.retryInMinutes ?? "…"} min before the next vendor sync.`
+              : "Sync already running — watch progress below."),
           "info",
         );
         return;
       }
       toast(
-        vars.demo
-          ? "Sync started — BeautyFort + BTS. Watch progress below."
-          : vars.mode === "full"
-            ? "Full sync started — taxonomy + vanish + catalogue rewrite (live downloads still rate-limited)."
-            : "Fast sync started — prices/stock for active retail vendors (live downloads still rate-limited).",
+        vars.mode === "full"
+          ? "Rebuild started — creating/updating the full catalogue from BeautyFort + BTS."
+          : "Price & stock sync started — updating changed offers only.",
         "ok",
       );
       watchingRunId.current = -1;
@@ -98,6 +109,7 @@ export function Sync() {
 
   const starting = run.isPending;
   const busy = starting || syncRunning;
+  const actionsDisabled = busy || onCooldown || secretsMissing.length > 0;
 
   useEffect(() => {
     if (watchingRunId.current === -1 && newest && isRunActive(newest)) {
@@ -110,15 +122,16 @@ export function Sync() {
 
     const id = watchingRunId.current;
     watchingRunId.current = null;
+    qc.invalidateQueries({ queryKey: ["live-status"] });
     if (newest.status === "success" || newest.status === "partial") {
       toast(
-        `Sync #${id} finished (${newest.status}) — fetched ${newest.products_fetched}, wrote +${newest.posts_created}/~${newest.posts_updated}`,
+        `Sync #${id} finished (${newest.status}) — fetched ${newest.products_fetched}, wrote +${newest.posts_created}/~${newest.posts_updated} $ ${newest.prices_updated}`,
         "ok",
       );
     } else {
       toast(`Sync #${id} failed (${newest.status})`, "error");
     }
-  }, [newest, toast]);
+  }, [newest, toast, qc]);
 
   const lastRunSummary = useMemo(() => {
     if (!newest) return null;
@@ -131,19 +144,24 @@ export function Sync() {
     };
   }, [newest]);
 
-  const primaryLabel = syncRunning ? "Syncing…" : starting ? "Starting…" : "Run sync now";
   const stopEnabled = syncRunning && !stop.isPending;
   const stopTitle = syncRunning
     ? "Abort the active run between batches and turn Sync enabled off until you Run again"
     : "No sync running";
+
+  const cooldownHint = onCooldown
+    ? `Available in ${cooldownMin} min (vendor API cooldown — protects BeautyFort daily caps).`
+    : `Cooldown ${live.data?.cooldownMinutes ?? "…"} min after each live sync.`;
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
         <p className="text-sm text-muted">
-          Catalogue sync for BeautyFort + BTS only — never places vendor orders. Scheduled at :00
-          and :30 · live downloads min {live.data?.liveFeedMinMinutes ?? "…"} min apart.
+          Two actions only: <strong className="font-medium text-ink">Rebuild catalogue</strong>{" "}
+          (first import / full rebuild) and{" "}
+          <strong className="font-medium text-ink">Update prices &amp; stock</strong>. Never places
+          vendor orders.
         </p>
       </header>
 
@@ -160,30 +178,61 @@ export function Sync() {
 
       <section className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50 to-panel px-5 py-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-xl">
-            <h2 className="text-lg font-semibold tracking-tight text-ink">Run sync now</h2>
-            <p className="mt-1 text-sm text-muted">
-              Starts a <strong className="font-medium text-ink">fast</strong> live catalogue sync for
-              BeautyFort + BTS (prices, stock, new products). Not orders. After it finishes, open
-              Products.
+          <div className="max-w-xl space-y-2">
+            <h2 className="text-lg font-semibold tracking-tight text-ink">Catalogue actions</h2>
+            <p className="text-sm text-muted">
+              Empty shop → Rebuild once. After that, use Update prices &amp; stock (or the
+              automatic schedule). Buttons stay disabled during a run and during the cooldown.
             </p>
+            <p className={cn("text-xs", onCooldown ? "font-medium text-amber-800" : "text-muted")}>
+              {cooldownHint}
+            </p>
+            {live.data ? (
+              <p className="font-mono text-xs text-muted">
+                BF {live.data.beautyfort.dailyRemaining}/{live.data.beautyfort.maxPerDay} left today
+                · BTS {live.data.bts.dailyRemaining}/{live.data.bts.maxPerDay} left today
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-col items-stretch gap-2 sm:items-end">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                aria-busy={busy}
+                aria-busy={busy && run.variables?.mode === "fast"}
                 className={cn(
-                  "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed",
+                  "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50",
                   syncRunning
                     ? "bg-accent text-accent-ink opacity-95 ring-2 ring-accent/30 ring-offset-2 ring-offset-panel"
-                    : "bg-accent text-accent-ink hover:opacity-95 disabled:opacity-50",
+                    : "bg-accent text-accent-ink hover:opacity-95",
                 )}
-                disabled={busy}
-                onClick={() => run.mutate({ mode: "fast", demo: true })}
+                disabled={actionsDisabled}
+                title={
+                  onCooldown
+                    ? cooldownHint
+                    : "Download live price/stock changes for BeautyFort + BTS"
+                }
+                onClick={() => run.mutate({ mode: "fast" })}
               >
                 {busy ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-                {primaryLabel}
+                {syncRunning
+                  ? "Syncing…"
+                  : onCooldown
+                    ? `Update in ${cooldownMin}m`
+                    : "Update prices & stock"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-line bg-panel px-4 py-3 text-sm font-semibold transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={actionsDisabled}
+                title={
+                  onCooldown
+                    ? cooldownHint
+                    : "Full catalogue rebuild — taxonomy, new products, vanish, park WPF"
+                }
+                onClick={() => run.mutate({ mode: "full" })}
+              >
+                <RefreshCw size={16} />
+                {onCooldown ? `Rebuild in ${cooldownMin}m` : "Rebuild catalogue"}
               </button>
               <button
                 type="button"
@@ -199,43 +248,17 @@ export function Sync() {
                 onClick={() => stop.mutate()}
               >
                 {stop.isPending ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
-                {stop.isPending ? "Stopping…" : "Stop sync"}
+                {stop.isPending ? "Stopping…" : "Stop"}
               </button>
             </div>
             <p className="max-w-sm text-right text-xs text-muted">
               {syncRunning
                 ? "Stop aborts between batches and turns Sync enabled off until you Run again."
-                : "Stop is available only while a sync is running."}
+                : "Set the cooldown under Settings → Minutes between syncs."}
             </p>
           </div>
         </div>
       </section>
-
-      {live.data ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(
-            [
-              ["BeautyFort", live.data.beautyfort],
-              ["BTS", live.data.bts],
-            ] as const
-          ).map(([name, v]) => (
-            <div key={name} className="rounded-xl border border-line bg-panel px-4 py-3 text-sm">
-              <div className="font-medium">{name} live API</div>
-              <p className="mt-0.5 text-xs text-muted">
-                Whether a fresh catalogue download is allowed right now (rate limits / daily caps).
-              </p>
-              <div className={cn("mt-1", v.allow ? "text-ok" : "text-amber-700")}>
-                {v.allow ? "Live download allowed" : "Using cache / blocked"}
-              </div>
-              <div className="mt-1 text-xs text-muted">{v.reason}</div>
-              <div className="mt-1 font-mono text-xs text-muted">
-                max {v.maxPerDay}/day · cache age{" "}
-                {v.cacheAgeMinutes == null ? "none" : `${v.cacheAgeMinutes}m`}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
 
       {syncRunning ? (
         <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm">
@@ -243,7 +266,8 @@ export function Sync() {
           <div>
             <div className="font-medium text-ink">Syncing…</div>
             <div className="text-muted">
-              Run #{newest?.id} · {newest?.mode}/{newest?.source} — other start buttons are disabled
+              Run #{newest?.id} · {modeLabel(newest?.mode ?? "", newest?.source ?? "")} — start
+              buttons disabled
             </div>
           </div>
         </div>
@@ -260,8 +284,8 @@ export function Sync() {
             <RefreshCw size={16} className="text-muted" />
             <span className="text-sm font-medium">Last run</span>
             <StatusBadge status={lastRunSummary.status} />
-            <span className="font-mono text-sm text-muted">
-              #{lastRunSummary.id} · {lastRunSummary.mode}/{lastRunSummary.source}
+            <span className="text-sm text-muted">
+              #{lastRunSummary.id} · {modeLabel(lastRunSummary.mode, lastRunSummary.source)}
             </span>
             {newest?.finished_at ? (
               <span className="text-sm text-muted">finished {fmtDate(newest.finished_at)}</span>
@@ -270,49 +294,12 @@ export function Sync() {
         </div>
       ) : null}
 
-      <details className="rounded-xl border border-line bg-panel px-5 py-4 shadow-sm">
-        <summary className="cursor-pointer text-sm font-semibold">
-          More sync modes
-          <span className="ml-2 font-normal text-muted">fast vs full</span>
-        </summary>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-line bg-canvas/50 p-3">
-            <button
-              type="button"
-              className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={busy}
-              onClick={() => run.mutate({ mode: "fast" })}
-            >
-              {busy ? "Unavailable while syncing" : "Run fast sync"}
-            </button>
-            <p className="mt-2 text-xs text-muted">
-              Fast: refresh prices and stock for all active retail vendors (BeautyFort + BTS). Same
-              path as Run sync now, without pinning vendors in the request.
-            </p>
-          </div>
-          <div className="rounded-lg border border-line bg-canvas/50 p-3">
-            <button
-              type="button"
-              className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={busy}
-              onClick={() => run.mutate({ mode: "full" })}
-            >
-              {busy ? "Unavailable while syncing" : "Run full sync"}
-            </button>
-            <p className="mt-2 text-xs text-muted">
-              Full: rebuild catalogue structure too (taxonomy, vanished products, park WPF). Heavier;
-              usually overnight via schedule.
-            </p>
-          </div>
-        </div>
-      </details>
-
       <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-line bg-canvas/70 text-xs uppercase tracking-wide text-muted">
             <tr>
               <th className="px-4 py-3">ID</th>
-              <th className="px-4 py-3">Mode</th>
+              <th className="px-4 py-3">Action</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Fetched</th>
               <th className="px-4 py-3">Writes</th>
@@ -330,7 +317,7 @@ export function Sync() {
             ) : runs.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-muted" colSpan={7}>
-                  No sync runs yet — press Run sync now after Secrets are set.
+                  No sync runs yet — Rebuild catalogue after Secrets are set.
                 </td>
               </tr>
             ) : (
@@ -343,9 +330,7 @@ export function Sync() {
                   )}
                 >
                   <td className="px-4 py-3 font-mono tabular-nums">#{r.id}</td>
-                  <td className="px-4 py-3 font-mono">
-                    {r.mode}/{r.source}
-                  </td>
+                  <td className="px-4 py-3">{modeLabel(r.mode, r.source)}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} />
                   </td>

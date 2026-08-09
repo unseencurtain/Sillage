@@ -120,12 +120,15 @@ export async function recordLiveFetch(vendor: CacheVendor): Promise<void> {
 /**
  * Resolve what a connector should actually hit.
  * `forceLive` bypasses the gate (CLI escape hatch only — still records the fetch).
+ *
+ * When live is gated we return `blocked` — callers must not silently fall back to disk.
+ * Explicit `source=cache` / rewrite-only paths read the feed file without this helper.
  */
 export async function resolveLiveOrCache(
   vendor: CacheVendor,
   requested: "live" | "local",
   forceLive = false,
-): Promise<{ mode: "live" | "cache" | "local"; gate: LiveGateResult | null }> {
+): Promise<{ mode: "live" | "blocked" | "local"; gate: LiveGateResult | null }> {
   if (requested === "local") {
     return { mode: "local", gate: null };
   }
@@ -135,7 +138,54 @@ export async function resolveLiveOrCache(
   const gate = await checkLiveGate(vendor);
   if (gate.allow) return { mode: "live", gate };
   log.warn(gate.reason);
-  return { mode: "cache", gate };
+  return { mode: "blocked", gate };
+}
+
+async function liveFetchesUsedToday(vendor: CacheVendor): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const n = await readSettingNum(`live_fetch_count_${vendor}_${day}`);
+  return n ?? 0;
+}
+
+/** Combined BF+BTS cooldown for dashboard buttons and POST /sync/run. */
+export async function getRetailLiveCooldown(): Promise<{
+  allow: boolean;
+  retryInMinutes: number;
+  reason: string;
+  cooldownMinutes: number;
+  nextAllowedAt: string | null;
+  beautyfort: LiveGateResult & { maxPerDay: number; usedToday: number };
+  bts: LiveGateResult & { maxPerDay: number; usedToday: number };
+}> {
+  const settings = await loadSettings();
+  const cooldownMinutes = settings.liveFeedMinMinutes;
+  const [bfGate, btsGate, bfMax, btsMax, bfUsed, btsUsed] = await Promise.all([
+    checkLiveGate("beautyfort"),
+    checkLiveGate("bts"),
+    catalogueMaxPerDay("beautyfort"),
+    catalogueMaxPerDay("bts"),
+    liveFetchesUsedToday("beautyfort"),
+    liveFetchesUsedToday("bts"),
+  ]);
+  const retryInMinutes = Math.max(bfGate.retryInMinutes, btsGate.retryInMinutes);
+  const allow = bfGate.allow && btsGate.allow;
+  const blockers = [bfGate, btsGate].filter((g) => !g.allow).map((g) => g.reason);
+  const reason = allow
+    ? "live allowed for BeautyFort and BTS"
+    : blockers.join("; ");
+  const nextAllowedAt =
+    allow || retryInMinutes <= 0
+      ? null
+      : new Date(Date.now() + retryInMinutes * 60_000).toISOString();
+  return {
+    allow,
+    retryInMinutes: allow ? 0 : retryInMinutes,
+    reason,
+    cooldownMinutes,
+    nextAllowedAt,
+    beautyfort: { ...bfGate, maxPerDay: bfMax, usedToday: bfUsed },
+    bts: { ...btsGate, maxPerDay: btsMax, usedToday: btsUsed },
+  };
 }
 
 /**

@@ -145,17 +145,8 @@ export class WholesalePerfumesConnector extends VendorConnector {
     }
 
     const resolved = await resolveLiveOrCache("wholesale-perfumes", "live");
-    if (resolved.mode === "cache") {
-      const cached = await readFeedCache("wholesale-perfumes");
-      if (cached) {
-        const catalog = feedCacheProducts(cached) as WholesalePerfumesCatalogProduct[];
-        const store = (feedCacheStore(cached) as WholesalePerfumesStoreProduct[] | null) ?? [];
-        progress?.(
-          `live gated (${resolved.gate?.reason ?? "rate limit"}) — cache (${catalog.length} rows)`,
-        );
-        return joinCatalogAndStore(catalog, store);
-      }
-      log.warn("live gated and no cache — forcing one wholesale-perfumes catalog download");
+    if (resolved.mode === "blocked") {
+      throw new Error(resolved.gate?.reason ?? "wholesale-perfumes live fetch blocked");
     }
 
     progress?.("downloading wholesale-perfumes catalog XML (daily)");

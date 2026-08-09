@@ -430,13 +430,13 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help="Cron ticks every 5 minutes; catalogue sync only opens in the :00 / :30 windows. Order housekeeping runs every tick. Full-sync hour and dashboard clocks use the operator timezone below (MariaDB stays UTC)."
+        help="Update prices & stock on a timer (and after each manual sync). Rebuild catalogue is a button on Sync — not required every night. Order housekeeping still runs every cron tick."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
             <Toggle
               label="Sync enabled"
-              hint="Off → scheduled catalogue sync skipped. Stop on Sync page sets this off; Run sync now turns it back on."
+              hint="Off → scheduled price/stock sync skipped. Stop on Sync sets this off; starting a sync turns it back on."
               checked={isTruthy(form.sync_enabled)}
               disabled={busy}
               onChange={(v) => setBool("sync_enabled", v)}
@@ -444,7 +444,7 @@ export function Settings() {
           </div>
           <Field
             label="Operator timezone"
-            help="IANA zone for the full-sync hour and Sync / Orders / Logs timestamps. Does not change the shop for customers."
+            help="IANA zone for nightly hour and Sync / Orders / Logs timestamps. Does not change the shop for customers."
           >
             <select
               className={inputClass}
@@ -465,60 +465,60 @@ export function Settings() {
             </select>
           </Field>
           <Field
-            label="Fast sync minutes"
-            help="Minutes since last success before a fast sync is due (still only in :00/:30 windows)."
+            label="Minutes between syncs"
+            help="One number for auto schedule and the vendor API cooldown. After Rebuild or Update, both Sync buttons stay disabled for this many minutes (default 60 — protects BeautyFort’s daily download cap). 30 is allowed if you accept less headroom."
           >
             <input
               type="number"
               step="1"
+              min={1}
               className={inputClass}
-              value={form.fast_sync_minutes ?? ""}
+              value={form.live_feed_min_minutes ?? form.fast_sync_minutes ?? ""}
               disabled={busy}
-              onChange={(e) => set("fast_sync_minutes", e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                set("live_feed_min_minutes", v);
+                set("fast_sync_minutes", v);
+              }}
             />
-          </Field>
-          <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
-            <Toggle
-              label="Full sync enabled"
-              hint="Allow the nightly full catalogue rebuild (taxonomy, vanish, park WPF, etc.)."
-              checked={isTruthy(form.full_sync_enabled)}
-              disabled={busy}
-              onChange={(v) => setBool("full_sync_enabled", v)}
-            />
-          </div>
-          <Field
-            label={`Full sync hour (${resolveTimeZone(form.schedule_timezone)})`}
-            help={`Nightly full attempt at this local hour. ≈ ${utcClockForLocalHour(
-              resolveTimeZone(form.schedule_timezone),
-              Number(form.full_sync_hour ?? 0),
-            )} today.`}
-          >
-            <input
-              type="number"
-              step="1"
-              min={0}
-              max={23}
-              className={inputClass}
-              value={form.full_sync_hour ?? ""}
-              disabled={busy}
-              onChange={(e) => set("full_sync_hour", e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Sync source"
-            help="live = vendor APIs (rate-limited). local = offline fixtures under .feedscratch."
-          >
-            <select
-              className={inputClass}
-              value={form.sync_source ?? "live"}
-              disabled={busy}
-              onChange={(e) => set("sync_source", e.target.value)}
-            >
-              <option value="live">live</option>
-              <option value="local">local</option>
-            </select>
           </Field>
         </div>
+
+        <details className="mt-4 rounded-lg border border-line/70 bg-canvas/30 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold">
+            Advanced — optional nightly rebuild
+            <span className="ml-2 font-normal text-muted">hour 0–23 only</span>
+          </summary>
+          <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-line/70 bg-panel px-4 py-3">
+              <Toggle
+                label="Nightly rebuild enabled"
+                hint="Optional. Prefer the Rebuild catalogue button on Sync. When on, attempts one full rebuild after the hour below."
+                checked={isTruthy(form.full_sync_enabled)}
+                disabled={busy}
+                onChange={(v) => setBool("full_sync_enabled", v)}
+              />
+            </div>
+            <Field
+              label={`Nightly rebuild hour (${resolveTimeZone(form.schedule_timezone)})`}
+              help={`0–23 in your operator timezone. ≈ ${utcClockForLocalHour(
+                resolveTimeZone(form.schedule_timezone),
+                Math.min(23, Math.max(0, Math.trunc(Number(form.full_sync_hour ?? 0)) || 0)),
+              )} today. Do not enter 30 — that belongs in Minutes between syncs.`}
+            >
+              <input
+                type="number"
+                step="1"
+                min={0}
+                max={23}
+                className={inputClass}
+                value={form.full_sync_hour ?? ""}
+                disabled={busy || !isTruthy(form.full_sync_enabled)}
+                onChange={(e) => set("full_sync_hour", e.target.value)}
+              />
+            </Field>
+          </div>
+        </details>
       </Section>
 
       <Section
@@ -598,24 +598,11 @@ export function Settings() {
         <summary className="cursor-pointer text-lg font-semibold tracking-tight">
           Advanced
           <span className="ml-2 text-sm font-normal text-muted">
-            live-feed gate, volume filter, descriptions, company billing
+            volume filter, descriptions, company billing
           </span>
         </summary>
         <div className="mt-4 space-y-6">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label="Min minutes between live downloads"
-              help="Hard gate for BeautyFort + BTS catalogue fetches. Cache is used until this elapses (default 60). Per-vendor daily caps live on Vendors."
-            >
-              <input
-                type="number"
-                step="1"
-                className={inputClass}
-                value={form.live_feed_min_minutes ?? ""}
-                disabled={busy}
-                onChange={(e) => set("live_feed_min_minutes", e.target.value)}
-              />
-            </Field>
             <Field
               label="Volume filter"
               help="ranges = bucketed ml facets · exact = every ml term · off = hide volume facet."

@@ -18,7 +18,7 @@ import { todayAtHourUtc, toMysqlUtc } from "../lib/timezone.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
-import { inHalfHourSlot } from "../vendors/liveGate.ts";
+import { getRetailLiveCooldown, inHalfHourSlot } from "../vendors/liveGate.ts";
 import { runSync, type SyncSummary } from "./run.ts";
 
 const log = logger("schedule");
@@ -152,6 +152,16 @@ export async function runScheduledSync(override?: "full" | "fast"): Promise<Sync
 
   log.info(`tick: ${decision.action} — ${decision.reason}`);
   if (decision.action === "skip") return null;
+
+  if (settings.syncSource === "live") {
+    const cooldown = await getRetailLiveCooldown();
+    if (!cooldown.allow) {
+      log.info(
+        `tick: skip live ${decision.action} — cooldown ${cooldown.retryInMinutes}m (${cooldown.reason})`,
+      );
+      return null;
+    }
+  }
 
   try {
     return await runSync({ mode: decision.action, source: settings.syncSource });

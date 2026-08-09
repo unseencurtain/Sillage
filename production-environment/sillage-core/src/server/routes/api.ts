@@ -25,8 +25,7 @@ import { parsePriceTiers } from "../../sync/pricing.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
 import { isSyncLockHeld, kickContentRewrite, kickPriceRewrite } from "../../sync/pendingRewrite.ts";
 import type { OrderAddress } from "../../orders/types.ts";
-import { feedCacheAgeMinutes } from "../../vendors/feedCache.ts";
-import { checkLiveGate, resolveVendorLiveMaxPerDay } from "../../vendors/liveGate.ts";
+import { getRetailLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
@@ -190,12 +189,33 @@ api.post("/sync/run", async (c) => {
       ok: true,
       started: false,
       alreadyRunning: true,
+      cooldown: false,
       mode,
       source,
       vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
       detail:
         "Sync already running — your new request was not started. Watch the active run; pricing Save queues a rewrite-only follow-up automatically.",
     });
+  }
+
+  // Live catalogue syncs must wait out the vendor cooldown — never start a run that would
+  // silently reuse a stale on-disk feed.
+  if (source === "live") {
+    const cooldown = await getRetailLiveCooldown();
+    if (!cooldown.allow) {
+      return c.json({
+        ok: true,
+        started: false,
+        alreadyRunning: false,
+        cooldown: true,
+        retryInMinutes: cooldown.retryInMinutes,
+        nextAllowedAt: cooldown.nextAllowedAt,
+        mode,
+        source,
+        vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+        detail: `Next sync available in ${cooldown.retryInMinutes} min — ${cooldown.reason}`,
+      });
+    }
   }
 
   // Fire-and-forget so the HTTP request returns immediately; the dashboard polls /sync/runs.
@@ -208,6 +228,7 @@ api.post("/sync/run", async (c) => {
     ok: true,
     started: true,
     alreadyRunning: false,
+    cooldown: false,
     mode,
     source,
     vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
@@ -262,26 +283,30 @@ api.post("/sync/stop", async (c) => {
 });
 
 api.get("/sync/live-status", async (c) => {
-  const settings = await loadSettings();
-  const [bfGate, btsGate, bfAge, btsAge, bfMax, btsMax] = await Promise.all([
-    checkLiveGate("beautyfort"),
-    checkLiveGate("bts"),
-    feedCacheAgeMinutes("beautyfort"),
-    feedCacheAgeMinutes("bts"),
-    resolveVendorLiveMaxPerDay("beautyfort"),
-    resolveVendorLiveMaxPerDay("bts"),
-  ]);
+  const cooldown = await getRetailLiveCooldown();
   return c.json({
-    liveFeedMinMinutes: settings.liveFeedMinMinutes,
+    cooldownMinutes: cooldown.cooldownMinutes,
+    /** @deprecated use cooldownMinutes — same value as live_feed_min_minutes */
+    liveFeedMinMinutes: cooldown.cooldownMinutes,
+    allow: cooldown.allow,
+    retryInMinutes: cooldown.retryInMinutes,
+    nextAllowedAt: cooldown.nextAllowedAt,
+    reason: cooldown.reason,
     beautyfort: {
-      ...bfGate,
-      maxPerDay: bfMax,
-      cacheAgeMinutes: bfAge,
+      allow: cooldown.beautyfort.allow,
+      reason: cooldown.beautyfort.reason,
+      retryInMinutes: cooldown.beautyfort.retryInMinutes,
+      maxPerDay: cooldown.beautyfort.maxPerDay,
+      usedToday: cooldown.beautyfort.usedToday,
+      dailyRemaining: Math.max(0, cooldown.beautyfort.maxPerDay - cooldown.beautyfort.usedToday),
     },
     bts: {
-      ...btsGate,
-      maxPerDay: btsMax,
-      cacheAgeMinutes: btsAge,
+      allow: cooldown.bts.allow,
+      reason: cooldown.bts.reason,
+      retryInMinutes: cooldown.bts.retryInMinutes,
+      maxPerDay: cooldown.bts.maxPerDay,
+      usedToday: cooldown.bts.usedToday,
+      dailyRemaining: Math.max(0, cooldown.bts.maxPerDay - cooldown.bts.usedToday),
     },
   });
 });
@@ -819,11 +844,25 @@ api.put("/settings", async (c) => {
       persist = JSON.stringify(parsed.tiers);
     } else if (key === "schedule_timezone") {
       persist = resolveTimeZone(value);
+    } else if (key === "full_sync_hour") {
+      const h = Math.min(23, Math.max(0, Math.trunc(Number(value)) || 0));
+      persist = String(h);
+    } else if (key === "live_feed_min_minutes" || key === "fast_sync_minutes") {
+      const m = Math.max(1, Math.trunc(Number(value)) || 60);
+      persist = String(m);
     }
     const changed = prior.get(key) !== persist;
     if (!changed) continue;
     await setSetting(key, persist);
     n++;
+    // One operator "minutes between syncs" keeps schedule cadence and vendor gate in lockstep.
+    if (key === "live_feed_min_minutes" && prior.get("fast_sync_minutes") !== persist) {
+      await setSetting("fast_sync_minutes", persist);
+      n++;
+    } else if (key === "fast_sync_minutes" && prior.get("live_feed_min_minutes") !== persist) {
+      await setSetting("live_feed_min_minutes", persist);
+      n++;
+    }
     if (priceKeys.has(key)) touchPrice = true;
     if (contentKeys.has(key)) touchContent = true;
     // Turning sync back on clears a previous Stop.
