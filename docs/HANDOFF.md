@@ -15,6 +15,7 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |
 | **Hub images** | `unseencurtain/sillage-core:<tag>`, `unseencurtain/sillage-wordpress:<tag>` |
+| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — continue image/sync work here |
 | **Git (pricing lock fix)** | `8628eee` on `main` — dedicated `GET_LOCK` connection + Save-only-on-change. Redeploy if VPS image tag lags. |
 | **Tag baseline** | `pre-scratch-20260808` — restore marker before catalogue wipe + B2B split ([`SCRATCH-RESET.md`](SCRATCH-RESET.md)) |
 | **B2B (later)** | [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) · local pointer `b2b-wholesale/` |
@@ -75,7 +76,7 @@ Spot-checked on `ovhe` after the lock fix. Re-check with the SQL below if you ch
 | **Vendor MOQ** | BF/BTS `order_config` has **no** `min_order_value_eur`; WPF has 100 but parked | OK — no hard MOQ on retail lanes |
 | **Orders dry-run / auto** | `orders_dry_run=1`, `orders_auto_dispatch=0` | OK — keep unless intentional live spend |
 | **Order ceilings** | max/daily 10000 EUR; poll 15m; notify on | OK — rails only |
-| **Schedule** | Sync page: **Rebuild catalogue** + **Update prices & stock**; Settings **Minutes between syncs** (check interval, not “minutes a day”). Per-vendor cadence is on **Vendors**. Rebuild queues when the schedule is on. Optional nightly rebuild under Schedule → Advanced. | Update hidden while Sync enabled is on; no silent disk “cache” sync |
+| **Schedule** | Sync page: **Rebuild catalogue** + **Update prices & stock**; Settings **Minutes between syncs** (check interval, not “minutes a day”). **Daily full catalogue rebuild** is first-class (live `full_sync_enabled=1`, hour 23, `Asia/Dhaka`). Per-vendor cadence is on **Vendors**. Rebuild queues when the schedule is on. BTS 25%/7-day unseen recovery is emergency only. | Update hidden while Sync enabled is on; no silent disk “cache” sync |
 | **Live feed gate** | same minutes as schedule; **no daily download cap** | OK — do **not** start a live sync just to reprice (use Settings multiplier Save) |
 | **Description / volume** | `none` / `ranges` | OK — Save of these kicks **full/cache** content rewrite (heavier) |
 | **Shop / CDN URLs** | `wp_base_url` + `image_cdn_base_url` set | Shop URL hot-applies. **Image CDN does not rewrite existing product image URLs** — needs overrides + content rewrite |
@@ -103,8 +104,12 @@ SELECT id, mode, source, status, prices_updated, started_at
 - **B2B is a separate project** — own compose / own repo when ready; not bolted onto this shop.
 - **`orders_dry_run` stays `1`** unless you intentionally dispatch live vendor orders (no sandbox).
 - **Images:** host volume `~/ecom_sites/data/media` → `lps-media`; public CDN
-  `images.slilverbelt.xyz`. Brasty Playwright crawl may still run on the laptop
-  (`tools/images/brasty/`).
+  `images.slilverbelt.xyz`. Brasty photos already on the VPS at `/home/ubuntu/brasty/`
+  (EAN `.jpg`). Matcher: `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`.
+  Canonical map: `sillage-core/data/image_overrides.json` (bind-mounted; recreate core/cron
+  after edits). Playwright crawl `tools/images/brasty/` is for EANs not in that dump.
+  After a merge: **`--mode=full --source=cache --rewrite-only`** (fast rewrite ignores
+  `needs_content_write`).
 - **Theme target: Kadence.** Bridge must stay theme-agnostic; Blocksy-specific shims are legacy,
   not the long-term model. Lots of shop UI belongs in **sillage-bridge**, not the theme.
 
@@ -112,11 +117,14 @@ SELECT id, mode, source, status, prices_updated, started_at
 
 ## Next work (priority)
 
-1. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
-2. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
-3. **Fill company billing** before first live BeautyFort order.
-4. **Optional later:** display-time multiplier (no 53k rewrite) — larger WC redesign; not started.
-5. **B2B separately** — new stack in [sillage-b2b](https://github.com/unseencurtain/sillage-b2b);
+1. **Photos still missing** — ~13k shop products had no EAN hit in Brasty / ocean / Shopify
+   after the 2026-08-30 fill. Continue Brasty scrape or manual overrides. Victoria’s Secret
+   `0197575132998` / `BF-F558351` is one of those.
+2. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
+3. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
+4. **Fill company billing** before first live BeautyFort order.
+5. **Optional later:** display-time multiplier (no 53k rewrite) — larger WC redesign; not started.
+6. **B2B separately** — new stack in [sillage-b2b](https://github.com/unseencurtain/sillage-b2b);
    own compose; do not expand this retail repo for WPF.
 
 Polish **this retail shop (BF+BTS) first.** B2B later on its own infrastructure.

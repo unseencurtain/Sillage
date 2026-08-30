@@ -28,6 +28,19 @@ At sync time, `sillage-core/src/sync/images.ts` resolves each product's image UR
 The override file is built *offline* by the steps below. Populate it in source priority order so
 earlier, higher-quality sources win when keys collide (merge scripts never clobber existing keys).
 
+**After any merge:** copy `image_overrides.json` onto the VPS bind-mount
+(`~/sillage/sillage-core/data/image_overrides.json`), **recreate** `sillage-core` / `sillage-cron`
+(the override map is cached in-process), mark affected products dirty, then:
+
+```bash
+# Content path — required when only the override URL changed (hashes include imageUrl).
+docker exec sillage-core bun run sync -- --mode=full --source=cache --rewrite-only
+```
+
+`--mode=fast --rewrite-only` only selects `needs_price_write` and will skip an image-only dirty
+mark. Fast still writes `_external_thumbnail_url` when a **price/visibility** hash changes (for
+example un-hiding after a photo appears) — mark `needs_price_write=1` if you take that path.
+
 ---
 
 ## Step 1 — wholesale-perfumes.eu catalog XML (`flask_front`)
@@ -58,13 +71,36 @@ Image-only index: EAN → external image URL. Not a vendor, not wholesale-perfum
 
 ---
 
-## Step 3 — Brasty (Playwright scrape)
+## Step 3 — Brasty photos already on the VPS (preferred when files exist)
 
 Brasty is an **image source only** — no vendor row, no catalogue sync, no orders. Photos match
-products by **EAN alone** and can illustrate any vendor's product.
+products by **EAN alone**.
 
-Tool location after reorg: **`tools/images/brasty/`** (standalone Node + Playwright; not a
-`sillage-core` dependency).
+Live dump on `ovhe`:
+
+| Path | Contents |
+|---|---|
+| `/home/ubuntu/brasty/in_stock` (and `out_of_stock`, `sale`, `new`, `back_in_stock`, `hot_deals`) | Zero-padded EAN `.jpg` filenames |
+
+Matcher: `production-environment/python-analysis/beautyfort-enriched/fill_missing_shop_images.py`.
+
+It walks BeautyFort **and** BTS shop rows whose resolved URL is empty / placeholder / BeautyFort
+`/pic/` / BTS `no_image.webp`, then fills in this order (never clobbering an existing override
+key): existing `image_overrides.json` → Brasty EAN file → `oceanfragrances.csv` → Shopify
+`products_export_1.csv`.
+
+1. Export products that still lack a usable photo (dashboard Products JSON or SQL dump).
+2. Run the matcher; copy Brasty hits into `~/ecom_sites/data/media/` (CDN
+   `https://images.slilverbelt.xyz/<original-stem>.jpg`).
+3. Merge the delta into `sillage-core/data/image_overrides.json` on the VPS **and** in git.
+4. Recreate core/cron, then **full** rewrite-only (see [After overrides change](#after-overrides-change)).
+
+---
+
+## Step 3b — Brasty (Playwright scrape)
+
+Use this when the VPS dump does not contain the EAN. Tool location:
+**`tools/images/brasty/`** (standalone Node + Playwright; not a `sillage-core` dependency).
 
 ### Site constraints
 
@@ -154,9 +190,16 @@ Brasty watermark asset: `tools/images/brasty/assets/lps-logo.png`.
 ## After overrides change
 
 1. Copy/host any new files under `data/media/` if using self-hosted URLs.
-2. Run sync so WooCommerce picks up URLs — **`bun run sync -- --rewrite-all`** when image rules
-   or override keys changed materially (hashes cover vendor data only).
-3. Check sync summary `hiddenNoImage` if `hide_products_without_image` is on (default).
+2. Recreate `sillage-core` and `sillage-cron` so `loadImageOverrides()` re-reads the JSON
+   (in-process cache; `compose up -d` on already-running containers is not enough).
+3. Mark the filled EANs dirty (`needs_content_write=1` on `sil_products` via `sil_offers.primary_ean`
+   / `eans`), then **`bun run sync -- --mode=full --source=cache --rewrite-only`**.
+   `--rewrite-all` also works but rewrites the whole catalogue.
+   Fast rewrite-only ignores `needs_content_write`.
+4. Check sync summary `hiddenNoImage` if `hide_products_without_image` is on (default).
+   Products still without a usable photo stay **Hidden · no image** on the dashboard Products
+   table and `exclude-from-catalog` on the shop. Do not turn hide-without-image off shop-wide
+   to unhide one SKU.
 
 ---
 
@@ -165,7 +208,7 @@ Brasty watermark asset: `tools/images/brasty/assets/lps-logo.png`.
 | Path | Purpose |
 |---|---|
 | `tools/images/brasty/` | Brasty Playwright scrape (this playbook §3) |
-| `production-environment/python-analysis/` | Bulk download, oceanfragrances, enricher sandbox |
+| `production-environment/python-analysis/` | Bulk EAN match: Brasty VPS dump, oceanfragrances, Shopify, enricher sandbox |
 | `production-environment/sillage-core/data/image_overrides.json` | Canonical EAN → URL map consumed at sync |
 | `production-environment/sillage-core/src/sync/images.ts` | Override load + cross-vendor fill |
 

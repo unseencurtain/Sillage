@@ -441,7 +441,7 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help="The schedule clock is shared. What each wholesaler actually downloads lives on Vendors (BeautyFort = full stock file every call; BTS = daily change batch, looked up on every call). There is no daily download cap. Rebuild catalogue is on Sync."
+        help="The schedule clock is shared. Minutes between syncs is the incremental check (BeautyFort stock file / BTS daily change batch). Daily full rebuild is the routine catalogue refresh (new products, categories in WordPress). The 25%/7-day BTS pull is emergency recovery only."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
@@ -455,7 +455,7 @@ export function Settings() {
           </div>
           <Field
             label="Operator timezone"
-            help="IANA zone for dashboard clocks and the optional nightly rebuild hour. Does not change the shop for customers."
+            help="IANA zone for dashboard clocks and the daily full-rebuild hour. Does not change the shop for customers."
           >
             <select
               className={inputClass}
@@ -477,7 +477,7 @@ export function Settings() {
           </Field>
           <Field
             label="Minutes between syncs"
-            help="Not “30 minutes a day” — this is how often we call each wholesaler (every 30 / 35 / 120 minutes). Same clock for BeautyFort and BTS; they cool down independently. What each call downloads is on Vendors."
+            help="Not “30 minutes a day” — this is the incremental check (every 30 / 35 / 120 minutes). Same clock for BeautyFort and BTS; they cool down independently. Daily full rebuild is a separate control below."
           >
             <input
               type="number"
@@ -495,41 +495,35 @@ export function Settings() {
           </Field>
         </div>
 
-        <details className="mt-4 rounded-lg border border-line/70 bg-canvas/30 px-4 py-3">
-          <summary className="cursor-pointer text-sm font-semibold">
-            Advanced — optional nightly rebuild
-            <span className="ml-2 font-normal text-muted">hour 0–23 only</span>
-          </summary>
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
-            <div className="rounded-lg border border-line/70 bg-panel px-4 py-3">
-              <Toggle
-                label="Nightly rebuild enabled"
-                hint="Optional extra full import after this hour. Prefer Rebuild on Sync (queues for the next call). When on, one full rebuild is attempted after the hour below."
-                checked={isTruthy(form.full_sync_enabled)}
-                disabled={busy}
-                onChange={(v) => setBool("full_sync_enabled", v)}
-              />
-            </div>
-            <Field
-              label={`Nightly rebuild hour (${resolveTimeZone(form.schedule_timezone)})`}
-              help={`0–23 in your operator timezone. ≈ ${utcClockForLocalHour(
-                resolveTimeZone(form.schedule_timezone),
-                Math.min(23, Math.max(0, Math.trunc(Number(form.full_sync_hour ?? 0)) || 0)),
-              )} today. Do not enter 30 — that belongs in Minutes between syncs.`}
-            >
-              <input
-                type="number"
-                step="1"
-                min={0}
-                max={23}
-                className={inputClass}
-                value={form.full_sync_hour ?? ""}
-                disabled={busy || !isTruthy(form.full_sync_enabled)}
-                onChange={(e) => set("full_sync_hour", e.target.value)}
-              />
-            </Field>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
+          <div className="rounded-lg border border-line/70 bg-panel px-4 py-3">
+            <Toggle
+              label="Daily full catalogue rebuild"
+              hint="Routine refresh once per day after the hour below: full BeautyFort + BTS catalogues, new products, and WordPress categories. Incremental 30-minute checks stay on. BTS 25%/7-day recovery stays as emergency backup. Manual Rebuild on Sync still works."
+              checked={isTruthy(form.full_sync_enabled)}
+              disabled={busy}
+              onChange={(v) => setBool("full_sync_enabled", v)}
+            />
           </div>
-        </details>
+          <Field
+            label={`Daily rebuild hour (${resolveTimeZone(form.schedule_timezone)})`}
+            help={`0–23 in your operator timezone. ≈ ${utcClockForLocalHour(
+              resolveTimeZone(form.schedule_timezone),
+              Math.min(23, Math.max(0, Math.trunc(Number(form.full_sync_hour ?? 0)) || 0)),
+            )} UTC today. One attempt after this hour; a failure is not retried every tick. Do not enter 30 — that belongs in Minutes between syncs.`}
+          >
+            <input
+              type="number"
+              step="1"
+              min={0}
+              max={23}
+              className={inputClass}
+              value={form.full_sync_hour ?? ""}
+              disabled={busy || !isTruthy(form.full_sync_enabled)}
+              onChange={(e) => set("full_sync_hour", e.target.value)}
+            />
+          </Field>
+        </div>
       </Section>
 
       <Section

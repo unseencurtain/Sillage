@@ -464,9 +464,9 @@ function CatalogueSyncPanel({
           <div>
             <dt className="font-medium text-ink">Full catalogue rebuild</dt>
             <dd className="text-muted">
-              Not the regular update. Use Sync → Rebuild catalogue for a first import or a full
-              structure refresh (new products, taxonomy). Optional nightly rebuild is under Settings →
-              Schedule → Advanced (off unless you turned it on).
+              Routine: Settings → Daily full catalogue rebuild (once per 24 hours after the chosen
+              hour) — new products, prices/stock, and WordPress categories from the ~9k stock file.
+              Manual: Sync → Rebuild catalogue.
             </dd>
           </div>
         </dl>
@@ -485,10 +485,10 @@ function CatalogueSyncPanel({
           <div>
             <dt className="font-medium text-ink">Full catalogue rebuild (~45k products)</dt>
             <dd className="text-muted">
-              Not the daily update. Use Sync → Rebuild catalogue when the shop is empty or you want
-              every BTS product re-imported. It also runs automatically as recovery if more than a
-              quarter of BTS products have not been seen for 7 days (missed batches / vanished SKUs) —
-              that is a safety net, not the normal cadence.
+              Routine: Settings → Daily full catalogue rebuild downloads the full ~45k catalogue and
+              creates/updates WordPress categories for every referenced BTS node. Emergency: if more
+              than a quarter of BTS products have not been seen for 7 days, the next 30-minute check
+              also pulls the full catalogue. Manual: Sync → Rebuild catalogue.
             </dd>
           </div>
         </dl>
