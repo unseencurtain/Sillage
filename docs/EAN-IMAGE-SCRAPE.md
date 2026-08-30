@@ -27,7 +27,7 @@ Rows with no real EAN are skipped (`skipped_no_barcode` in `export-summary.json`
 
 1. `export_missing.py` — MariaDB: empty Woo `_external_thumbnail_url` **and** a real EAN
 2. `scrape_ean_images.py` — Open Beauty/Products/Food Facts, then Go-UPC, query by EAN
-3. `apply_scraped.py` — copy onto `~/ecom_sites/data/media/`, merge EAN → CDN URL, rewrite
+3. `apply_scraped.py` — **zip only** by default. Does **not** write the shop.
+   Use `--apply-to-shop` only after the files in `scraped/` have been inspected.
 
-After apply, dashboard **Sync** shop writes should show those SKUs as updated when
-the rewrite runs. Hide-without-image stays **on**.
+Hide-without-image stays **on**. Do not push unreviewed photos onto the CDN.

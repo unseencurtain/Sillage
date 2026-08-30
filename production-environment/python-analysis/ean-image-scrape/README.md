@@ -23,7 +23,9 @@ cp -a production-environment/python-analysis/ean-image-scrape/. "$DIR/bin/"
 
 python3 "$DIR/bin/export_missing.py" --out-dir "$DIR"
 python3 "$DIR/bin/scrape_ean_images.py" --work-dir "$DIR" --workers 3
-python3 "$DIR/bin/apply_scraped.py" --work-dir "$DIR" --rewrite
+python3 "$DIR/bin/apply_scraped.py" --work-dir "$DIR"   # zip only; inspect scraped/
+# only after inspection:
+# python3 "$DIR/bin/apply_scraped.py" --work-dir "$DIR" --apply-to-shop --rewrite
 ```
 
 `--rewrite` copies files into `~/ecom_sites/data/media/`, merges
