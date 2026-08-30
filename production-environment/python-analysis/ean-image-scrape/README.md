@@ -1,10 +1,8 @@
 # EAN image scrape
 
-Fill shop products that have **no photo** by looking up **EAN only**
-(EAN-13 / UPC / GTIN — the barcode digits). Name and brand are exported so
-you can read the list; they are **never** used as a search key.
-
-A hit is kept only when the source returns the **same EAN** (leading zeros ignored).
+Fill shop products that have **no photo**. Every row must have an **EAN**.
+Lookups try EAN first, then **EAN + brand + name** (Bing / Open Facts search).
+A photo is always saved as `{ean}.jpg`. Rows with no EAN are skipped.
 
 ## VPS folder
 
