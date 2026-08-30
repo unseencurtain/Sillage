@@ -39,7 +39,15 @@ function fetchedLabel(r: SyncRun) {
   return r.products_fetched == null ? "—" : Number(r.products_fetched).toLocaleString();
 }
 
-function modeLabel(mode: string, source: string) {
+function writesLabel(r: Pick<SyncRun, "posts_created" | "posts_updated" | "prices_updated" | "errors">) {
+  const parts = [
+    `New ${Number(r.posts_created ?? 0).toLocaleString()}`,
+    `Updated ${Number(r.posts_updated ?? 0).toLocaleString()}`,
+    `Prices ${Number(r.prices_updated ?? 0).toLocaleString()}`,
+  ];
+  if (r.errors) parts.push(`Errors ${Number(r.errors).toLocaleString()}`);
+  return parts.join(" · ");
+}
   if (source === "cache" && mode === "fast") return "Price rewrite";
   if (source === "cache" && mode === "full") return "Content rewrite";
   if (mode === "full") return "Rebuild catalogue";
@@ -157,7 +165,7 @@ export function Sync() {
     qc.invalidateQueries({ queryKey: ["live-status"] });
     if (newest.status === "success" || newest.status === "partial") {
       toast(
-        `Sync #${id} finished (${newest.status}) — fetched ${newest.products_fetched}, wrote +${newest.posts_created}/~${newest.posts_updated} $ ${newest.prices_updated}`,
+        `Sync #${id} finished (${newest.status}) — ${writesLabel(newest)}`,
         "ok",
       );
     } else {
@@ -350,7 +358,12 @@ export function Sync() {
               <th className="px-4 py-3">Action</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Fetched</th>
-              <th className="px-4 py-3">Writes</th>
+              <th className="px-4 py-3">
+                Shop writes
+                <span className="mt-0.5 block font-normal normal-case tracking-normal text-[11px] text-muted/80">
+                  New products · listing updates · prices
+                </span>
+              </th>
               <th className="px-4 py-3">Duration</th>
               <th className="px-4 py-3">Started</th>
             </tr>
@@ -383,9 +396,8 @@ export function Sync() {
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 font-mono text-xs tabular-nums">{fetchedLabel(r)}</td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-muted">
-                    +{r.posts_created} ~{r.posts_updated} $ {r.prices_updated}
-                    {r.errors ? ` !${r.errors}` : ""}
+                  <td className="px-4 py-3 text-xs tabular-nums text-muted">
+                    {writesLabel(r)}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums">
                     {r.duration_ms ? `${(r.duration_ms / 1000).toFixed(1)}s` : "—"}

@@ -115,7 +115,7 @@ Operator model (two actions only):
 | **Rebuild catalogue** | same, `mode:"full"` | Empty shop / sync off → runs now. With Sync enabled and a catalogue already imported → **queues** for the next scheduled call |
 | **Stop** | `POST /api/sync/stop` | Only while a run is active; sets `sync_enabled=0`. A later Update does **not** turn the schedule back on |
 | Call-interval status | `GET /api/sync/live-status` | Per-vendor `retryInMinutes`. Daily remaining is unused (always `null`) |
-| Runs table | `GET /api/sync/runs` | History; Fetched shows `BF n · BTS m` (Δ when BTS used the changes API) |
+| Runs table | `GET /api/sync/runs` | History; Fetched shows `BF n · BTS m` (Δ when BTS used the changes API). **Shop writes** is `New n · Updated n · Prices n` (new WooCommerce products, listing/content rewrites including images, price/stock writes). Not `+ ~ $` |
 
 **Call interval:** Settings **Minutes between syncs** writes both `live_feed_min_minutes` and
 `fast_sync_minutes`. BeautyFort and BTS are gated independently. There is **no daily download
