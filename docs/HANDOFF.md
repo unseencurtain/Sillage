@@ -24,6 +24,7 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **Operator UI guide** | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | **Agent runbook** | [`AGENTS-RUNBOOK.md`](AGENTS-RUNBOOK.md) — sync, photos, orders, new VPS |
 | **New VPS / photos** | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) · [`specs/S3-images.md`](specs/S3-images.md) |
+| **Missing photos by EAN** | [`EAN-IMAGE-SCRAPE.md`](EAN-IMAGE-SCRAPE.md) · VPS `~/sillage/ean-image-scrape/` |
 | **BTS tracking** | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
 | **Health / recs** | [`RECOMMENDATIONS.md`](RECOMMENDATIONS.md) |
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |

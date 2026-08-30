@@ -21,6 +21,7 @@ Sillage/
 │   ├── OPERATOR-DASHBOARD.md          Engineers: every UI control
 │   ├── CONTEXT.md                     Schema + container facts
 │   ├── AGENTS-RUNBOOK.md              Agent loop
+│   ├── EAN-IMAGE-SCRAPE.md            Missing photos: fill by EAN only
 │   └── …
 ├── production-environment/
 │   ├── compose.yaml                   The only compose file that matters
@@ -35,7 +36,8 @@ Sillage/
 │   ├── ecom_sites/
 │   │   ├── config/                    php.ini, MariaDB, lps-media nginx
 │   │   └── data/wp/wp-content/plugins/sillage-bridge/   only WP path in git
-│   ├── python-analysis/               Photo matcher / restore scripts
+│   ├── python-analysis/               Photo matcher / restore / EAN scrape
+│   │   └── ean-image-scrape/          Export missing + EAN-only download
 │   └── wordpress-image/
 ├── tools/images/brasty/               Optional Playwright scrape
 └── b2b-wholesale/                     Pointer only (parked)
@@ -57,6 +59,7 @@ After cleanup, home should look like this:
 │   ├── compose.yaml
 │   ├── .feedscratch/                  Vendor feed cache (writable)
 │   ├── backups/                       Dated SQL dumps (optional)
+│   ├── ean-image-scrape/              EAN-only photo scrape (CSV + scraped/ + zip)
 │   ├── scripts/vps-bootstrap.sh
 │   ├── sillage-core/
 │   │   ├── data/image_overrides.json
