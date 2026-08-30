@@ -43,3 +43,15 @@ export function normalizeOrderStatus(status: string): string {
 
   return raw;
 }
+
+export function btsVendorPollStatus(
+  orderStatus: string,
+): "pending" | "confirmed" | "dispatched" | "delivered" | "cancelled" | "unknown" {
+  const normalised = normalizeOrderStatus(orderStatus);
+  if (normalised === "Delivered") return "delivered";
+  if (normalised === "Shipped") return "dispatched";
+  if (normalised === "Paid") return "confirmed";
+  if (normalised === "Pending Payment") return "pending";
+  if (normalised === "Cancelled") return "cancelled";
+  return "unknown";
+}

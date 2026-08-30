@@ -16,6 +16,30 @@ Everything else in this document is an *image source*: EAN → URL, no stock, no
 
 ---
 
+## Restore on a new VPS (photos)
+
+JPEG/WebP bytes are **gitignored** (`ecom_sites/data/media/**`). Git carries:
+
+- `sillage-core/data/image_overrides.json` (EAN → URL)
+- `sillage-core/data/found-images-manifest.json` (CDN filenames that must exist on disk)
+- `python-analysis/beautyfort-enriched/restore_found_images.py`
+
+Full migrate (rsync vs rebuild): [`../VPS-MIGRATE.md`](../VPS-MIGRATE.md). Agent loop:
+[`../AGENTS-RUNBOOK.md`](../AGENTS-RUNBOOK.md).
+
+```bash
+python3 production-environment/python-analysis/beautyfort-enriched/restore_found_images.py \
+  --overrides production-environment/sillage-core/data/image_overrides.json \
+  --dest ~/ecom_sites/data/media \
+  --media-src /path/from/old-vps/media \   # optional
+  --brasty-root /home/ubuntu/brasty \      # optional
+  --from-cdn                               # while images.slilverbelt.xyz still serves
+```
+
+Only `images.slilverbelt.xyz` URLs need files on disk. Shopify / BTS / ocean URLs are hotlinks.
+
+---
+
 ## Resolution order (how the shop picks a photo)
 
 At sync time, `sillage-core/src/sync/images.ts` resolves each product's image URL in this order:

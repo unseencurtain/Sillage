@@ -9,23 +9,13 @@ import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, recordEvent } from "../db/settings.ts";
 import { signPayload } from "../lib/hmac.ts";
 import { logger } from "../lib/log.ts";
-import { BeautyfortError } from "../vendors/beautyfort/BeautyfortClient.ts";
-import type { TrackingParcel, VendorPollStatus } from "./adapter.ts";
+import type { TrackingParcel } from "./adapter.ts";
 import { createOrderAdapter } from "./adapters/index.ts";
+import { isPermanentPollFailure, nextVendorOrderStatus } from "./pollRules.ts";
+
+export { isPermanentPollFailure, nextVendorOrderStatus } from "./pollRules.ts";
 
 const log = logger("tracking");
-
-/** Errors that will not clear on retry — park the row so the cron tick stops spamming. */
-export function isPermanentPollFailure(err: unknown): boolean {
-  if (err instanceof BeautyfortError && err.permanent) return true;
-  const msg = String(err);
-  return (
-    /no OrderReference/i.test(msg) ||
-    /order not found/i.test(msg) ||
-    /invalid vendor order number/i.test(msg) ||
-    /does not exist/i.test(msg)
-  );
-}
 
 async function touchLastPolled(id: number): Promise<void> {
   await execute(`UPDATE ${sil("sil_vendor_orders")} SET last_polled_at = NOW() WHERE id = ?`, [id]);
@@ -67,28 +57,6 @@ interface PollRow extends RowDataPacket {
   dry_run: number;
   last_polled_at: string | null;
   vendor_slug: string;
-}
-
-const STATUS_RANK: Record<string, number> = {
-  submitted: 1,
-  confirmed: 2,
-  dispatched: 3,
-  delivered: 4,
-};
-
-function mapPollToRow(status: VendorPollStatus): string | null {
-  switch (status) {
-    case "confirmed":
-      return "confirmed";
-    case "dispatched":
-      return "dispatched";
-    case "delivered":
-      return "delivered";
-    case "cancelled":
-      return "cancelled";
-    default:
-      return null;
-  }
 }
 
 async function pushToWooCommerce(payload: Record<string, unknown>): Promise<boolean> {
@@ -183,8 +151,8 @@ export async function pollVendorOrder(id: number): Promise<{
     [id],
   );
 
-  const next = mapPollToRow(polled.status);
-  if (next && (STATUS_RANK[next] ?? 0) > (STATUS_RANK[row.status] ?? 0)) {
+  const next = nextVendorOrderStatus(row.status, polled.status);
+  if (next) {
     await execute(
       `UPDATE ${sil("sil_vendor_orders")}
           SET status = ?,

@@ -111,10 +111,13 @@ order record for the operator.
 
 ## Polling
 
-Every 15 minutes for orders in `submitted` or `confirmed`. BeautyFort's own guidance is no more
-than one status poll per 5 minutes.
+Every 15 minutes for orders in `submitted` or `confirmed` (and `dispatched`, for delivery).
+BeautyFort's own guidance is no more than one status poll per 5 minutes.
 
-- BTS — `getOrder(orderNumber)` for status, `getTrackings([...])` in bulk for tracking
+- BTS — `getOrder(orderNumber)` for status; `getTrackings([...])` when tracking is still
+  empty. v2.1 `order_not_found` / `tracking: null` means **not assigned yet** (24–72h after
+  create), not a missing order. **Cancelled** must leave `submitted` (it is not a forward
+  rank). Details: [`../BTS-ORDERS.md`](../BTS-ORDERS.md).
 - BeautyFort — `getOrderDetail(ref, undefined, true)`, tracking arrives in `parcels[]`
   (`courierName`, `trackingCode`, `trackingURL`, `dateDispatched`) once status is `Dispatched`
 

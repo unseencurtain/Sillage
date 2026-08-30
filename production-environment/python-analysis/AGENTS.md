@@ -26,6 +26,15 @@ python3 beautyfort-enriched/fill_missing_shop_images.py \
   --out-delta /tmp/image_overrides.delta.json \
   --out-merged ../sillage-core/data/image_overrides.json
 
+# Restore CDN-hosted files onto a new VPS (map is in git; JPEGs are not)
+python3 beautyfort-enriched/restore_found_images.py \
+  --overrides ../sillage-core/data/image_overrides.json \
+  --dest ~/ecom_sites/data/media \
+  --brasty-root /home/ubuntu/brasty \
+  --from-cdn \
+  --write-manifest ../sillage-core/data/found-images-manifest.json
+# see docs/VPS-MIGRATE.md
+
 # optional: copy .env.example → .env and set WHOLESALE_PERFUMES_USER / WHOLESALE_PERFUMES_TOKEN
 python3 beautyfort-enriched/test.py
 python3 beautyfort-enriched/fetch_wholesale_perfumes.py
@@ -56,6 +65,8 @@ wholesale-perfumes catalog etiquette: download at most once per day (script cach
 beautyfort-enriched/
   enrich.py
   fill_missing_shop_images.py  — EAN match for BF+BTS rows still missing a usable photo
+  restore_found_images.py      — copy/download CDN files listed in image_overrides.json
+  brasty_placeholders.py       — MD5 skip-list for Brasty camera graphics
   fetch_wholesale_perfumes.py  — wholesale-perfumes.eu catalog download + parse
   host_override_images.py      — download remote override URLs → ecom_sites/data/media (images CDN)
   test.py

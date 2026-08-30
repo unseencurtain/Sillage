@@ -8,9 +8,9 @@
  */
 import { env } from "../../config/env.ts";
 import { loadVendor } from "../../db/settings.ts";
-import { BTSClient } from "../../vendors/bts/BtsClient.ts";
+import { BTSClient, coerceBtsTracking, isBtsTrackingNotReady } from "../../vendors/bts/BtsClient.ts";
 import type { CreateOrderParams, PaymentMethod } from "../../vendors/bts/types.ts";
-import { normalizeOrderStatus } from "../../vendors/bts/orderStatus.ts";
+import { btsVendorPollStatus } from "../../vendors/bts/orderStatus.ts";
 import type {
   CancelResult,
   Destination,
@@ -208,29 +208,35 @@ export class BtsOrderAdapter implements VendorOrderAdapter {
   }
 
   async poll(vendorOrderNumber: string): Promise<VendorOrderStatus> {
-    const detail = await client().getOrder(vendorOrderNumber);
-    const normalised = normalizeOrderStatus(detail.order_status);
-    const parcels =
-      detail.tracking && detail.tracking.trim() !== ""
-        ? [
-            {
-              courier: detail.shipping_company || "",
-              code: detail.tracking,
-              url: "",
-              dispatchedAt: null,
-            },
-          ]
-        : [];
+    const api = client();
+    const detail = await api.getOrder(vendorOrderNumber);
+    let tracking = coerceBtsTracking(detail.tracking);
+    // getOrder is the status source. getTrackings is the v2.1 bulk tracking
+    // endpoint — it often returns tracking:null or order_not_found until 24–72h.
+    if (!tracking) {
+      try {
+        const rows = await api.getTrackings([vendorOrderNumber]);
+        const match =
+          rows.find((r) => r.order_number === vendorOrderNumber) ?? rows[0];
+        tracking = coerceBtsTracking(match?.tracking);
+      } catch (err) {
+        if (!isBtsTrackingNotReady(err)) throw err;
+      }
+    }
 
-    let status: VendorOrderStatus["status"] = "unknown";
-    if (normalised === "Delivered") status = "delivered";
-    else if (normalised === "Shipped") status = "dispatched";
-    else if (normalised === "Paid") status = "confirmed";
-    else if (normalised === "Pending Payment") status = "pending";
-    else if (normalised === "Cancelled") status = "cancelled";
+    const parcels = tracking
+      ? [
+          {
+            courier: detail.shipping_company || "",
+            code: tracking,
+            url: "",
+            dispatchedAt: null,
+          },
+        ]
+      : [];
 
     return {
-      status,
+      status: btsVendorPollStatus(detail.order_status),
       vendorOrderNumber,
       rawStatus: detail.order_status,
       parcels,
