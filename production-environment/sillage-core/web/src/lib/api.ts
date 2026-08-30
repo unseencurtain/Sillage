@@ -103,6 +103,11 @@ export const api = {
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
+  setProductVisibility: (id: number, hidden: boolean) =>
+    request<{ ok: boolean; operator_hidden: boolean; syncStarted?: boolean; syncQueued?: boolean }>(
+      `/api/products/${id}/visibility`,
+      { method: "PUT", body: JSON.stringify({ hidden }) },
+    ),
   vendors: () =>
     request<{
       vendors: Vendor[];
@@ -265,7 +270,10 @@ export interface ProductsPage {
     vendor_price: string;
     primary_ean: string | null;
     vendor: string;
-    shop_visibility?: "visible" | "hidden_no_image" | "hidden_stock";
+    shop_visibility?: "visible" | "hidden_no_image" | "hidden_stock" | "hidden_operator";
+    operator_hidden?: boolean;
+    photo_url?: string | null;
+    shop_url?: string | null;
     image_url: string | null;
   }>;
   total: number;

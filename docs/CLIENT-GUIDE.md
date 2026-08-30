@@ -176,19 +176,29 @@ Empty checks for BTS are success, not failure.
 
 ### Products
 
-Search **SKU, name, or EAN**. This table is **read-only**. You do not hide or reprice a single
-row here.
+Search **SKU, name, or EAN**.
 
-Columns: **SKU**, **Name**, **Vendor**, **Stock**, **Shop**, **Cost**, **WP**.
+Columns: **Photo**, **SKU**, **Name**, **Vendor**, **Stock**, **Shop**, **Cost**, **WP**.
 
-**Shop** is what customers see on the catalogue — the photo WordPress is actually printing, not
-only the wholesaler feed. A vendor file that never landed in WooCommerce still counts as no photo.
+**Photo** opens the image the shop would print, in a new tab. No usable photo → **No photo** (or a
+link to the product page if one exists).
+
+**Shop** is a dropdown plus a reason badge.
+
+| Dropdown | What happens |
+|---|---|
+| **Follow rules** | Hide-without-image and the stock threshold decide. The next rewrite can show the product again if it has a real photo and enough stock. |
+| **Keep hidden** | Stays off the catalogue and search even when stock and photo would show it. Use this for a bad or wrong photo. The next rewrite keeps it hidden. |
 
 | Badge | Meaning |
 |---|---|
 | **Visible** | In the shop catalogue, with a real `http(s)` photo |
 | **Hidden · no image** | WooCommerce has no usable photo (empty, `None`, placeholder, or a tiny BeautyFort `/pic/` thumb). Stock can still be 1. |
 | **Hidden · stock** | At or below the stock threshold |
+| **Hidden · pinned** | You chose **Keep hidden** |
+
+Do not delete a product in WooCommerce to hide it. The next catalogue rewrite will create it
+again. Use **Keep hidden** instead.
 
 **Cost** is wholesale cost, not the selling price. Selling price is cost × your multiplier (and
 tiers / FX / VAT when those are set).
@@ -305,7 +315,12 @@ recalculation → spot-check a product on the shop. Do **not** start a live Sync
 
 **A product has stock but is missing from the shop**  
 Products → search SKU → read **Shop**. **Hidden · no image** means it needs a real photo, not more
-stock. **Hidden · stock** means the threshold hid it.
+stock. **Hidden · stock** means the threshold hid it. **Hidden · pinned** means someone chose
+**Keep hidden**.
+
+**A photo on the shop is wrong or not good enough**  
+Products → search SKU → **Open photo** to inspect → Shop dropdown → **Keep hidden**. Do not delete
+the product in WooCommerce.
 
 **I want to pause catalogue updates**  
 Settings → turn **Sync enabled** off, or **Stop** while a run is active. Turn **Sync enabled**

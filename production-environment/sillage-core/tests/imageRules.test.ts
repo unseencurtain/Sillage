@@ -81,5 +81,14 @@ describe("imageRules weak BeautyFort thumbs", () => {
         stockThreshold: 0,
       }),
     ).toBe("hidden_stock");
+    expect(
+      shopVisibility({
+        stock: 1,
+        imageUrl: "https://images.btswholesaler.com/ok.jpg",
+        hideWithoutImage: true,
+        stockThreshold: 0,
+        operatorHidden: true,
+      }),
+    ).toBe("hidden_operator");
   });
 });

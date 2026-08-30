@@ -136,6 +136,8 @@ interface PendingRow extends RowDataPacket {
   gallery_urls: string | string[];
   /** Woo `_external_thumbnail_url` — what the shop actually renders. */
   wp_thumb_url: string | null;
+  /** Dashboard “Keep hidden” pin — survives the next rewrite. */
+  operator_hidden: number;
 }
 
 interface PreparedProduct {
@@ -353,7 +355,7 @@ export async function writePendingProducts(
               o.id AS offer_id, o.vendor_id, o.vendor_product_id, o.sku, o.eans, o.name,
               o.description, o.brand, o.category_refs, o.attributes, o.extra, o.vendor_price,
               o.vendor_recommended_price, o.stock, o.image_url, o.gallery_urls,
-              thumb.meta_value AS wp_thumb_url
+              thumb.meta_value AS wp_thumb_url, p.operator_hidden
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          ${thumbJoin}
@@ -420,8 +422,10 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   );
 
   const hiddenNoImage = shouldHideForMissingImage(imageUrl, ctx.settings.hideProductsWithoutImage);
-  // Stock-threshold hide and missing-image hide OR together onto the same visibility terms.
-  const effectivePricing: PricingResult = hiddenNoImage ? { ...pricing, hidden: true } : pricing;
+  const operatorHidden = Number(row.operator_hidden) === 1;
+  // Stock hide, missing-image hide, and the Products “Keep hidden” pin OR together.
+  const effectivePricing: PricingResult =
+    hiddenNoImage || operatorHidden ? { ...pricing, hidden: true } : pricing;
 
   const pHash = priceHash(effectivePricing);
   const isNew = row.wp_post_id === null;
