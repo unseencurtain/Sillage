@@ -17,11 +17,10 @@ import csv
 import json
 import os
 import re
+import subprocess
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
@@ -44,6 +43,28 @@ OFF_HOSTS = (
     "world.openproductsfacts.org",
     "world.openfoodfacts.org",
 )
+
+SKIP_OPEN_FACTS = False
+_off_lock = Lock()
+_off_timeouts = 0
+_off_dead = False
+
+
+def open_facts_ok() -> bool:
+    if SKIP_OPEN_FACTS:
+        return False
+    return not _off_dead
+
+
+def note_open_facts_timeout() -> None:
+    global _off_timeouts, _off_dead
+    with _off_lock:
+        _off_timeouts += 1
+        if _off_timeouts >= 4 and not _off_dead:
+            _off_dead = True
+            print("open-facts: giving up for this run (4 timeouts)", flush=True)
+
+
 SKIP_URL = re.compile(
     r"(favicon|sprite|logo[-_]?only|1x1|pixel\.|placeholder|no[_-]?image|"
     r"woocommerce-placeholder|/th\?id=OIP)",
@@ -51,35 +72,48 @@ SKIP_URL = re.compile(
 )
 
 
-def http_get(url: str, ua: str = UA, timeout: int = 12) -> tuple[int, bytes, str]:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": ua,
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.8",
-        },
-    )
+# urllib timeout does not reliably kill a stalled TLS handshake (Open Facts).
+# curl --max-time does, so a dead host cannot freeze every worker.
+def http_get(url: str, ua: str = UA, timeout: int = 8) -> tuple[int, bytes, str]:
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            ctype = resp.headers.get("Content-Type") or ""
-            # Cap the body. A stalled or huge CDN reply used to block a worker
-            # forever and freeze the whole pool (no new {ean}.jpg, high CPU).
-            chunks: list[bytes] = []
-            total = 0
-            limit = 2_000_000
-            while total < limit:
-                piece = resp.read(min(65_536, limit - total))
-                if not piece:
-                    break
-                chunks.append(piece)
-                total += len(piece)
-            return resp.status, b"".join(chunks), ctype
-    except urllib.error.HTTPError as exc:
-        body = exc.read() if exc.fp else b""
-        return exc.code, body, exc.headers.get("Content-Type") or ""
-    except Exception:
+        proc = subprocess.run(
+            [
+                "curl",
+                "-sS",
+                "-L",
+                "--globoff",
+                "--max-time",
+                str(timeout),
+                "--connect-timeout",
+                "4",
+                "--max-filesize",
+                "2000000",
+                "-A",
+                ua,
+                "-H",
+                "Accept-Language: en-US,en;q=0.8",
+                "-w",
+                "\n__CURL__%{http_code}\t%{content_type}",
+                url,
+            ],
+            capture_output=True,
+            timeout=timeout + 5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return 0, b"", ""
+    raw = proc.stdout
+    marker = b"\n__CURL__"
+    idx = raw.rfind(marker)
+    if idx == -1:
+        return 0, raw, ""
+    body = raw[:idx]
+    meta = raw[idx + len(marker) :].decode("utf-8", "replace").strip()
+    code_s, _, ctype = meta.partition("\t")
+    try:
+        code = int(code_s)
+    except ValueError:
+        code = 0
+    return code, body, ctype
 
 
 def json_get(url: str, ua: str = UA) -> tuple[int, dict | None]:
@@ -128,10 +162,16 @@ def short_name(name: str) -> str:
 
 
 def lookup_open_facts_ean(ean: str) -> dict | None:
+    if not open_facts_ok():
+        return None
     # Beauty first (this shop). Other Open Facts hosts only if beauty misses.
     for host in OFF_HOSTS:
         code = primary_codes(ean)[0] if primary_codes(ean) else ean
         status, data = json_get(f"https://{host}/api/v0/product/{code}.json")
+        if status == 0:
+            note_open_facts_timeout()
+            if not open_facts_ok():
+                return None
         if status != 200 or not data or data.get("status") != 1:
             continue
         product = data.get("product") or {}
@@ -151,6 +191,8 @@ def lookup_open_facts_ean(ean: str) -> dict | None:
 
 
 def lookup_open_facts_search(ean: str, brand: str, name: str) -> dict | None:
+    if not open_facts_ok():
+        return None
     terms = " ".join(p for p in (brand, short_name(name)) if p).strip()
     if len(terms) < 4:
         return None
@@ -161,6 +203,10 @@ def lookup_open_facts_search(ean: str, brand: str, name: str) -> dict | None:
             f"&search_simple=1&action=process&json=1&page_size=8"
         )
         status, data = json_get(url)
+        if status == 0:
+            note_open_facts_timeout()
+            if not open_facts_ok():
+                return None
         if status != 200 or not data:
             continue
         for product in data.get("products") or []:
@@ -374,6 +420,11 @@ def main() -> int:
         action="store_true",
         help="retry EANs previously marked miss (use after adding name tricks)",
     )
+    ap.add_argument(
+        "--skip-open-facts",
+        action="store_true",
+        help="do not call Open Facts (use when that API hangs the worker pool)",
+    )
     args = ap.parse_args()
 
     work = Path(args.work_dir)
@@ -384,16 +435,21 @@ def main() -> int:
     reports.mkdir(parents=True, exist_ok=True)
     progress_path = reports / "progress.jsonl"
 
+    global SKIP_OPEN_FACTS
+    SKIP_OPEN_FACTS = args.skip_open_facts
+
     products = load_products(csv_path)
-    # Resume: always skip EANs we already saved. Skip previous misses unless
-    # --retry-miss, so a restart does not re-walk 800 dead Open Facts rows first.
-    skip = already_done(progress_path, skip_miss=not args.retry_miss)
+    # Resume: skip saved jpgs and jsonl hits. Skip previous misses unless
+    # --retry-miss, so a restart does not re-walk dead Open Facts rows first.
+    on_disk = {p.stem for p in scraped.iterdir() if p.is_file()}
+    skip = already_done(progress_path, skip_miss=not args.retry_miss) | on_disk
     todo_rows = [row for norm, row in products.items() if norm not in skip]
     if args.limit:
         todo_rows = todo_rows[: args.limit]
     print(
-        f"catalog={len(products)} already_found={len(skip)} "
-        f"todo={len(todo_rows)} workers={args.workers} retry_miss={args.retry_miss}",
+        f"catalog={len(products)} skip={len(skip)} "
+        f"todo={len(todo_rows)} workers={args.workers} retry_miss={args.retry_miss} "
+        f"skip_open_facts={SKIP_OPEN_FACTS}",
         flush=True,
     )
 
