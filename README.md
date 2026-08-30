@@ -13,6 +13,14 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 | sillage-core | Catalogue sync, pricing, images, order ingest + vendor dispatch |
 | sillage-bridge | Thin WP plugin (REST + shortcodes only — **no product SQL writes**) |
 
+## For clients (humans)
+
+**[How to use Sillage](docs/CLIENT-GUIDE.md)** — shop vs dashboard, money safety, every menu
+page, shopper rules, everyday recipes. **Update that file in the same change** when dashboard
+labels, Settings knobs, or shopper behaviour change.
+
+Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIENT-FEATURE-WALKTHROUGH.md).
+
 ## Repository layout
 
 | Path | What it is |
@@ -24,8 +32,7 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 | `…/plugins/sillage-bridge/` | Only WordPress path that is versioned |
 | `production-environment/wordpress-image/` | Dockerfile → `unseencurtain/sillage-wordpress` |
 | `production-environment/scripts/` | bootstrap, build-push, deploy |
-| `docs/` | Start with [`docs/CONTEXT.md`](docs/CONTEXT.md) |
-| `docs/CLIENT-FEATURE-WALKTHROUGH.md` | Client-facing feature tour |
+| `docs/` | Start with the **client guide** [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md) (humans / how to use). Engineers: [`docs/CONTEXT.md`](docs/CONTEXT.md) |
 
 ## Safety (read before live sync / dispatch)
 

@@ -5,9 +5,10 @@ only the one deep doc you need. Do not wander the tree.
 
 | If you need | Read |
 |---|---|
+| **Client / human how-to** | [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md) — update with UI/shopper changes |
 | Resume / live host / current health | [`HANDOFF.md`](HANDOFF.md) |
 | Schema, containers, what PHP may write | [`CONTEXT.md`](CONTEXT.md) |
-| Dashboard knobs | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
+| Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | Move shop + photos to a **new** VPS | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) |
 | Photos, Brasty, overrides | [`specs/S3-images.md`](specs/S3-images.md) |
