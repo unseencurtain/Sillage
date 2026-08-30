@@ -102,14 +102,16 @@ export function shouldHideForMissingImage(
 }
 
 /** Why a product is hidden from the shop loop (same rules the writer applies). */
-export type ShopVisibility = "visible" | "hidden_no_image" | "hidden_stock";
+export type ShopVisibility = "visible" | "hidden_no_image" | "hidden_stock" | "hidden_operator";
 
 export function shopVisibility(opts: {
   stock: number;
   imageUrl: string | null | undefined;
   hideWithoutImage: boolean;
   stockThreshold: number;
+  operatorHidden?: boolean;
 }): ShopVisibility {
+  if (opts.operatorHidden) return "hidden_operator";
   if (shouldHideForMissingImage(opts.imageUrl, opts.hideWithoutImage)) return "hidden_no_image";
   if (opts.stock <= opts.stockThreshold) return "hidden_stock";
   return "visible";

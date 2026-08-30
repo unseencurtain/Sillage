@@ -481,7 +481,7 @@ api.get("/products", async (c) => {
     query<RowDataPacket>(
       `SELECT p.id, p.sku, p.wp_post_id, p.slug, o.name, o.stock, o.vendor_price, o.primary_ean,
               o.eans, COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url,
-              v.min_visible_stock, thumb.meta_value AS wp_thumb_url
+              v.min_visible_stock, thumb.meta_value AS wp_thumb_url, p.operator_hidden
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          JOIN ${sil("sil_vendors")} v ON v.id = o.vendor_id
@@ -502,7 +502,13 @@ api.get("/products", async (c) => {
       row.min_visible_stock === null || row.min_visible_stock === undefined
         ? settings.stockThreshold
         : Number(row.min_visible_stock);
-    const { min_visible_stock: _min, eans: _eans, wp_thumb_url: wooThumb, ...rest } = row;
+    const {
+      min_visible_stock: _min,
+      eans: _eans,
+      wp_thumb_url: wooThumb,
+      operator_hidden: opHidden,
+      ...rest
+    } = row;
     void _min;
     void _eans;
     const resolved = resolveImageUrl(
@@ -511,18 +517,77 @@ api.get("/products", async (c) => {
       overrides,
       offerImages,
     );
+    const photo = displayedShopImage((wooThumb as string | null) ?? null, resolved);
+    const operatorHidden = Number(opHidden) === 1;
+    const slug = typeof row.slug === "string" ? row.slug : "";
     return {
       ...rest,
+      operator_hidden: operatorHidden,
+      photo_url: photo,
+      shop_url: slug ? `${env.wordpress.baseUrl}/product/${slug}/` : null,
       shop_visibility: shopVisibility({
         stock: Number(row.stock),
-        imageUrl: displayedShopImage((wooThumb as string | null) ?? null, resolved),
+        imageUrl: photo,
         hideWithoutImage: settings.hideProductsWithoutImage,
         stockThreshold: threshold,
+        operatorHidden,
       }),
     };
   });
 
   return c.json({ items: decorated, total: Number(totalRows[0]?.total ?? 0), page, limit });
+});
+
+api.put("/products/:id/visibility", async (c) => {
+  const id = Number(c.req.param("id"));
+  const body = await c.req.json<{ hidden?: boolean }>();
+  if (!Number.isFinite(id) || id <= 0 || typeof body.hidden !== "boolean") {
+    return c.json({ error: "hidden must be true or false" }, 400);
+  }
+
+  const rows = await query<RowDataPacket & { id: number; sku: string | null; wp_post_id: number | null }>(
+    `SELECT id, sku, wp_post_id FROM ${sil("sil_products")} WHERE id = ? LIMIT 1`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return c.json({ error: "product not found" }, 404);
+
+  await execute(
+    `UPDATE ${sil("sil_products")}
+        SET operator_hidden = ?, needs_price_write = 1
+      WHERE id = ?`,
+    [body.hidden ? 1 : 0, id],
+  );
+
+  // Hide immediately so a bad photo is off the catalogue before the rewrite lands.
+  if (body.hidden && row.wp_post_id) {
+    await execute(
+      `INSERT IGNORE INTO ${wp("term_relationships")} (object_id, term_taxonomy_id, term_order)
+       SELECT ?, tt.term_taxonomy_id, 0
+         FROM ${wp("term_taxonomy")} tt
+         JOIN ${wp("terms")} t ON t.term_id = tt.term_id
+        WHERE tt.taxonomy = 'product_visibility'
+          AND t.slug IN ('exclude-from-catalog', 'exclude-from-search')`,
+      [row.wp_post_id],
+    );
+  }
+
+  const syncStatus = await kickPriceRewrite();
+  await recordEvent(
+    "info",
+    "products",
+    body.hidden
+      ? `Keep hidden: ${row.sku ?? id}`
+      : `Follow shop rules: ${row.sku ?? id}`,
+    { productId: id, sku: row.sku, hidden: body.hidden },
+  );
+
+  return c.json({
+    ok: true,
+    operator_hidden: body.hidden,
+    syncStarted: syncStatus === "started",
+    syncQueued: syncStatus === "queued",
+  });
 });
 
 api.get("/vendors", async (c) => {

@@ -55,7 +55,7 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 |---|---|---|
 | Overview | `/` | Health snapshot + **Run sync now** |
 | Sync | `/sync` | **Run sync now** + manual runs + BF/BTS live gates |
-| Products | `/products` | Catalogue search (read-only) |
+| Products | `/products` | Catalogue search; Shop dropdown can pin **Keep hidden** |
 | Vendors | `/vendors` | BeautyFort + BTS editors; WPF parked notice |
 | Orders | `/orders` | Per-vendor order dispatch |
 | Secrets | `/secrets` | Vendor API credentials (set / clear; never echoed) |
@@ -143,12 +143,13 @@ emergency-only. Order housekeeping runs every tick.
 | Control | API | Effect |
 |---|---|---|
 | Search box | `GET /api/products?q=&page=` | Filters SKU / name / EAN |
-| Table | same | Read-only. Cost = vendor price on primary offer. **Shop** is the same visibility the writer applies (hide-without-image + stock threshold) after image resolve |
+| Photo | same (`photo_url`) | Opens the displayed shop image in a new tab |
+| Shop dropdown | `PUT /api/products/:id/visibility` `{ hidden }` | `hidden: true` sets `sil_products.operator_hidden=1`, hides in Woo immediately, marks `needs_price_write`, kicks a fast rewrite. `hidden: false` clears the pin; rewrite applies image/stock rules again |
 | Pagination | same | 50 per page |
 
-No edit / hide / reprice actions. Retail price and visibility change via sync + Settings/Vendors.
+Retail price still changes only via Settings/Vendors. Do not delete the WooCommerce post — the next full write recreates it.
 
-**Shop column:** `Visible` / `Hidden · no image` / `Hidden · stock`. Stock of `1` does **not** mean the listing is on the storefront. Hide-without-image (default on) excludes products whose **resolved** image is still empty, a placeholder (`no_image`, Woo placeholder), or a weak BeautyFort `/pic/` thumb. The writer ORs that onto the same `exclude-from-catalog` + `exclude-from-search` terms as the stock threshold. Products stay in WooCommerce (and on this table) with their WP id.
+**Shop badges:** `Visible` / `Hidden · no image` / `Hidden · stock` / `Hidden · pinned`. Stock of `1` does **not** mean the listing is on the storefront. Hide-without-image (default on) excludes products whose **displayed Woo thumb** is still empty, a placeholder (`no_image`, Woo placeholder), or a weak BeautyFort `/pic/` thumb. The writer ORs image hide, stock hide, and `operator_hidden` onto `exclude-from-catalog` + `exclude-from-search`. Products stay in WooCommerce (and on this table) with their WP id.
 
 **Image resolve order** (same as sync): curated `data/image_overrides.json` → another vendor’s usable photo for the same EAN → else no image. Cross-vendor fill never uses `/pic/` thumbs or `no_image.webp` as donors. Example: Victoria’s Secret Temptation Body Lotion (EAN `0197575132998`) can show stock 1 / WP 70276 and still be **Hidden · no image** because BeautyFort’s `/pic/` URL and BTS’s `no_image.webp` are both unusable.
 
