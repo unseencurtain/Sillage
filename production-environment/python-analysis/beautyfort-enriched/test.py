@@ -44,6 +44,7 @@ def neq(actual, not_expected, label):
 
 # Import the functions we test
 sys.path.insert(0, ROOT)
+from brasty_placeholders import BRASTY_NO_PHOTO_MD5, file_is_brasty_placeholder
 from enrich import (
     normalize_ean,
     parse_bf_barcodes,
@@ -329,6 +330,17 @@ print(f"  (report: {report['products_with_image']}/{report['total_beautyfort_pro
 for r in enriched:
     img = r.get("image_url") or ""
     assert "Thumbnail" not in img, f"thumbnail found in output: {img}"
+
+# ============================================================
+print("\n--- Brasty camera placeholders ---")
+# ============================================================
+
+eq(len(BRASTY_NO_PHOTO_MD5), 3, "three known encodings of the camera graphic")
+eq(
+    "3c9965d4926d04529b513909a41373dc" in BRASTY_NO_PHOTO_MD5,
+    True,
+    "8542-byte 8809598454323.jpg encoding is blocked",
+)
 
 # ============================================================
 # Summary

@@ -70,7 +70,8 @@ beautyfort-enriched/
 ## Source priority
 
 1. existing `sillage-core/data/image_overrides.json`
-2. **Brasty** VPS dump (`/home/ubuntu/brasty/*`, filename stem = EAN)
+2. **Brasty** VPS dump (`/home/ubuntu/brasty/*`, filename stem = EAN). Skip camera
+   placeholders (`brasty_placeholders.py`) — they are not product photos.
 3. oceanfragrances.csv (image source only — not a vendor)
 4. Shopify CSV (`Variant Barcode` / `Image Src`)
 5. wholesale-perfumes XML (`pictures/flask_front`) when enriching WPF / historic BF rows
