@@ -2,16 +2,29 @@
 
 ## What This Is
 
-Cross-vendor image enrichment tool. Matches BeautyFort products against multiple external
-catalogs (wholesale-perfumes.eu XML, oceanfragrances CSV, Shopify, BTS) to find real
-product images, then writes Bun-ready `image_overrides.json`.
+Cross-vendor image enrichment tool. Matches **BeautyFort and BTS** products that still have no
+usable photo against Brasty (EAN `.jpg` dump), oceanfragrances CSV, and Shopify exports, then
+writes Bun-ready `image_overrides.json`.
 
-BeautyFort CDN images are often placeholders forever. This pipeline stays outside the Bun app.
+BeautyFort `/pic/` thumbs and BTS `no_image.webp` are unusable — hide-without-image keeps those
+SKUs out of the shop until an override exists.
+
+This pipeline stays outside the Bun app.
 
 ## Commands
 
 ```bash
 cd production-environment/python-analysis
+
+# Match shop products missing a usable photo (BeautyFort + BTS) by EAN
+python3 beautyfort-enriched/fill_missing_shop_images.py \
+  --products-json /tmp/shop_products.json \
+  --overrides ../sillage-core/data/image_overrides.json \
+  --ocean /path/oceanfragrances.csv \
+  --shopify /path/products_export_1.csv \
+  --brasty-eans /tmp/brasty_eans.txt \
+  --out-delta /tmp/image_overrides.delta.json \
+  --out-merged ../sillage-core/data/image_overrides.json
 
 # optional: copy .env.example → .env and set WHOLESALE_PERFUMES_USER / WHOLESALE_PERFUMES_TOKEN
 python3 beautyfort-enriched/test.py
@@ -25,9 +38,15 @@ LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz \
 # optional next: --host www.oceanfragrances.com
 ```
 
-After `--install-core` / hosting rewrites, run a **fast / rewrite sync** on the shop so
-`_external_thumbnail_url` updates for existing products. Rsync `ecom_sites/data/media/` to
-the VPS host path (bind-mounted into the `lps-media` container) when using self-hosted URLs.
+After merging overrides, on `ovhe`: copy Brasty jpgs into `~/ecom_sites/data/media/`, rsync
+`image_overrides.json` to `~/sillage/sillage-core/data/`, **recreate** `sillage-core` /
+`sillage-cron`, then:
+
+```bash
+docker exec sillage-core bun run sync -- --mode=full --source=cache --rewrite-only
+```
+
+(`--mode=fast --rewrite-only` does not write image-only dirty flags.)
 
 wholesale-perfumes catalog etiquette: download at most once per day (script caches ~20h).
 
@@ -36,6 +55,7 @@ wholesale-perfumes catalog etiquette: download at most once per day (script cach
 ```
 beautyfort-enriched/
   enrich.py
+  fill_missing_shop_images.py  — EAN match for BF+BTS rows still missing a usable photo
   fetch_wholesale_perfumes.py  — wholesale-perfumes.eu catalog download + parse
   host_override_images.py      — download remote override URLs → ecom_sites/data/media (images CDN)
   test.py
@@ -49,13 +69,14 @@ beautyfort-enriched/
 
 ## Source priority
 
-1. seed `data/image_overrides.json`
-2. **wholesale-perfumes XML** (`products/wholesale_perfumes_catalog.xml` from `--fetch-wholesale-perfumes`)
+1. existing `sillage-core/data/image_overrides.json`
+2. **Brasty** VPS dump (`/home/ubuntu/brasty/*`, filename stem = EAN)
 3. oceanfragrances.csv (image source only — not a vendor)
-4. Shopify CSV
-5. BTS JSON
+4. Shopify CSV (`Variant Barcode` / `Image Src`)
+5. wholesale-perfumes XML (`pictures/flask_front`) when enriching WPF / historic BF rows
+6. BTS JSON (cross-vendor fill also runs automatically at sync)
 
-Multi-EAN fan-out: any hit maps **all** barcodes on that BeautyFort product to the same URL.
+Multi-EAN fan-out: any hit maps **all** barcodes on that product to the same URL.
 
 ## Bun consumption
 
@@ -66,4 +87,6 @@ Multi-EAN fan-out: any hit maps **all** barcodes on that BeautyFort product to t
 - `WHOLESALE_PERFUMES_TOKEN` is the API token from wholesale-perfumes **user settings**, not necessarily the shop password.
 - "Ocean" in this folder means **oceanfragrances.csv** (image CSV), never the wholesaler.
 - Large fixtures under `products/` are not committed.
-- Next vendor image work: Brasty Playwright scraper (CSV has no images).
+- Next vendor image work: Brasty Playwright scraper for EANs **not** already in `/home/ubuntu/brasty/`.
+- Victoria’s Secret EAN `0197575132998` (SKU `BF-F558351`) was not in Brasty / ocean / Shopify —
+  still needs a manual photo. Do not disable hide-without-image shop-wide for one SKU.

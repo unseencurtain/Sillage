@@ -53,6 +53,7 @@ describe("retail live cooldown — no silent cache", () => {
     expect(vendorsSrc).toContain("How often this vendor updates");
     expect(vendorsSrc).toContain("About once a day on the shop");
     expect(vendorsSrc).toContain("re-downloads their full stock file");
+    expect(vendorsSrc).toContain("Daily full catalogue rebuild");
   });
 
   test("settings Save keeps cooldown and fast cadence in lockstep", () => {

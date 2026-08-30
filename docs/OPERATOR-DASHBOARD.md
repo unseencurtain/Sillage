@@ -126,8 +126,9 @@ silently reuse a stale on-disk feed.
 invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignores the interval).
 
 **Schedule:** cron every 5 minutes; when Sync enabled is on, a due tick runs fast price/stock
-(or a queued rebuild). Optional nightly rebuild is under Settings → Schedule → Advanced. Order
-housekeeping runs every tick.
+(or a queued rebuild). **Daily full catalogue rebuild** is a first-class Settings control (keep
+on for this shop). Incremental 30-minute checks still run. BTS 25%/7-day stale recovery stays
+emergency-only. Order housekeeping runs every tick.
 
 `--vendor=all` never includes parked wholesale-perfumes.
 
@@ -204,8 +205,8 @@ The **Minutes between syncs** field stays on Settings (one number; BeautyFort an
 
 | Vendor | Prices and stock on the shop | Full catalogue rebuild |
 |---|---|---|
-| BeautyFort | Every check (~30 min). They have no change-only feed, so each call re-downloads the ~9k stock file | Sync → Rebuild catalogue (first import / structure). Optional nightly rebuild is Advanced and off by default |
-| BTS | **About once a day.** We still check every 30 min; BTS only publishes a daily change batch, so most checks are empty until that batch appears | Same Rebuild button. Also auto-recovery if >25% of BTS offers unseen for 7 days — not the normal path |
+| BeautyFort | Every check (~30 min). They have no change-only feed, so each call re-downloads the ~9k stock file | Settings → Daily full catalogue rebuild (routine). Manual: Sync → Rebuild catalogue |
+| BTS | **About once a day.** We still check every 30 min; BTS only publishes a daily change batch, so most checks are empty until that batch appears | Same daily rebuild (creates WP categories for referenced BTS nodes). Emergency: auto-recovery if >25% of BTS offers unseen for 7 days — not the normal path |
 
 The 48-hour lookback on BTS change checks is an implementation detail (so yesterday’s batch is not missed). It is **not** “BTS updates every 48 hours”. Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
 
@@ -278,9 +279,9 @@ sync just to reprice — Save already queues a rewrite-only run.
 |---|---|---|
 | Sync enabled | `sync_enabled` | On → schedule owns price/stock. Stop turns it off. Manual Update does not turn it back on |
 | Operator timezone | `schedule_timezone` | IANA zone for dashboard clocks + optional nightly hour. MariaDB stays UTC |
-| Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Per-vendor call interval + schedule cadence |
-| Nightly rebuild (Advanced) | `full_sync_enabled` | Optional extra full import after the hour; prefer Sync → Rebuild catalogue |
-| Nightly rebuild hour (Advanced) | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not the minutes interval) |
+| Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Incremental check interval |
+| Daily full catalogue rebuild | `full_sync_enabled` | Routine once-per-day full import (new products + WP categories). Keep on. Incremental 30-min checks still run |
+| Daily rebuild hour | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not the minutes interval). One attempt after this hour |
 | Sync source | `sync_source` | Hidden from main UI; keep `live` in production (`local` = fixtures) |
 
 ### Pricing & catalogue visibility

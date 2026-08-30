@@ -258,9 +258,9 @@ cadence is a settings edit, not a rebuild.
 | `sync_enabled` | `1` | Schedule kill switch. Manual Update works when off and does not turn this back on |
 | `fast_sync_minutes` | `30` | Schedule cadence; kept equal to `live_feed_min_minutes` from Settings |
 | `live_feed_min_minutes` | `30` | Per-vendor call interval. Daily download counters are recorded but never block |
-| `full_sync_enabled` | `0` | Optional nightly full rebuild (prefer Sync → Rebuild button) |
-| `schedule_timezone` | `UTC` | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
-| `full_sync_hour` | `3` | Hour of day (0–23) in `schedule_timezone` for optional nightly full |
+| `full_sync_enabled` | seed `0`; **live shop `1`** | Routine once-per-day full import (new SKUs + WP categories). Keep on. Incremental 30-min checks still run. Sync → Rebuild remains the manual escape |
+| `schedule_timezone` | `UTC` (live: `Asia/Dhaka`) | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
+| `full_sync_hour` | `3` (live: `23`) | Hour of day (0–23) in `schedule_timezone`. One attempt after this hour |
 | `sync_source` | `live` | `live` hits vendors (no silent disk fallback when gated); `local` = fixtures; `cache` = rewrite-only internal |
 
 Rules, all evaluated by the database so no clock skew is possible:
@@ -314,8 +314,8 @@ can illustrate any vendor's product.
 | Image source | Where | Notes |
 |---|---|---|
 | oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
-| Brasty | `tools/images/brasty/` | Playwright scrape; watermarked photos. Explicitly **not** a supplier |
-| Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export |
+| Brasty | VPS folders `/home/ubuntu/brasty/{in_stock,out_of_stock,sale,new,back_in_stock,hot_deals}` (zero-padded EAN `.jpg`); scrape tool `tools/images/brasty/` | Image source only. Match by **EAN**. Copy hits into `~/ecom_sites/data/media/` (CDN `https://images.slilverbelt.xyz/<file>`). Playwright crawl is optional for new photos. Explicitly **not** a supplier |
+| Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export (`Variant Barcode` → `Image Src`) |
 | Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
 | wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |
 
