@@ -30,7 +30,7 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 ## Safety (read before live sync / dispatch)
 
 - Vendor order APIs have **no sandbox**. Defaults: `orders_dry_run=1`, `orders_auto_dispatch=0`.
-- Live catalogue fetches are **rate-gated** (min interval + per-day caps) with on-disk feed cache.
+- Live catalogue fetches are **interval-gated** (minutes between calls per wholesaler) with an on-disk feed cache. There is no daily download cap.
 - **Never commit** `.env`, `.deploy/`, or `*.pem`.
 - WordPress core / MariaDB data under `ecom_sites/data/` are gitignored (plugin excepted).
 - Bun writes products via SQL; PHP must not grow write paths.
@@ -146,7 +146,7 @@ bun test
 | Firewall | ufw allows 22/80/443 only on bootstrapped hosts |
 | DB | `sillage` user: ALL on `sillage.*`; narrow DML/SELECT on listed `earth.wp_*` tables only (see `sillage-grants.sql`) |
 | Orders | Dry-run default; live dispatch is explicit and spends real money |
-| Feeds | Live vendor downloads capped; disk cache under `.feedscratch/cache` |
+| Feeds | Live vendor downloads spaced by the call interval; disk cache under `.feedscratch/cache` |
 
 ## Agents / contributors
 

@@ -19,7 +19,6 @@ interface VendorForm {
   minOrderValueEur: string;
   serviceableCountries: string;
   active: boolean;
-  liveMaxPerDay: string;
 }
 
 function toForm(v: Vendor): VendorForm {
@@ -33,7 +32,6 @@ function toForm(v: Vendor): VendorForm {
       v.minOrderValueEur === null || v.minOrderValueEur === undefined ? "" : String(v.minOrderValueEur),
     serviceableCountries: v.serviceableCountries.join(" "),
     active: v.active,
-    liveMaxPerDay: v.liveMaxPerDay === null || v.liveMaxPerDay === undefined ? "" : String(v.liveMaxPerDay),
   };
 }
 
@@ -85,10 +83,6 @@ function buildPatch(form: VendorForm, original: Vendor): VendorPatch {
   }
 
   if (form.active !== original.active) patch.active = form.active;
-
-  const liveMax = emptyToNullNumber(form.liveMaxPerDay);
-  const liveMaxInt = liveMax === null ? null : Math.trunc(liveMax);
-  if (liveMaxInt !== original.liveMaxPerDay) patch.liveMaxPerDay = liveMaxInt;
 
   return patch;
 }
@@ -383,25 +377,6 @@ function VendorEditor({
           />
         </div>
       </div>
-
-      <details className="mt-4 rounded-lg border border-line bg-canvas/40 px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium">Advanced — live feed cap</summary>
-        <label className="mt-3 block text-sm">
-          <span className="font-medium text-ink">Live downloads / day</span>
-          <input
-            type="number"
-            step="1"
-            className={inputClass}
-            value={form.liveMaxPerDay}
-            disabled={save.isPending}
-            onChange={(e) => set("liveMaxPerDay", e.target.value)}
-          />
-          <span className="mt-1 block text-xs text-muted">
-            Catalogue feed daily cap (BeautyFort ~40 SOAP budget; BTS similarly capped). Leave the
-            default unless you are tuning rate limits.
-          </span>
-        </label>
-      </details>
 
       <p className="mt-4 text-sm text-muted">
         Changing the multiplier or VAT starts a cache rewrite-only sync after save. CLI{" "}

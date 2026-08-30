@@ -16,33 +16,29 @@ Imports and maintains tens of thousands of products from BeautyFort and BTS into
 **How to navigate**
 1. Open **https://sillage.slilverbelt.xyz** → log in.
 2. Go to **Sync**.
-3. Review the run table: mode (`fast` / `full`), source (`live` / `cache` / `local`), fetched counts, writes, duration.
-4. Use **Run fast sync** for price/stock; **Run full sync** for full catalogue + content rewrite.
+3. Review the run table: mode (`fast` / `full`), Fetched (`BF n · BTS m`), writes, duration.
+4. Use **Rebuild catalogue** for the first import or a full structure refresh (queues when Sync enabled is on). Leave **Sync enabled** on for scheduled price/stock. **Update prices & stock** is a one-off only when the schedule is off.
 
 **Value to the client**  
 A full catalogue that would be impractical to maintain by hand stays aligned with wholesaler stock and pricing on a schedule.
 
 ---
 
-## 2. Live API rate limits & feed cache (anti-ban)
+## 2. Call interval (no daily download cap)
 
 **What it does**  
-BeautyFort has a tight daily SOAP budget (~40 calls). The system:
-- Caches each downloaded feed on disk
-- Enforces a **minimum interval** between live downloads (default **60 minutes**)
-- Enforces **daily caps** (BeautyFort default **20**, BTS default **48**)
-- When gated, reuses the last cached feed instead of hitting the vendor again
-- Only opens scheduled catalogue syncs at **:00** and **:30** past the hour
+Each wholesaler is called on a single interval (Settings → **Minutes between syncs**):
+- BeautyFort and BTS are gated independently — one cooling down does not block the other
+- There is **no daily download cap**
+- When a vendor is inside its interval, that vendor is skipped (no silent reuse of a stale on-disk feed)
+- Cron ticks every 5 minutes and starts a run when the interval has elapsed
 
 **How to navigate**
-1. **Sync** page → top cards show BeautyFort / BTS live status (allowed vs cache, reason, cache age).
-2. **Settings** → adjust:
-   - Min minutes between live downloads  
-   - BeautyFort live downloads / day  
-   - BTS live downloads / day  
+1. **Sync** → BF / BTS ready vs wait-N-min.
+2. **Settings → Schedule → Minutes between syncs** (one number for both the schedule and the API gate).
 
 **Value to the client**  
-Protects wholesaler API access from accidental ban while keeping the store updating from the last good feed.
+Keeps wholesaler APIs on a predictable cadence without an extra “downloads per day” knob that no longer does anything.
 
 ---
 
@@ -52,8 +48,8 @@ Protects wholesaler API access from accidental ban while keeping the store updat
 Immediately requests abort of the running sync (between batches) and turns **Sync enabled** off so nothing restarts until you allow it.
 
 **How to navigate**
-1. **Sync** → **Stop all sync**.
-2. To resume: turn **Sync enabled** on in **Settings**, or press **Run fast/full** (that re-enables sync).
+1. **Sync** → **Stop**.
+2. To resume the schedule: turn **Sync enabled** on in **Settings**. A manual Update does **not** turn the schedule back on.
 
 **Value to the client**  
 Operator control during incidents, pricing experiments, or before a careful live import.

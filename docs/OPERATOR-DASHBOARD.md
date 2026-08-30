@@ -77,7 +77,7 @@ Polls `GET /api/overview` every 15s.
 
 | UI | Meaning |
 |---|---|
-| **Run sync now** | `POST /api/sync/run` `{mode:"fast", vendors:["beautyfort","bts"]}` — demo CTA; disabled while a run is active |
+| **Update prices & stock** | Same as Sync: one-off fast live sync. Shows **Scheduled (Nm)** and is disabled while Sync enabled is on |
 | Visible in shop | WP publish ∩ not `exclude-from-catalog` |
 | Published in WP | Includes catalog-hidden products |
 | Sillage products | `COUNT(sil_products)` |
@@ -111,23 +111,23 @@ Operator model (two actions only):
 
 | Control | API | Effect |
 |---|---|---|
-| **Update prices & stock** | `POST /api/sync/run` `{mode:"fast", source:"live", vendors:["beautyfort","bts"]}` | Primary CTA on Sync + Overview. Disabled while a run is active **or** vendor cooldown is active |
-| **Rebuild catalogue** | same, `mode:"full"` | Button on Sync (not Settings-only / not “nightly only”) |
-| **Stop** | `POST /api/sync/stop` | Only while a run is active; sets `sync_enabled=0` |
-| Cooldown status | `GET /api/sync/live-status` | `retryInMinutes`, daily remaining per vendor — **no** “cache age” |
-| Runs table | `GET /api/sync/runs` | History; UI labels Rebuild / Prices & stock / rewrites |
+| **Update prices & stock** | `POST /api/sync/run` `{mode:"fast", source:"live", vendors:["beautyfort","bts"]}` | One-off only when **Sync enabled is off**. Disabled while a run is active, the schedule is on, or a vendor is inside its call interval |
+| **Rebuild catalogue** | same, `mode:"full"` | Empty shop / sync off → runs now. With Sync enabled and a catalogue already imported → **queues** for the next scheduled call |
+| **Stop** | `POST /api/sync/stop` | Only while a run is active; sets `sync_enabled=0`. A later Update does **not** turn the schedule back on |
+| Call-interval status | `GET /api/sync/live-status` | Per-vendor `retryInMinutes`. Daily remaining is unused (always `null`) |
+| Runs table | `GET /api/sync/runs` | History; Fetched shows `BF n · BTS m` (Δ when BTS used the changes API) |
 
-**Cooldown:** Settings **Minutes between syncs** writes both `live_feed_min_minutes` and
-`fast_sync_minutes` (default **60** — BeautyFort daily cap). After a live Rebuild or Update,
-buttons stay disabled until that many minutes pass. If the gate blocks, the API returns
-`started:false` / `cooldown:true` — it does **not** silently reuse a stale on-disk feed.
+**Call interval:** Settings **Minutes between syncs** writes both `live_feed_min_minutes` and
+`fast_sync_minutes`. BeautyFort and BTS are gated independently. There is **no daily download
+cap**. If the gate blocks, the API returns `started:false` / `cooldown:true` — it does **not**
+silently reuse a stale on-disk feed.
 
 **“Cache” is not an operator mode.** Disk feed files are internal. Pricing Save still uses
-invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignores cooldown).
+invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignores the interval).
 
-**Schedule:** cron every 5 minutes; catalogue sync opens in **:00 / :30** windows when due and
-not in cooldown. Optional nightly rebuild is under Settings → Advanced. Order housekeeping runs
-every tick.
+**Schedule:** cron every 5 minutes; when Sync enabled is on, a due tick runs fast price/stock
+(or a queued rebuild). Optional nightly rebuild is under Settings → Schedule → Advanced. Order
+housekeeping runs every tick.
 
 `--vendor=all` never includes parked wholesale-perfumes.
 
@@ -188,7 +188,6 @@ required when changing **Active** or **Serviceable countries**.
 | VAT rate (fraction) | `vat_rate` | Use `0.21` for 21%. **Save → price rewrite** |
 | Min order value (EUR) | `order_config.min_order_value_eur` | Bridge hard-blocks checkout under MOQ |
 | Serviceable countries | `serviceable_countries` JSON | ISO list; blocks approve/dispatch outside list |
-| Live downloads / day | `live_max_per_day` | Catalogue live-fetch daily cap |
 | Active | `active` | Inactive = skipped by sync / cannot dispatch |
 
 Not editable here: `slug`, `sku_prefix`, `currency`. API credentials → **Secrets**.
@@ -243,12 +242,11 @@ shop URLs — they save into `sil_settings` (or billing JSON) and take effect on
 (cart fee: bridge, ~60s object-cache TTL; schedule: next cron tick; URLs: hot-applied in Bun).
 
 UI sections (each control has one-line help): **Shop URLs** → **Pricing & catalogue** → **Cart
-minimum** → **Schedule** → **Order safety** → **Advanced** (live-feed gate, volume/description,
-company billing).
+minimum** → **Schedule** → **Order safety** → **Advanced** (volume/description, company billing).
 
 If prices stay stale after a multiplier Save: check `IS_USED_LOCK('sillage:sync')` and
-[`HANDOFF.md`](HANDOFF.md) “If shop prices ≠ Settings multiplier”. Do not burn BeautyFort live
-caps with Fast sync just to reprice.
+[`HANDOFF.md`](HANDOFF.md) “If shop prices ≠ Settings multiplier”. Do not start a live vendor
+sync just to reprice — Save already queues a rewrite-only run.
 
 ### Shop URLs (post-login)
 
@@ -261,11 +259,11 @@ caps with Fast sync just to reprice.
 
 | UI label | Key | Effect |
 |---|---|---|
-| Sync enabled | `sync_enabled` | Off → scheduled price/stock sync skipped. Stop sets off; starting a sync clears abort |
-| Operator timezone | `schedule_timezone` | IANA zone for nightly hour + dashboard clocks. MariaDB stays UTC |
-| Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Vendor API cooldown + schedule cadence (default 60) |
-| Nightly rebuild (Advanced) | `full_sync_enabled` | Optional; prefer Sync → Rebuild catalogue button |
-| Nightly rebuild hour (Advanced) | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not 30 — that is minutes) |
+| Sync enabled | `sync_enabled` | On → schedule owns price/stock. Stop turns it off. Manual Update does not turn it back on |
+| Operator timezone | `schedule_timezone` | IANA zone for dashboard clocks + optional nightly hour. MariaDB stays UTC |
+| Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Per-vendor call interval + schedule cadence |
+| Nightly rebuild (Advanced) | `full_sync_enabled` | Optional extra full import after the hour; prefer Sync → Rebuild catalogue |
+| Nightly rebuild hour (Advanced) | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not the minutes interval) |
 | Sync source | `sync_source` | Hidden from main UI; keep `live` in production (`local` = fixtures) |
 
 ### Pricing & catalogue visibility

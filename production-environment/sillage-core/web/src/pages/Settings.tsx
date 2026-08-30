@@ -217,7 +217,7 @@ export function Settings() {
         </Link>{" "}
         → fill BeautyFort + BTS →{" "}
         <Link to="/sync" className="font-medium text-accent hover:underline">
-          Sync → Run sync now
+          Sync → Rebuild catalogue
         </Link>{" "}
         → check{" "}
         <Link to="/products" className="font-medium text-accent hover:underline">
@@ -436,7 +436,7 @@ export function Settings() {
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
             <Toggle
               label="Sync enabled"
-              hint="Off → scheduled price/stock sync skipped. Stop on Sync sets this off; starting a sync turns it back on."
+              hint="On → the schedule owns price/stock updates. Stop on Sync turns this off. A manual Update does not turn it back on."
               checked={isTruthy(form.sync_enabled)}
               disabled={busy}
               onChange={(v) => setBool("sync_enabled", v)}
@@ -444,7 +444,7 @@ export function Settings() {
           </div>
           <Field
             label="Operator timezone"
-            help="IANA zone for nightly hour and Sync / Orders / Logs timestamps. Does not change the shop for customers."
+            help="IANA zone for dashboard clocks and the optional nightly rebuild hour. Does not change the shop for customers."
           >
             <select
               className={inputClass}
