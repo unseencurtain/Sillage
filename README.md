@@ -21,6 +21,7 @@ labels, Settings knobs, or shopper behaviour change.
 
 **[Change domains](docs/DOMAIN-MIGRATION.md)** — shop / dashboard / image hostnames.
 **[Folder structure](docs/FOLDER-STRUCTURE.md)** — GitHub tree vs live VPS.
+**[Missing photos by EAN](docs/EAN-IMAGE-SCRAPE.md)** — list + scrape keyed only by EAN.
 
 Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIENT-FEATURE-WALKTHROUGH.md).
 

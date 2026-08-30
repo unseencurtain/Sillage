@@ -14,6 +14,7 @@ only the one deep doc you need. Do not wander the tree.
 | Change shop / dash / image hosts | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) |
 | What lives where (repo + VPS) | [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | Photos, Brasty, overrides | [`specs/S3-images.md`](specs/S3-images.md) |
+| Missing photos by **EAN** | [`EAN-IMAGE-SCRAPE.md`](EAN-IMAGE-SCRAPE.md) |
 | BTS v2.1 orders + tracking | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
 | Hard rules (no PHP product SQL, dry-run) | [`../AGENTS.md`](../AGENTS.md) |
 
