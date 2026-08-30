@@ -36,4 +36,14 @@ describe("BTS fast-sync recovery", () => {
   test("product-changes pagination tolerates a missing products array", () => {
     expect(clientSrc).toContain("res.products ?? []");
   });
+
+  test("a failed new-SKU import does not trigger a full-feed fallback", () => {
+    expect(runSrc).toContain("importing new SKUs from delta failed");
+    expect(runSrc).toContain("full-feed fallback skipped");
+  });
+
+  test("BTS client treats 404 no products found as an empty list", () => {
+    expect(clientSrc).toContain("isBtsEmptyCatalog");
+    expect(clientSrc).toContain("no products found");
+  });
 });

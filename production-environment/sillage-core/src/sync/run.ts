@@ -577,15 +577,22 @@ async function fastSyncVendor(
         const changed = await applyPriceStockDelta(vendor.id, updates);
         summary.updated += changed;
 
-        const imported = await importMissingDeltaProducts({
-          vendor,
-          connector,
-          updates,
-          since,
-          runId,
-          summary,
-        });
-        return changed + imported;
+        try {
+          const imported = await importMissingDeltaProducts({
+            vendor,
+            connector,
+            updates,
+            since,
+            runId,
+            summary,
+          });
+          return changed + imported;
+        } catch (err) {
+          // Delta prices/stock already applied. Do not fall through to a full
+          // catalogue pull — that would re-hit the vendor and trip the call interval.
+          log.warn(`${vendor.slug}: importing new SKUs from delta failed: ${String(err)}`);
+          return changed;
+        }
       }
     } catch (err) {
       log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
@@ -593,20 +600,29 @@ async function fastSyncVendor(
   }
   // BeautyFort, stale BTS recovery, and delta miss: pull the full feed and diff by checksum.
   // source=local|cache reads fixtures/disk; source=live hits the vendor (gate already checked).
-  await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
-  const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
-  log.progressEnd();
+  try {
+    await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
+    const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
+    log.progressEnd();
 
-  const products = raw.map((r) => connector.normalize(r)).filter((p): p is NormalizedProduct => p !== null);
-  const diff = await diffOffers(vendor, products, runId);
-  summary.fetched += diff.fetched;
-  summary.fetchedByVendor = summary.fetchedByVendor ?? {};
-  summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + diff.fetched;
-  summary.updated += diff.updated;
-  summary.created += diff.created;
-  summary.vanished += diff.vanished;
+    const products = raw.map((r) => connector.normalize(r)).filter((p): p is NormalizedProduct => p !== null);
+    const diff = await diffOffers(vendor, products, runId);
+    summary.fetched += diff.fetched;
+    summary.fetchedByVendor = summary.fetchedByVendor ?? {};
+    summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + diff.fetched;
+    summary.updated += diff.updated;
+    summary.created += diff.created;
+    summary.vanished += diff.vanished;
 
-  return diff.updated + diff.vanished;
+    return diff.updated + diff.vanished;
+  } catch (err) {
+    if (String(err).includes("live fetch blocked")) {
+      log.warn(`${vendor.slug}: full-feed fallback skipped — ${String(err)}`);
+      summary.skippedVendors = [...(summary.skippedVendors ?? []), vendor.slug];
+      return 0;
+    }
+    throw err;
+  }
 }
 
 /**
