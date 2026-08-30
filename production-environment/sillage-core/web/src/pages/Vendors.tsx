@@ -115,8 +115,9 @@ export function Vendors() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted">
-          BeautyFort + BTS only. Saving multiplier / FX / VAT / min stock recalculates shop prices
-          from stored offers (same rewrite-only path as Settings — no live vendor download). Credentials:{" "}
+          BeautyFort + BTS only. Catalogue sync behaviour is per vendor below (what we download each
+          call). Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers
+          (no live vendor download). Credentials:{" "}
           <Link to="/secrets" className="font-medium text-accent hover:underline">
             Secrets
           </Link>
@@ -133,6 +134,8 @@ export function Vendors() {
             vendor={v}
             globalPriceMultiplier={data?.globalPriceMultiplier ?? 1}
             globalStockThreshold={data?.globalStockThreshold ?? 0}
+            callIntervalMinutes={data?.callIntervalMinutes ?? 30}
+            lastLiveFetch={data?.lastLiveFetch?.[v.slug] ?? null}
           />
         ))}
         {parked.map((v) => (
@@ -178,10 +181,14 @@ function VendorEditor({
   vendor,
   globalPriceMultiplier,
   globalStockThreshold,
+  callIntervalMinutes,
+  lastLiveFetch,
 }: {
   vendor: Vendor;
   globalPriceMultiplier: number;
   globalStockThreshold: number;
+  callIntervalMinutes: number;
+  lastLiveFetch: string | null;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -260,6 +267,12 @@ function VendorEditor({
           {form.active ? "active" : "inactive"}
         </span>
       </div>
+
+      <CatalogueSyncPanel
+        slug={vendor.slug}
+        callIntervalMinutes={callIntervalMinutes}
+        lastLiveFetch={lastLiveFetch}
+      />
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="block text-sm">
@@ -411,5 +424,60 @@ function VendorEditor({
         </div>
       )}
     </article>
+  );
+}
+
+function CatalogueSyncPanel({
+  slug,
+  callIntervalMinutes,
+  lastLiveFetch,
+}: {
+  slug: string;
+  callIntervalMinutes: number;
+  lastLiveFetch: string | null;
+}) {
+  const last = lastLiveFetch
+    ? `${new Date(lastLiveFetch).toLocaleString("en-GB", { timeZone: "UTC", hour12: false })} UTC`
+    : "never";
+  const isBf = slug === "beautyfort";
+  const isBts = slug === "bts";
+
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-canvas/50 p-4">
+      <h3 className="text-sm font-semibold">Catalogue sync</h3>
+      <p className="mt-1 text-xs text-muted">
+        How often we may call this wholesaler is shared: every {callIntervalMinutes} minutes (
+        <Link to="/settings" className="font-medium text-accent hover:underline">
+          Settings → Minutes between syncs
+        </Link>
+        ). That is not “{callIntervalMinutes} minutes a day”. Each vendor downloads something different
+        on a call.
+      </p>
+      {isBf ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink">
+          <li>
+            Every allowed call: full BeautyFort stock file (~9k SKUs). Prices and stock update then.
+          </li>
+          <li>They do not offer a “changes since” feed — we always pull the whole file.</li>
+        </ul>
+      ) : null}
+      {isBts ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink">
+          <li>
+            Every allowed call: <code className="font-mono text-xs">getProductChanges</code> for the
+            last 48 hours (BTS floor). They typically publish one daily change batch, so most 30-minute
+            calls return nothing until that batch appears. Prices and stock then catch up within a day.
+          </li>
+          <li>
+            If more than 25% of BTS offers have not been seen for 7 days, the next call also downloads
+            the full catalogue (~45k) so vanished SKUs and missed batches recover.
+          </li>
+        </ul>
+      ) : null}
+      {!isBf && !isBts ? (
+        <p className="mt-2 text-sm text-ink">No live feed for this supplier.</p>
+      ) : null}
+      <p className="mt-2 text-xs text-muted">Last live fetch: {last}</p>
+    </div>
   );
 }

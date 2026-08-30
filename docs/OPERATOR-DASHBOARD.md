@@ -138,10 +138,16 @@ housekeeping runs every tick.
 | Control | API | Effect |
 |---|---|---|
 | Search box | `GET /api/products?q=&page=` | Filters SKU / name / EAN |
-| Table | same | Read-only. Cost = vendor price on primary offer |
+| Table | same | Read-only. Cost = vendor price on primary offer. **Shop** is the same visibility the writer applies (hide-without-image + stock threshold) after image resolve |
 | Pagination | same | 50 per page |
 
 No edit / hide / reprice actions. Retail price and visibility change via sync + Settings/Vendors.
+
+**Shop column:** `Visible` / `Hidden · no image` / `Hidden · stock`. Stock of `1` does **not** mean the listing is on the storefront. Hide-without-image (default on) excludes products whose **resolved** image is still empty, a placeholder (`no_image`, Woo placeholder), or a weak BeautyFort `/pic/` thumb. The writer ORs that onto the same `exclude-from-catalog` + `exclude-from-search` terms as the stock threshold. Products stay in WooCommerce (and on this table) with their WP id.
+
+**Image resolve order** (same as sync): curated `data/image_overrides.json` → another vendor’s usable photo for the same EAN → else no image. Cross-vendor fill never uses `/pic/` thumbs or `no_image.webp` as donors. Example: Victoria’s Secret Temptation Body Lotion (EAN `0197575132998`) can show stock 1 / WP 70276 and still be **Hidden · no image** because BeautyFort’s `/pic/` URL and BTS’s `no_image.webp` are both unusable.
+
+To show that SKU on the shop: add a real photo in `image_overrides.json` for the EAN and run a rewrite, or turn **Hide products without image** off (shop-wide — weak thumbs would appear). Do not treat it as a stock bug.
 
 ---
 
@@ -191,6 +197,17 @@ required when changing **Active** or **Serviceable countries**.
 | Active | `active` | Inactive = skipped by sync / cannot dispatch |
 
 Not editable here: `slug`, `sku_prefix`, `currency`. API credentials → **Secrets**.
+
+### Catalogue sync (per vendor)
+
+The **Minutes between syncs** field stays on Settings (one number; BeautyFort and BTS cool down independently). It is **not** “30 minutes a day”. What each call **downloads** is documented on the vendor card:
+
+| Vendor | Each allowed call | Why prices can look “daily” |
+|---|---|---|
+| BeautyFort | Full stock file (~9k SKUs). No changes-since API | Prices/stock update on that call |
+| BTS | `getProductChanges` with a **48h lookback floor**. Full catalogue (~45k) if >25% of offers unseen for 7 days | BTS typically publishes **one daily change batch**, so many 30-minute calls are empty until that batch appears |
+
+Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
 
 ### Parked: wholesale-perfumes
 
@@ -273,7 +290,7 @@ sync just to reprice — Save already queues a rewrite-only run.
 | Price multiplier | `global_price_multiplier` | Fallback when no tier matches / tiers empty / no vendor override |
 | Price tiers (section) | `price_tiers` JSON | Cost bands; last row unbounded (`maxCost: null`) |
 | Stock threshold | `global_stock_threshold` | Global floor when vendor min stock is null |
-| Hide products without image | `hide_products_without_image` | `exclude-from-catalog` when image missing/placeholder |
+| Hide products without image | `hide_products_without_image` | Default on. After image resolve (override → other vendor EAN → else none), if the URL is still empty / placeholder / BTS `no_image` / BeautyFort `/pic/` thumb, the product gets `exclude-from-catalog` + `exclude-from-search` (OR’d with the stock-threshold hide). Product remains in WP and on the Products table. Save marks dirty and starts a rewrite-only sync. Products → Shop column shows **Hidden · no image** when this rule is why the listing is missing from the store |
 | Volume filter | `volume_filter_mode` | Advanced: `ranges` \| `exact` \| `off` |
 | Description mode | `description_mode` | Advanced: `none` = title in `<p>`; `template` = brand/type/size blurb |
 

@@ -9,6 +9,8 @@ import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
 import { resolveTimeZone } from "../../lib/timezone.ts";
+import { isUnusableImage, shopVisibility } from "../../sync/imageRules.ts";
+import { loadImageOverrides, normalizeEan, resolveImageUrl } from "../../sync/images.ts";
 import {
   loadCompanyBilling,
   parseCompanyBilling,
@@ -71,6 +73,52 @@ function decorateSyncRun(row: RowDataPacket) {
     skipped_vendors: extra.skippedVendors ?? [],
     bts_delta: extra.btsDelta === true,
   };
+}
+
+function offerEans(row: RowDataPacket): string[] {
+  const collected: string[] = [];
+  const raw = row.eans;
+  if (Array.isArray(raw)) {
+    for (const v of raw) if (typeof v === "string" && v) collected.push(v);
+  } else if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const v of parsed) if (typeof v === "string" && v) collected.push(v);
+      }
+    } catch {
+      /* ignore malformed JSON */
+    }
+  }
+  if (typeof row.primary_ean === "string" && row.primary_ean) collected.push(row.primary_ean);
+  return collected;
+}
+
+async function loadUsableImagesForEans(eans: string[]): Promise<Map<string, string>> {
+  const unique = [
+    ...new Set(
+      eans.flatMap((raw) => {
+        const trimmed = raw.trim();
+        const norm = normalizeEan(trimmed);
+        return [trimmed, norm].filter((v): v is string => Boolean(v));
+      }),
+    ),
+  ];
+  const map = new Map<string, string>();
+  if (unique.length === 0) return map;
+  const rows = await query<RowDataPacket & { primary_ean: string | null; image_url: string | null }>(
+    `SELECT primary_ean, image_url FROM ${sil("sil_offers")}
+      WHERE vanished_at IS NULL
+        AND primary_ean IN (${unique.map(() => "?").join(",")})
+        AND image_url IS NOT NULL AND image_url != ''`,
+    unique,
+  );
+  for (const row of rows) {
+    const ean = normalizeEan(row.primary_ean);
+    if (!ean || isUnusableImage(row.image_url) || map.has(ean)) continue;
+    map.set(ean, row.image_url!);
+  }
+  return map;
 }
 
 async function hasSuccessfulCatalogue(): Promise<boolean> {
@@ -422,7 +470,7 @@ api.get("/products", async (c) => {
     : "";
   const params: unknown[] = q ? [`%${q}%`, `%${q}%`, `%${q}%`] : [];
 
-  const [totalRows, items] = await Promise.all([
+  const [totalRows, items, settings] = await Promise.all([
     query<RowDataPacket & { total: number }>(
       `SELECT COUNT(*) AS total
          FROM ${sil("sil_products")} p
@@ -432,7 +480,8 @@ api.get("/products", async (c) => {
     ),
     query<RowDataPacket>(
       `SELECT p.id, p.sku, p.wp_post_id, p.slug, o.name, o.stock, o.vendor_price, o.primary_ean,
-              COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url
+              o.eans, COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url,
+              v.min_visible_stock
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          JOIN ${sil("sil_vendors")} v ON v.id = o.vendor_id
@@ -440,17 +489,60 @@ api.get("/products", async (c) => {
         ORDER BY p.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     ),
+    loadSettings(),
   ]);
 
-  return c.json({ items, total: Number(totalRows[0]?.total ?? 0), page, limit });
+  const offerImages = await loadUsableImagesForEans(items.map((row) => offerEans(row)).flat());
+  const overrides = loadImageOverrides();
+
+  const decorated = items.map((row) => {
+    const threshold =
+      row.min_visible_stock === null || row.min_visible_stock === undefined
+        ? settings.stockThreshold
+        : Number(row.min_visible_stock);
+    const { min_visible_stock: _min, eans: _eans, ...rest } = row;
+    void _min;
+    void _eans;
+    const resolved = resolveImageUrl(
+      offerEans(row),
+      (row.image_url as string | null) ?? null,
+      overrides,
+      offerImages,
+    );
+    return {
+      ...rest,
+      shop_visibility: shopVisibility({
+        stock: Number(row.stock),
+        imageUrl: resolved,
+        hideWithoutImage: settings.hideProductsWithoutImage,
+        stockThreshold: threshold,
+      }),
+    };
+  });
+
+  return c.json({ items: decorated, total: Number(totalRows[0]?.total ?? 0), page, limit });
 });
 
 api.get("/vendors", async (c) => {
   const vendors = await loadVendors();
   const settings = await loadSettings();
+  const lastFetchRows = await query<RowDataPacket & { setting_key: string; setting_value: string }>(
+    `SELECT setting_key, setting_value FROM ${sil("sil_settings")}
+      WHERE setting_key IN ('last_live_fetch_beautyfort', 'last_live_fetch_bts')`,
+  );
+  const lastLiveFetch: Record<string, string | null> = {
+    beautyfort: null,
+    bts: null,
+  };
+  for (const row of lastFetchRows) {
+    if (row.setting_key === "last_live_fetch_beautyfort") lastLiveFetch.beautyfort = row.setting_value;
+    if (row.setting_key === "last_live_fetch_bts") lastLiveFetch.bts = row.setting_value;
+  }
   return c.json({
     globalPriceMultiplier: settings.priceMultiplier,
     globalStockThreshold: settings.stockThreshold,
+    callIntervalMinutes: settings.liveFeedMinMinutes,
+    lastLiveFetch,
     vendors: vendors.map((v) => {
       const minOrder = v.orderConfig.min_order_value_eur;
       const minOrderValueEur =
