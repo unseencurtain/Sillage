@@ -20,6 +20,10 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **Tag baseline** | `pre-scratch-20260808` — restore marker before catalogue wipe + B2B split ([`SCRATCH-RESET.md`](SCRATCH-RESET.md)) |
 | **B2B (later)** | [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) · local pointer `b2b-wholesale/` |
 | **Operator UI guide** | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
+| **Agent runbook** | [`AGENTS-RUNBOOK.md`](AGENTS-RUNBOOK.md) — sync, photos, orders, new VPS |
+| **New VPS / photos** | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) · [`specs/S3-images.md`](specs/S3-images.md) |
+| **BTS tracking** | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
+| **Health / recs** | [`RECOMMENDATIONS.md`](RECOMMENDATIONS.md) |
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 
 ---
@@ -104,10 +108,12 @@ SELECT id, mode, source, status, prices_updated, started_at
 - **B2B is a separate project** — own compose / own repo when ready; not bolted onto this shop.
 - **`orders_dry_run` stays `1`** unless you intentionally dispatch live vendor orders (no sandbox).
 - **Images:** host volume `~/ecom_sites/data/media` → `lps-media`; public CDN
-  `images.slilverbelt.xyz`. Brasty photos already on the VPS at `/home/ubuntu/brasty/`
-  (EAN `.jpg`). Matcher: `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`.
-  Canonical map: `sillage-core/data/image_overrides.json` (bind-mounted; recreate core/cron
-  after edits). Playwright crawl `tools/images/brasty/` is for EANs not in that dump.
+  `images.slilverbelt.xyz`. **Git has the EAN map, not the JPEGs** (~380 MB). New VPS:
+  [`VPS-MIGRATE.md`](VPS-MIGRATE.md) + `restore_found_images.py`. Brasty dump on the VPS at
+  `/home/ubuntu/brasty/` (every filename is digits + `.jpg` = EAN). Matcher:
+  `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`. Canonical map:
+  `sillage-core/data/image_overrides.json` (bind-mounted; recreate core/cron after edits).
+  Playwright crawl `tools/images/brasty/` is for EANs not in that dump.
   **Skip Brasty camera placeholders** (grey camera + BRASTY watermark — not a product photo;
   MD5s in `python-analysis/beautyfort-enriched/brasty_placeholders.py`). After a merge:
   **`--mode=full --source=cache --rewrite-only`** (fast rewrite ignores `needs_content_write`).
@@ -118,14 +124,17 @@ SELECT id, mode, source, status, prices_updated, started_at
 
 ## Next work (priority)
 
-1. **Photos still missing** — ~13k shop products had no EAN hit in Brasty / ocean / Shopify
-   after the 2026-08-30 fill. Continue Brasty scrape or manual overrides. Victoria’s Secret
-   `0197575132998` / `BF-F558351` is one of those.
+1. **Photos still missing** — ~12.4k shop products have EANs that are not in the 36k Brasty
+   dump (intersection was ~8.4k). Only **31** SKUs have an empty barcode. Continue Brasty
+   scrape or manual overrides. Victoria’s Secret `0197575132998` / `BF-F558351` is one of those.
+   Hide-without-image stays on. Restore/migrate photos: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
 2. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
 3. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
 4. **Fill company billing** before first live BeautyFort order.
-5. **Optional later:** display-time multiplier (no 53k rewrite) — larger WC redesign; not started.
-6. **B2B separately** — new stack in [sillage-b2b](https://github.com/unseencurtain/sillage-b2b);
+5. **BTS tracking** — after deploy, poll `SIL-54253-BTS` so Cancelled leaves `submitted`
+   ([`BTS-ORDERS.md`](BTS-ORDERS.md)).
+6. **Optional later:** display-time multiplier (no 53k rewrite) — larger WC redesign; not started.
+7. **B2B separately** — new stack in [sillage-b2b](https://github.com/unseencurtain/sillage-b2b);
    own compose; do not expand this retail repo for WPF.
 
 Polish **this retail shop (BF+BTS) first.** B2B later on its own infrastructure.

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
-import { isUnusableImage, normalizeEan, resolveImageUrl } from "./imageRules.ts";
+import { isUnusableImage, normalizeEan, resolveImageUrl, indexOfferImages } from "./imageRules.ts";
 
 export {
   isPlaceholderImage,
@@ -22,6 +22,7 @@ export {
   normalizeEan,
   resolveImageUrl,
   shouldHideForMissingImage,
+  indexOfferImages,
 } from "./imageRules.ts";
 
 const log = logger("images");
@@ -49,22 +50,20 @@ export function loadImageOverrides(root = process.cwd()): Map<string, string> {
   }
 }
 
-/** Build EAN → image from non-vanished offers that already have a real URL. */
+/** Build EAN → image from non-vanished offers that already have a real URL.
+
+  Indexes **every** barcode on the offer, not only `primary_ean`. A BeautyFort
+  row whose extra EAN matches a BTS photo would otherwise stay hidden.
+ */
 export async function loadOfferImageIndex(): Promise<Map<string, string>> {
-  const rows = await query<RowDataPacket & { primary_ean: string | null; image_url: string | null }>(
-    `SELECT primary_ean, image_url FROM ${sil("sil_offers")}
+  const rows = await query<
+    RowDataPacket & { primary_ean: string | null; eans: unknown; image_url: string | null }
+  >(
+    `SELECT primary_ean, eans, image_url FROM ${sil("sil_offers")}
       WHERE vanished_at IS NULL
-        AND primary_ean IS NOT NULL AND primary_ean != ''
         AND image_url IS NOT NULL AND image_url != ''`,
   );
-  const map = new Map<string, string>();
-  for (const row of rows) {
-    const ean = normalizeEan(row.primary_ean);
-    // Never index weak BeautyFort /pic/ thumbs — they must not "fill" another vendor's gap.
-    if (!ean || isUnusableImage(row.image_url)) continue;
-    if (!map.has(ean)) map.set(ean, row.image_url!);
-  }
-  return map;
+  return indexOfferImages(rows);
 }
 
 export interface ImageLookup {

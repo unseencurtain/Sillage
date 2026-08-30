@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BeautyfortError } from "../src/vendors/beautyfort/BeautyfortClient.ts";
-import { isPermanentPollFailure } from "../src/orders/tracking.ts";
+import { isPermanentPollFailure, nextVendorOrderStatus } from "../src/orders/pollRules.ts";
 
 describe("isPermanentPollFailure", () => {
   test("flags BeautyfortError.permanent", () => {
@@ -30,5 +30,24 @@ describe("isPermanentPollFailure", () => {
       ),
     ).toBe(false);
     expect(isPermanentPollFailure(new Error("ECONNRESET"))).toBe(false);
+  });
+});
+
+describe("nextVendorOrderStatus", () => {
+  test("applies BTS Cancelled from submitted (rank compare used to drop it)", () => {
+    expect(nextVendorOrderStatus("submitted", "cancelled")).toBe("cancelled");
+    expect(nextVendorOrderStatus("confirmed", "cancelled")).toBe("cancelled");
+    expect(nextVendorOrderStatus("dispatched", "cancelled")).toBe("cancelled");
+  });
+
+  test("does not reopen a delivered row as cancelled", () => {
+    expect(nextVendorOrderStatus("delivered", "cancelled")).toBe(null);
+  });
+
+  test("still advances forward ranks", () => {
+    expect(nextVendorOrderStatus("submitted", "confirmed")).toBe("confirmed");
+    expect(nextVendorOrderStatus("confirmed", "dispatched")).toBe("dispatched");
+    expect(nextVendorOrderStatus("dispatched", "delivered")).toBe("delivered");
+    expect(nextVendorOrderStatus("delivered", "dispatched")).toBe(null);
   });
 });

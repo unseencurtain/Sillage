@@ -5,9 +5,10 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)).
 
 **Read [`docs/HANDOFF.md`](docs/HANDOFF.md)** for live host, roadmap, and resume-after-a-gap context.
-**Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet: container
-names, database credentials, WooCommerce schema quirks, and the complete list of tables we write
-to. Then read only the one spec under `docs/specs/` that covers your task. Do not go exploring —
+**Read [`docs/AGENTS-RUNBOOK.md`](docs/AGENTS-RUNBOOK.md)** for the whole-project loop (sync, photos,
+new VPS, orders). **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet:
+container names, database credentials, WooCommerce schema quirks, and the complete list of tables we
+write to. Then read only the one spec under `docs/specs/` that covers your task. Do not go exploring —
 everything you need is in those files.
 
 **Operator dashboard:** every Settings / Vendors / Sync / Orders control for this retail shop is

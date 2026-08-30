@@ -79,3 +79,40 @@ export function shopVisibility(opts: {
   if (opts.stock <= opts.stockThreshold) return "hidden_stock";
   return "visible";
 }
+
+function offerEans(primary: string | null | undefined, rawEans: unknown): string[] {
+  const out: string[] = [];
+  if (primary) out.push(primary);
+  let extra: unknown = rawEans;
+  if (typeof extra === "string" && extra.trim()) {
+    try {
+      extra = JSON.parse(extra);
+    } catch {
+      extra = extra.split(/[\s,;]+/);
+    }
+  }
+  if (Array.isArray(extra)) {
+    for (const v of extra) if (v != null) out.push(String(v));
+  }
+  return out;
+}
+
+/** Index every barcode on an offer, not only `primary_ean`. */
+export function indexOfferImages(
+  rows: Array<{
+    primary_ean: string | null;
+    eans?: unknown;
+    image_url: string | null;
+  }>,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    if (isUnusableImage(row.image_url)) continue;
+    const url = row.image_url!;
+    for (const raw of offerEans(row.primary_ean, row.eans)) {
+      const ean = normalizeEan(raw);
+      if (ean && !map.has(ean)) map.set(ean, url);
+    }
+  }
+  return map;
+}

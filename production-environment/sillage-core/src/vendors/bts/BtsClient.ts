@@ -61,6 +61,26 @@ export function isBtsEmptyCatalog(err: unknown): boolean {
   return `${err.message}\n${detail}`.toLowerCase().includes("no products found");
 }
 
+/**
+ * BTS v2.1 `getTrackings` returns `order_not_found` when the carrier has not
+ * assigned a tracking number yet (typically 24–72h after create). That is not a
+ * missing order — keep polling.
+ */
+export function isBtsTrackingNotReady(err: unknown): boolean {
+  if (!(err instanceof BTSRequestError)) return false;
+  const detail = typeof err.details === "string" ? err.details : JSON.stringify(err.details ?? "");
+  const blob = `${err.message}\n${detail}`.toLowerCase();
+  return blob.includes("order_not_found") || blob.includes("order not found");
+}
+
+/** Empty / JSON-null tracking codes are "not assigned yet", not a parcel. */
+export function coerceBtsTracking(raw: unknown): string {
+  if (raw == null) return "";
+  const s = String(raw).trim();
+  if (!s || /^(null|undefined|n\/a|none|-)$/i.test(s)) return "";
+  return s;
+}
+
 function emptyPagination(): Pagination {
   return {
     current_page: 1,
@@ -685,7 +705,7 @@ export class BTSClient {
     return {
       order_number: String(raw["order_number"] ?? ""),
       order_status: normalizeOrderStatus(String(raw["order_status"] ?? "")),
-      tracking: String(raw["tracking"] ?? ""),
+      tracking: coerceBtsTracking(raw["tracking"]),
       order_total: String(raw["order_total"] ?? "0"),
       client_name: String(raw["client_name"] ?? ""),
       client_email: String(raw["client_email"] ?? ""),
@@ -731,9 +751,30 @@ export class BTSClient {
       url.searchParams.append(`order_number[${i}]`, n),
     );
 
-    return this.executeRequest<TrackingInfo[]>(url.toString(), {
-      method: "GET",
-      headers: this.authHeaders,
-    });
+    let raw: unknown;
+    try {
+      raw = await this.executeRequest<unknown>(url.toString(), {
+        method: "GET",
+        headers: this.authHeaders,
+      });
+    } catch (err) {
+      if (isBtsTrackingNotReady(err)) return [];
+      throw err;
+    }
+    return normaliseTrackings(raw);
   }
+}
+
+function normaliseTrackings(raw: unknown): TrackingInfo[] {
+  const rows = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && Array.isArray((raw as { trackings?: unknown }).trackings)
+      ? ((raw as { trackings: unknown[] }).trackings)
+      : [];
+  return rows
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+    .map((row) => ({
+      order_number: String(row["order_number"] ?? ""),
+      tracking: coerceBtsTracking(row["tracking"]),
+    }));
 }

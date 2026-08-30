@@ -48,6 +48,8 @@ function writesLabel(r: Pick<SyncRun, "posts_created" | "posts_updated" | "price
   if (r.errors) parts.push(`Errors ${Number(r.errors).toLocaleString()}`);
   return parts.join(" · ");
 }
+
+function modeLabel(mode: string, source: string) {
   if (source === "cache" && mode === "fast") return "Price rewrite";
   if (source === "cache" && mode === "full") return "Content rewrite";
   if (mode === "full") return "Rebuild catalogue";

@@ -1,4 +1,5 @@
 node_modules/
+/sillage/
 dist/
 web/dist/
 .env
