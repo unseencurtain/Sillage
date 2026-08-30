@@ -45,7 +45,7 @@ SQL
 echo "DB_USER_OK"
 
 WPCONFIG="$DATA_DIR/wp/wp-config.php"
-DASH_URL="${SILLAGE_DASHBOARD_URL:-https://${DASH_DOMAIN:-sillage.slilverbelt.xyz}}"
+DASH_URL="${SILLAGE_DASHBOARD_URL:-https://${DASH_DOMAIN:-sillage.prinscosmetic.eu}}"
 if [[ ! -f "$WPCONFIG" ]]; then
   echo "WP_CONFIG_MISSING — start ecom first so WordPress can create wp-config.php" >&2
   exit 1

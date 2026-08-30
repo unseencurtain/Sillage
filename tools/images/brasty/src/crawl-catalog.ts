@@ -496,7 +496,7 @@ async function main(): Promise<void> {
     `Catalog totals: attempted=${totals.attempted} downloaded=${totals.downloaded} skipped=${totals.skipped} failed=${totals.failed}`,
   );
   log.info(
-    "Next: npm run watermark && npm run build-overrides  (set LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz)",
+    "Next: npm run watermark && npm run build-overrides  (set LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu)",
   );
 }
 

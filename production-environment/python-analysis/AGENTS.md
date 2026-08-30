@@ -42,7 +42,7 @@ python3 beautyfort-enriched/enrich.py --fetch-wholesale-perfumes --install-core
 
 # Host flask_front (elsvc) override URLs on the images CDN (binaries gitignored)
 python3 beautyfort-enriched/host_override_images.py --dry-run
-LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz \
+LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu \
   python3 beautyfort-enriched/host_override_images.py --host images.elsvc.net
 # optional next: --host www.oceanfragrances.com
 ```

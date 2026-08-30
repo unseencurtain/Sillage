@@ -7,9 +7,9 @@ dashboard — not for developers. Button names and page titles match what you se
 
 | What | Address |
 |---|---|
-| Customer shop | https://cosmetic.slilverbelt.xyz |
-| Operations dashboard | https://sillage.slilverbelt.xyz |
-| Track an order (customers) | https://cosmetic.slilverbelt.xyz/track-order/ |
+| Customer shop | https://prinscosmetic.eu |
+| Operations dashboard | https://sillage.prinscosmetic.eu |
+| Track an order (customers) | https://prinscosmetic.eu/track-order/ |
 
 Ask the operator who deployed the shop for the dashboard password. It is **not** in this repository.
 
@@ -96,7 +96,7 @@ The dashboard shows a red banner when dry-run is off.
 
 ## 4. Sign in
 
-1. Open https://sillage.slilverbelt.xyz
+1. Open https://sillage.prinscosmetic.eu
 2. **User** is usually `admin`
 3. Enter the password you were given → **Sign in**
 4. Use **Sign out** at the bottom of the left menu when you are done
@@ -287,7 +287,7 @@ BeautyFort is a smaller EU set; BTS is broader.
 
 **EAN.** The barcode appears on the product page. Shop search understands barcodes.
 
-**Track order.** Customers open https://cosmetic.slilverbelt.xyz/track-order/ and enter order
+**Track order.** Customers open https://prinscosmetic.eu/track-order/ and enter order
 number + checkout email.
 
 **Vendor names.** LPS01 / LPS02 are operations labels. They must not appear as shop categories or
@@ -350,9 +350,9 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 
 | Surface | URL |
 |---|---|
-| Dashboard | https://sillage.slilverbelt.xyz |
-| Shop | https://cosmetic.slilverbelt.xyz |
-| Customer tracking | https://cosmetic.slilverbelt.xyz/track-order/ |
+| Dashboard | https://sillage.prinscosmetic.eu |
+| Shop | https://prinscosmetic.eu |
+| Customer tracking | https://prinscosmetic.eu/track-order/ |
 
 User for the dashboard is **admin** unless you were told otherwise. Keep the password off GitHub
 and out of chat logs.

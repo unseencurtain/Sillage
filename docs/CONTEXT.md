@@ -31,7 +31,7 @@ Networks are **external** and must exist before `docker compose up`:
 `shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
 Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). New image
 URLs come from tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default
-`https://images.slilverbelt.xyz`). Settings `image_cdn_base_url` is on the dashboard and
+`https://images.prinscosmetic.eu`). Settings `image_cdn_base_url` is on the dashboard and
 hot-applied into Bun runtime via `applyRuntimeUrls`; it does **not** by itself rewrite URLs
 already written on products — use overrides + a content rewrite.
 
@@ -46,7 +46,7 @@ Compose: `production-environment/compose.yaml`. Env template: `production-enviro
 Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
 **Live VPS:** SSH `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`) — shop
-`cosmetic.slilverbelt.xyz`, dashboard `sillage.slilverbelt.xyz`, images `images.slilverbelt.xyz`.
+`prinscosmetic.eu`, dashboard `sillage.prinscosmetic.eu`, images `images.prinscosmetic.eu`.
 App dir `~/sillage/`; data at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
 WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. SSH `ovh` (`51.79.255.226`) is empty/unused.
 Resume context: [`HANDOFF.md`](HANDOFF.md).
@@ -314,7 +314,7 @@ can illustrate any vendor's product.
 | Image source | Where | Notes |
 |---|---|---|
 | oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
-| Brasty | VPS folders `/home/ubuntu/brasty/{in_stock,out_of_stock,sale,new,back_in_stock,hot_deals}` (zero-padded EAN `.jpg`); scrape tool `tools/images/brasty/` | Image source only. Match by **EAN**. Copy hits into `~/ecom_sites/data/media/` (CDN `https://images.slilverbelt.xyz/<file>`). Playwright crawl is optional for new photos. Explicitly **not** a supplier |
+| Brasty | VPS folders `/home/ubuntu/brasty/{in_stock,out_of_stock,sale,new,back_in_stock,hot_deals}` (zero-padded EAN `.jpg`); scrape tool `tools/images/brasty/` | Image source only. Match by **EAN**. Copy hits into `~/ecom_sites/data/media/` (CDN `https://images.prinscosmetic.eu/<file>`). Playwright crawl is optional for new photos. Explicitly **not** a supplier |
 | Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export (`Variant Barcode` → `Image Src`) |
 | Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
 | wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |

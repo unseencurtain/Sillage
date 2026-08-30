@@ -12,7 +12,7 @@ That repo holds:
 
 ## This retail shop
 
-Sillage + `cosmetic.slilverbelt.xyz` sell **BeautyFort + BTS only**. wholesale-perfumes stays
+Sillage + `prinscosmetic.eu` sell **BeautyFort + BTS only**. wholesale-perfumes stays
 parked (`active=0`, excluded from `--vendor=all`). Do not re-enable it here.
 
 A copy of the connector may still exist under `production-environment/sillage-core/` for history

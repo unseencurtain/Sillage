@@ -4,8 +4,8 @@
 (written for humans). This page is a **demo script** for a live review, not the user manual.
 
 **Project:** Multi-vendor perfume/cosmetics dropshipping sync (BeautyFort + BTS → WooCommerce)  
-**Ops dashboard:** https://sillage.slilverbelt.xyz  
-**Storefront:** https://cosmetic.slilverbelt.xyz  
+**Ops dashboard:** https://sillage.prinscosmetic.eu  
+**Storefront:** https://prinscosmetic.eu  
 
 This document lists what was delivered and how to navigate each capability. Use it in client reviews and handovers.
 
@@ -17,7 +17,7 @@ This document lists what was delivered and how to navigate each capability. Use 
 Imports and maintains tens of thousands of products from BeautyFort and BTS into WooCommerce via bulk SQL (not slow REST product-by-product writes). Handles create, price/stock updates, vanish (out of catalogue), brands, categories, and attributes.
 
 **How to navigate**
-1. Open **https://sillage.slilverbelt.xyz** → log in.
+1. Open **https://sillage.prinscosmetic.eu** → log in.
 2. Go to **Sync**.
 3. Review the run table: mode (`fast` / `full`), Fetched (`BF n · BTS m`), writes, duration.
 4. Use **Rebuild catalogue** for the first import or a full structure refresh (queues when Sync enabled is on). Leave **Sync enabled** on for scheduled price/stock. **Update prices & stock** is a one-off only when the schedule is off.
@@ -208,7 +208,7 @@ Safe ops workflow that avoids accidental double-spend while still supporting rea
 - Polls vendors for tracking after submit.
 - Shows parcels on the **Orders** detail panel.
 - Pushes tracking into WooCommerce (order notes / meta); can email the customer when enabled.
-- Customer page: **https://cosmetic.slilverbelt.xyz/track-order/** (order number + checkout email).
+- Customer page: **https://prinscosmetic.eu/track-order/** (order number + checkout email).
 
 **How to navigate**
 1. Ops: **Orders** → open row → **Tracking** section (fills after the vendor ships).
@@ -262,8 +262,8 @@ Safe ops workflow that avoids accidental double-spend while still supporting rea
 - One-script redeploy path for future VPS  
 
 **How to navigate**
-- Shop: https://cosmetic.slilverbelt.xyz  
-- Dashboard: https://sillage.slilverbelt.xyz  
+- Shop: https://prinscosmetic.eu  
+- Dashboard: https://sillage.prinscosmetic.eu  
 - Redeploy helper: `production-environment/scripts/deploy-vps.sh`  
 - Dashboard password after deploy: `.deploy/vps-dashboard.txt` on the operator machine (not in git)
 
@@ -300,9 +300,9 @@ Safe ops workflow that avoids accidental double-spend while still supporting rea
 
 | Surface | URL | Notes |
 |---|---|---|
-| Dashboard | https://sillage.slilverbelt.xyz | User `admin`; password from operator `.deploy/vps-dashboard.txt` |
-| Storefront | https://cosmetic.slilverbelt.xyz | Customer-facing shop |
-| Track order | https://cosmetic.slilverbelt.xyz/track-order/ | Order number + email |
+| Dashboard | https://sillage.prinscosmetic.eu | User `admin`; password from operator `.deploy/vps-dashboard.txt` |
+| Storefront | https://prinscosmetic.eu | Customer-facing shop |
+| Track order | https://prinscosmetic.eu/track-order/ | Order number + email |
 
 ---
 

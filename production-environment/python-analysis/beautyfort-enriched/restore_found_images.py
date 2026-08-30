@@ -10,8 +10,8 @@ Restore order (first hit wins per filename):
   1. Copy from ``--media-src`` (rsync of an old VPS ``ecom_sites/data/media``)
   2. Copy from ``--brasty-root`` when the CDN filename stem matches a Brasty
      ``EAN.jpg`` (skip camera placeholders)
-  3. HTTP GET the live CDN URL (``images.slilverbelt.xyz``) while that host still
-     serves the file
+  3. HTTP GET the live CDN URL (``images.prinscosmetic.eu``, then the old
+     ``images.slilverbelt.xyz`` host) while that host still serves the file
 
 Shopify / BTS / oceanfragrances URLs stay as remote hotlinks — they do not need
 to be on disk.
@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from brasty_placeholders import file_is_brasty_placeholder  # noqa: E402
 
-CDN_HOSTS = ("images.slilverbelt.xyz",)
+CDN_HOSTS = ("images.prinscosmetic.eu", "images.slilverbelt.xyz")
 
 
 def cdn_filename(url: str) -> str | None:

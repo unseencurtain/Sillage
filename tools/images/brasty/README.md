@@ -139,7 +139,7 @@ npm run crawl-catalog
 Per row: read EAN from the list → hover `.c-product__img` → capture `/images/w700/`
 → HTTP download → `output/EAN.jpg`. Already-downloaded EANs are skipped. After a
 solid chunk: `npm run watermark` → `npm run build-overrides` (with
-`LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz`) → rsync media → rewrite sync.
+`LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu`) → rsync media → rewrite sync.
 
 ## 4. Watermark (optional LPS logo)
 
@@ -158,7 +158,7 @@ missing, this step **no-ops** with a clear message.
 
 ```bash
 # LPS_MEDIA_BASE_URL must match the public images host, e.g.
-# LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz
+# LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu
 npm run build-overrides
 ```
 
@@ -176,7 +176,7 @@ Stack (owned by `ecom_sites/compose.yaml` + deploy script — do not reinvent fr
 2. Copy watermarked (or original) `EAN.jpg` files there — served immediately by `lps-media`.
 3. Dedicated `lps-media` (`nginx:alpine`) mounts that path as its document root.
 4. Preferred public URL: `https://images.<domain>/<EAN>.jpg` (Caddy images site → media root).
-5. Shop `/lps-media/` remains a fallback. Set `LPS_MEDIA_BASE_URL=https://images.slilverbelt.xyz`
+5. Shop `/lps-media/` remains a fallback. Set `LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu`
    before `build-overrides` (aliases: `IMAGE_HOST_BASE_URL`, `PUBLIC_URL_BASE`).
 
 ## 7. Storefront sync

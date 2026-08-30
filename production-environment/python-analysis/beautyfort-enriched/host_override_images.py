@@ -14,7 +14,7 @@ Usage:
 
 Env (first match wins):
   LPS_MEDIA_BASE_URL / IMAGE_HOST_BASE_URL / PUBLIC_URL_BASE
-  default https://images.slilverbelt.xyz
+  default https://images.prinscosmetic.eu
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent
 ANALYSIS = ROOT.parent
 REPO_ECOM_MEDIA = ANALYSIS.parent / "ecom_sites" / "data" / "media"
 CORE_OVERRIDES = ANALYSIS.parent / "sillage-core" / "data" / "image_overrides.json"
-DEFAULT_PUBLIC = "https://images.slilverbelt.xyz"
+DEFAULT_PUBLIC = "https://images.prinscosmetic.eu"
 
 
 def resolve_public_base() -> str:
