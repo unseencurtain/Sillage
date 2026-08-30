@@ -56,6 +56,7 @@ After cleanup, home should look like this:
 │   ├── .env                           Secrets + image tags + the three domains
 │   ├── compose.yaml
 │   ├── .feedscratch/                  Vendor feed cache (writable)
+│   ├── backups/                       Dated SQL dumps (optional)
 │   ├── scripts/vps-bootstrap.sh
 │   ├── sillage-core/
 │   │   ├── data/image_overrides.json
@@ -67,7 +68,8 @@ After cleanup, home should look like this:
 │   ├── wp-db/                         MariaDB files
 │   └── media/                         Product images for images.* CDN
 ├── brasty/                            Photo dump (EAN.jpg). Keep.
-└── ovhe-backup/ovhe-backup.zip        Optional dated archive only
+├── ovhe-backup/ovhe-backup.zip        Optional dated archive only
+└── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile
 ```
 
 Docker reads:
