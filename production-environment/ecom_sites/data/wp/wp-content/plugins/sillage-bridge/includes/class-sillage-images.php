@@ -85,7 +85,18 @@ final class Sillage_Images {
 	 */
 	public static function thumbnail_url( int $product_id ): string {
 		$url = get_post_meta( $product_id, self::THUMB_META, true );
-		return is_string( $url ) ? trim( $url ) : '';
+		if ( ! is_string( $url ) ) {
+			return '';
+		}
+		$url = trim( $url );
+		// "None" / "null" leaked from Python; never emit those as <img src>.
+		if ( $url === '' || strcasecmp( $url, 'none' ) === 0 || strcasecmp( $url, 'null' ) === 0 ) {
+			return '';
+		}
+		if ( ! preg_match( '#^https?://#i', $url ) ) {
+			return '';
+		}
+		return $url;
 	}
 
 	/**

@@ -37,7 +37,9 @@ JOIN sillage.sil_vendors v ON v.id = o.vendor_id
 LEFT JOIN earth.wp_postmeta m
   ON m.post_id = p.wp_post_id AND m.meta_key = '_external_thumbnail_url'
 WHERE p.wp_post_id IS NOT NULL
-  AND (m.meta_value IS NULL OR m.meta_value = '')
+  AND (m.meta_value IS NULL OR m.meta_value = ''
+       OR m.meta_value IN ('None','null')
+       OR m.meta_value NOT LIKE 'http%')
 ORDER BY v.slug, o.brand, o.name
 """
 

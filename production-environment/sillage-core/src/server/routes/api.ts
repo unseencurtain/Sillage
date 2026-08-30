@@ -9,7 +9,7 @@ import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
 import { logger } from "../../lib/log.ts";
 import { resolveTimeZone } from "../../lib/timezone.ts";
-import { isUnusableImage, shopVisibility } from "../../sync/imageRules.ts";
+import { displayedShopImage, isUnusableImage, shopVisibility } from "../../sync/imageRules.ts";
 import { loadImageOverrides, normalizeEan, resolveImageUrl } from "../../sync/images.ts";
 import {
   loadCompanyBilling,
@@ -481,10 +481,12 @@ api.get("/products", async (c) => {
     query<RowDataPacket>(
       `SELECT p.id, p.sku, p.wp_post_id, p.slug, o.name, o.stock, o.vendor_price, o.primary_ean,
               o.eans, COALESCE(NULLIF(v.storefront_label, ''), v.name) AS vendor, o.image_url,
-              v.min_visible_stock
+              v.min_visible_stock, thumb.meta_value AS wp_thumb_url
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
          JOIN ${sil("sil_vendors")} v ON v.id = o.vendor_id
+         LEFT JOIN ${wp("postmeta")} thumb
+           ON thumb.post_id = p.wp_post_id AND thumb.meta_key = '_external_thumbnail_url'
          ${where}
         ORDER BY p.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
@@ -500,7 +502,7 @@ api.get("/products", async (c) => {
       row.min_visible_stock === null || row.min_visible_stock === undefined
         ? settings.stockThreshold
         : Number(row.min_visible_stock);
-    const { min_visible_stock: _min, eans: _eans, ...rest } = row;
+    const { min_visible_stock: _min, eans: _eans, wp_thumb_url: wooThumb, ...rest } = row;
     void _min;
     void _eans;
     const resolved = resolveImageUrl(
@@ -513,7 +515,7 @@ api.get("/products", async (c) => {
       ...rest,
       shop_visibility: shopVisibility({
         stock: Number(row.stock),
-        imageUrl: resolved,
+        imageUrl: displayedShopImage((wooThumb as string | null) ?? null, resolved),
         hideWithoutImage: settings.hideProductsWithoutImage,
         stockThreshold: threshold,
       }),
