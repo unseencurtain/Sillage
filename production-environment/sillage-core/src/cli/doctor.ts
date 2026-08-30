@@ -246,6 +246,40 @@ add(
   `${offers} offers, ${products} products, ${catalogVisible} visible in shop / ${published} published`,
 );
 
+const visibleWithoutPhoto = Number(
+  await scalar(
+    `SELECT COUNT(*) FROM ${wp("posts")} p
+      LEFT JOIN ${wp("postmeta")} thumb
+        ON thumb.post_id = p.ID AND thumb.meta_key = '_external_thumbnail_url'
+     WHERE p.post_type = 'product' AND p.post_status = 'publish'
+       AND NOT EXISTS (
+         SELECT 1 FROM ${wp("term_relationships")} tr
+         JOIN ${wp("term_taxonomy")} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+         JOIN ${wp("terms")} t ON t.term_id = tt.term_id
+         WHERE tr.object_id = p.ID
+           AND tt.taxonomy = 'product_visibility'
+           AND t.slug = 'exclude-from-catalog'
+       )
+       AND (
+         thumb.meta_value IS NULL
+         OR TRIM(thumb.meta_value) = ''
+         OR LOWER(TRIM(thumb.meta_value)) IN ('none', 'null')
+         OR LOWER(TRIM(thumb.meta_value)) NOT REGEXP '^https?://'
+         OR LOWER(thumb.meta_value) LIKE '%no_image%'
+         OR LOWER(thumb.meta_value) LIKE '%placeholder%'
+         OR LOWER(thumb.meta_value) LIKE '%beautyfort.com/pic/%'
+       )`,
+  ),
+);
+add(
+  "No placeholder on the shop",
+  visibleWithoutPhoto === 0,
+  visibleWithoutPhoto === 0
+    ? "every catalogue-visible product has a real http(s) photo"
+    : `${visibleWithoutPhoto} published + catalog-visible products have junk or empty Woo thumbs`,
+  "Shoppers see the grey WooCommerce camera. Hide those SKUs or write a real URL.",
+);
+
 // ── Report ──────────────────────────────────────────────────────────────────
 const width = Math.max(...checks.map((c) => c.name.length)) + 2;
 let failed = 0;

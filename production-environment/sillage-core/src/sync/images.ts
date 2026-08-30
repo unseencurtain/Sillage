@@ -22,6 +22,9 @@ export {
   normalizeEan,
   resolveImageUrl,
   shouldHideForMissingImage,
+  shopImageKey,
+  displayedShopImage,
+  thumbsNeedWrite,
   indexOfferImages,
 } from "./imageRules.ts";
 

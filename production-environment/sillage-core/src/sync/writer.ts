@@ -7,7 +7,12 @@ import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
 import { throwIfSyncAborted } from "./abort.ts";
-import { buildImageLookup, shouldHideForMissingImage, type ImageLookup } from "./images.ts";
+import {
+  buildImageLookup,
+  shouldHideForMissingImage,
+  thumbsNeedWrite,
+  type ImageLookup,
+} from "./images.ts";
 import { computePricing, resolveRules, type PricingResult } from "./pricing.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
@@ -129,6 +134,8 @@ interface PendingRow extends RowDataPacket {
   stock: number;
   image_url: string | null;
   gallery_urls: string | string[];
+  /** Woo `_external_thumbnail_url` — what the shop actually renders. */
+  wp_thumb_url: string | null;
 }
 
 interface PreparedProduct {
@@ -283,19 +290,49 @@ export async function writePendingProducts(
     hiddenNoImage: 0,
   };
 
-  // The fast sync never creates products; that is the nightly full sync's job. Restricting it to
-  // rows that already have a post keeps the 30-minute path to price, stock and visibility only.
+  // Fast sync never creates products; that is the nightly full sync's job.
+  // Also pick up catalogue-visible posts whose Woo thumb is junk even when hashes
+  // already match — otherwise skip-write leaves a placeholder on the shop.
+  const visiblePlaceholderHole = `(
+    p.wp_post_id IS NOT NULL
+    AND (
+      thumb.meta_value IS NULL
+      OR TRIM(thumb.meta_value) = ''
+      OR LOWER(TRIM(thumb.meta_value)) IN ('none', 'null')
+      OR LOWER(TRIM(thumb.meta_value)) NOT REGEXP '^https?://'
+      OR LOWER(thumb.meta_value) LIKE '%no_image%'
+      OR LOWER(thumb.meta_value) LIKE '%placeholder%'
+      OR LOWER(thumb.meta_value) LIKE '%beautyfort.com/pic/%'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+        FROM ${wp("term_relationships")} vis
+        JOIN ${wp("term_taxonomy")} vtt ON vtt.term_taxonomy_id = vis.term_taxonomy_id
+        JOIN ${wp("terms")} vt ON vt.term_id = vtt.term_id
+       WHERE vis.object_id = p.wp_post_id
+         AND vtt.taxonomy = 'product_visibility'
+         AND vt.slug = 'exclude-from-catalog'
+    )
+  )`;
   let where =
     mode === "fast"
-      ? "p.needs_price_write = 1 AND p.wp_post_id IS NOT NULL"
-      : "(p.needs_content_write = 1 OR p.needs_price_write = 1)";
+      ? `((p.needs_price_write = 1 AND p.wp_post_id IS NOT NULL) OR ${visiblePlaceholderHole})`
+      : `((p.needs_content_write = 1 OR p.needs_price_write = 1) OR ${visiblePlaceholderHole})`;
   if (options?.unpostedOnly) {
     where = `(${where}) AND p.wp_post_id IS NULL`;
   }
 
+  const thumbJoin = `LEFT JOIN (
+         SELECT post_id, MIN(meta_value) AS meta_value
+           FROM ${wp("postmeta")}
+          WHERE meta_key = '_external_thumbnail_url'
+          GROUP BY post_id
+       ) thumb ON thumb.post_id = p.wp_post_id`;
+
   const [{ total = 0 } = {}] = await query<RowDataPacket & { total: number }>(
     `SELECT COUNT(*) AS total FROM ${sil("sil_products")} p
        JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
+       ${thumbJoin}
       WHERE ${where}`,
   );
   if (total === 0) {
@@ -315,9 +352,11 @@ export async function writePendingProducts(
               p.applied_content_hash, p.applied_price_hash,
               o.id AS offer_id, o.vendor_id, o.vendor_product_id, o.sku, o.eans, o.name,
               o.description, o.brand, o.category_refs, o.attributes, o.extra, o.vendor_price,
-              o.vendor_recommended_price, o.stock, o.image_url, o.gallery_urls
+              o.vendor_recommended_price, o.stock, o.image_url, o.gallery_urls,
+              thumb.meta_value AS wp_thumb_url
          FROM ${sil("sil_products")} p
          JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
+         ${thumbJoin}
         WHERE ${where} AND p.id > ?
         ORDER BY p.id
         LIMIT ?`,
@@ -386,7 +425,9 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
 
   const pHash = priceHash(effectivePricing);
   const isNew = row.wp_post_id === null;
-  const writePrice = isNew || pHash !== row.applied_price_hash;
+  const thumbOutOfSync = thumbsNeedWrite(row.wp_thumb_url, imageUrl);
+  // Hashes can match while Woo still holds "" / "None" — force the write that skip-write missed.
+  const writePrice = isNew || pHash !== row.applied_price_hash || thumbOutOfSync;
 
   const base = {
     productId: row.product_id,
@@ -487,7 +528,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
     attributeTerms,
     brandTtId: brandTerm?.ttId ?? null,
     contentHash: cHash,
-    writeContent: isNew || cHash !== row.applied_content_hash,
+    writeContent: isNew || cHash !== row.applied_content_hash || thumbOutOfSync,
   };
 }
 

@@ -4,7 +4,11 @@
 
 export function isPlaceholderImage(url: string | null | undefined): boolean {
   if (!url) return true;
-  const low = url.toLowerCase();
+  const trimmed = url.trim();
+  const low = trimmed.toLowerCase();
+  if (!low || low === "none" || low === "null") return true;
+  // Shop only renders http(s). "None" and other junk must not count as a photo.
+  if (!/^https?:\/\//i.test(trimmed)) return true;
   return (
     low.includes("no_image") ||
     low.includes("woocommerce-placeholder") ||
@@ -12,6 +16,37 @@ export function isPlaceholderImage(url: string | null | undefined): boolean {
     low.endsWith("/images/") ||
     (low.includes("/thumb/") && low.includes("noimage"))
   );
+}
+
+/** Canonical empty-vs-URL compare. Unusable stored values collapse to "". */
+export function shopImageKey(url: string | null | undefined): string {
+  if (isUnusableImage(url)) return "";
+  return url!.trim();
+}
+
+/**
+ * Customer-facing URL for hide / dashboard Shop column.
+ * Woo `_external_thumbnail_url` is what the plugin prints.
+ * `undefined` means Woo was not queried — fall back to the resolved feed URL.
+ * `null` or junk means the shop has no photo, even if the vendor feed still has a file.
+ */
+export function displayedShopImage(
+  wooThumb: string | null | undefined,
+  resolved: string | null | undefined,
+): string | null {
+  if (wooThumb === undefined) {
+    const fallback = resolved?.trim() ?? "";
+    return isUnusableImage(fallback) ? null : fallback;
+  }
+  return isUnusableImage(wooThumb) ? null : wooThumb.trim();
+}
+
+/** True when Woo meta and the URL we would write are not the same shop photo. */
+export function thumbsNeedWrite(
+  wooThumb: string | null | undefined,
+  resolved: string | null | undefined,
+): boolean {
+  return shopImageKey(wooThumb) !== shopImageKey(resolved);
 }
 
 /** BeautyFort's /pic/ CDN serves tiny thumbs — treat as replaceable when a better URL exists. */

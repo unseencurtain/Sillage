@@ -181,12 +181,13 @@ row here.
 
 Columns: **SKU**, **Name**, **Vendor**, **Stock**, **Shop**, **Cost**, **WP**.
 
-**Shop** is what customers see:
+**Shop** is what customers see on the catalogue — the photo WordPress is actually printing, not
+only the wholesaler feed. A vendor file that never landed in WooCommerce still counts as no photo.
 
 | Badge | Meaning |
 |---|---|
-| **Visible** | In the shop catalogue |
-| **Hidden · no image** | No usable photo after Sillage tried overrides and the other vendor. Stock can still be 1. |
+| **Visible** | In the shop catalogue, with a real `http(s)` photo |
+| **Hidden · no image** | WooCommerce has no usable photo (empty, `None`, placeholder, or a tiny BeautyFort `/pic/` thumb). Stock can still be 1. |
 | **Hidden · stock** | At or below the stock threshold |
 
 **Cost** is wholesale cost, not the selling price. Selling price is cost × your multiplier (and
@@ -273,7 +274,8 @@ These rules are on purpose. They match how dropship dispatch works.
 
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
 image** is on. They still exist in WooCommerce and on **Products**. Weak BeautyFort `/pic/`
-thumbs and BTS `no_image` count as “no photo”.
+thumbs, BTS `no_image`, empty Woo meta, and the literal word `None` all count as “no photo”.
+The shop never shows the grey WooCommerce camera placeholder on a catalogue-visible product.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those
