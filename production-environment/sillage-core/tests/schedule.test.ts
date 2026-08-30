@@ -81,6 +81,16 @@ describe("schedule decisions", () => {
     expect(d.action).toBe("fast");
   });
 
+  test("a queued catalogue rebuild upgrades the next due fast sync to full", () => {
+    const d = decide(settings({ fullSyncEnabled: false }), timing({ minutesSinceAny: 30 }), true);
+    expect(d.action).toBe("full");
+  });
+
+  test("a queued rebuild still waits for the call interval", () => {
+    const d = decide(settings(), timing({ minutesSinceAny: 10, fullRunsSinceWindow: 1 }), true);
+    expect(d.action).toBe("skip");
+  });
+
   test("an empty catalogue seeds with a full sync", () => {
     const d = decide(settings(), timing({ minutesSinceAny: null, fullRunsSinceWindow: 1 }));
     expect(d.action).toBe("full");

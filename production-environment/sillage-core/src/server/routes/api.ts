@@ -23,13 +23,63 @@ import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
 import { parsePriceTiers } from "../../sync/pricing.ts";
 import { markAllPricesDirty, markAllProductsDirty, runSync } from "../../sync/run.ts";
-import { isSyncLockHeld, kickContentRewrite, kickPriceRewrite } from "../../sync/pendingRewrite.ts";
+import {
+  isCatalogueRebuildPending,
+  isSyncLockHeld,
+  kickContentRewrite,
+  kickPriceRewrite,
+  queueCatalogueRebuild,
+} from "../../sync/pendingRewrite.ts";
 import type { OrderAddress } from "../../orders/types.ts";
 import { getRetailLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
+
+function parseRunStats(raw: unknown): {
+  fetchedByVendor?: Record<string, number>;
+  skippedVendors?: string[];
+  btsDelta?: boolean;
+} {
+  if (!raw) return {};
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== "object") return {};
+    const obj = parsed as {
+      fetchedByVendor?: Record<string, number>;
+      skippedVendors?: string[];
+      btsDelta?: boolean;
+    };
+    return {
+      fetchedByVendor: obj.fetchedByVendor,
+      skippedVendors: obj.skippedVendors,
+      btsDelta: obj.btsDelta,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function decorateSyncRun(row: RowDataPacket) {
+  const extra = parseRunStats(row.stats);
+  const { stats: _stats, ...rest } = row;
+  void _stats;
+  return {
+    ...rest,
+    fetched_by_vendor: extra.fetchedByVendor ?? null,
+    skipped_vendors: extra.skippedVendors ?? [],
+    bts_delta: extra.btsDelta === true,
+  };
+}
+
+async function hasSuccessfulCatalogue(): Promise<boolean> {
+  const rows = await query<RowDataPacket & { n: number }>(
+    `SELECT COUNT(*) AS n FROM ${sil("sil_sync_runs")}
+      WHERE mode = 'full' AND status IN ('success','partial')`,
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}
 
 export const api = new Hono<AuthEnv>();
 api.use("*", requireSession);
@@ -84,7 +134,7 @@ api.get("/overview", async (c) => {
     ),
     query<RowDataPacket>(
       `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
-              prices_updated, products_vanished, errors, started_at, finished_at
+              prices_updated, products_vanished, errors, started_at, finished_at, stats
          FROM ${sil("sil_sync_runs")} ORDER BY id DESC LIMIT 1`,
     ),
     query<RowDataPacket & { status: string; n: number }>(
@@ -119,7 +169,7 @@ api.get("/overview", async (c) => {
     hiddenNoImage: Number(cat?.hidden_no_image ?? 0),
     /** Catalog-hidden with outofstock — stock threshold (and often OOS). */
     hiddenStock: Number(cat?.hidden_stock ?? 0),
-    lastSync: lastSync[0] ?? null,
+    lastSync: lastSync[0] ? decorateSyncRun(lastSync[0]) : null,
     ordersByStatus,
     syncsLast7Days: syncs.map((s) => ({ day: String(s.day), n: Number(s.n) })),
     settings: {
@@ -149,13 +199,13 @@ api.get("/sync/runs", async (c) => {
     ),
     query<RowDataPacket>(
       `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
-              prices_updated, products_vanished, errors, started_at, finished_at
+              prices_updated, products_vanished, errors, started_at, finished_at, stats
          FROM ${sil("sil_sync_runs")} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [limit, offset],
     ),
   ]);
   return c.json({
-    runs,
+    runs: runs.map(decorateSyncRun),
     total: Number(totalRows[0]?.total ?? 0),
     page,
     limit,
@@ -178,23 +228,61 @@ api.post("/sync/run", async (c) => {
   const vendors = Array.isArray(body.vendors)
     ? body.vendors.filter((v): v is string => v === "beautyfort" || v === "bts")
     : undefined;
+  const vendorList = vendors?.length ? vendors : ["beautyfort", "bts"];
 
-  // Re-enable scheduling when an operator deliberately starts a run after Stop.
   await clearSyncAbort();
-  if (!settings.syncEnabled) await setSetting("sync_enabled", "1");
 
-  // Honest status: do not claim "started" when the advisory lock is held (nothing was queued).
   if (await isSyncLockHeld()) {
     return c.json({
       ok: true,
       started: false,
       alreadyRunning: true,
+      queued: false,
       cooldown: false,
       mode,
       source,
-      vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+      vendors: vendorList,
       detail:
         "Sync already running — your new request was not started. Watch the active run; pricing Save queues a rewrite-only follow-up automatically.",
+    });
+  }
+
+  const catalogueReady = await hasSuccessfulCatalogue();
+  const pendingRebuild = await isCatalogueRebuildPending();
+
+  // Scheduled cadence owns price/stock. A one-off Update is only for when Sync enabled is off.
+  if (mode === "fast" && settings.syncEnabled) {
+    return c.json({
+      ok: true,
+      started: false,
+      alreadyRunning: false,
+      queued: false,
+      cooldown: false,
+      scheduleOwnsSync: true,
+      mode,
+      source,
+      vendors: vendorList,
+      detail:
+        "Automatic price & stock sync is on. The next scheduled call will run it. Turn Sync enabled off for a one-off update.",
+    });
+  }
+
+  // Rebuild while the schedule is on (and a catalogue already exists) waits for the next call.
+  if (mode === "full" && settings.syncEnabled && catalogueReady) {
+    if (!pendingRebuild) await queueCatalogueRebuild();
+    return c.json({
+      ok: true,
+      started: false,
+      alreadyRunning: false,
+      queued: true,
+      cooldown: false,
+      pendingRebuild: true,
+      mode,
+      source,
+      vendors: vendorList,
+      detail: pendingRebuild
+        ? `Catalogue rebuild is already queued. The next scheduled sync (every ${settings.fastSyncMinutes} min) will rebuild instead of prices-only.`
+        : `Catalogue rebuild queued. The next scheduled sync (every ${settings.fastSyncMinutes} min) will rebuild BeautyFort + BTS instead of a prices-only call.`,
     });
   }
 
@@ -202,23 +290,23 @@ api.post("/sync/run", async (c) => {
   // silently reuse a stale on-disk feed.
   if (source === "live") {
     const cooldown = await getRetailLiveCooldown();
-    if (!cooldown.allow) {
+    if (!cooldown.anyAllow) {
       return c.json({
         ok: true,
         started: false,
         alreadyRunning: false,
+        queued: false,
         cooldown: true,
         retryInMinutes: cooldown.retryInMinutes,
         nextAllowedAt: cooldown.nextAllowedAt,
         mode,
         source,
-        vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+        vendors: vendorList,
         detail: `Next sync available in ${cooldown.retryInMinutes} min — ${cooldown.reason}`,
       });
     }
   }
 
-  // Fire-and-forget so the HTTP request returns immediately; the dashboard polls /sync/runs.
   void runSync({
     mode,
     source,
@@ -228,10 +316,11 @@ api.post("/sync/run", async (c) => {
     ok: true,
     started: true,
     alreadyRunning: false,
+    queued: false,
     cooldown: false,
     mode,
     source,
-    vendors: vendors?.length ? vendors : ["beautyfort", "bts"],
+    vendors: vendorList,
   });
 });
 
@@ -283,22 +372,33 @@ api.post("/sync/stop", async (c) => {
 });
 
 api.get("/sync/live-status", async (c) => {
-  const cooldown = await getRetailLiveCooldown();
+  const [cooldown, settings, pendingRebuild, catalogueReady] = await Promise.all([
+    getRetailLiveCooldown(),
+    loadSettings(),
+    isCatalogueRebuildPending(),
+    hasSuccessfulCatalogue(),
+  ]);
   return c.json({
     cooldownMinutes: cooldown.cooldownMinutes,
     /** @deprecated use cooldownMinutes — same value as live_feed_min_minutes */
     liveFeedMinMinutes: cooldown.cooldownMinutes,
     allow: cooldown.allow,
+    anyAllow: cooldown.anyAllow,
     retryInMinutes: cooldown.retryInMinutes,
     nextAllowedAt: cooldown.nextAllowedAt,
     reason: cooldown.reason,
+    syncEnabled: settings.syncEnabled,
+    pendingRebuild,
+    catalogueReady,
+    scheduleOwnsFastSync: settings.syncEnabled,
+    dailyCapEnabled: false,
     beautyfort: {
       allow: cooldown.beautyfort.allow,
       reason: cooldown.beautyfort.reason,
       retryInMinutes: cooldown.beautyfort.retryInMinutes,
       maxPerDay: cooldown.beautyfort.maxPerDay,
       usedToday: cooldown.beautyfort.usedToday,
-      dailyRemaining: Math.max(0, cooldown.beautyfort.maxPerDay - cooldown.beautyfort.usedToday),
+      dailyRemaining: null,
     },
     bts: {
       allow: cooldown.bts.allow,
@@ -306,7 +406,7 @@ api.get("/sync/live-status", async (c) => {
       retryInMinutes: cooldown.bts.retryInMinutes,
       maxPerDay: cooldown.bts.maxPerDay,
       usedToday: cooldown.bts.usedToday,
-      dailyRemaining: Math.max(0, cooldown.bts.maxPerDay - cooldown.bts.usedToday),
+      dailyRemaining: null,
     },
   });
 });
@@ -763,6 +863,7 @@ api.get("/settings", async (c) => {
     description_mode: s.descriptionMode,
     volume_filter_mode: s.volumeFilterMode,
     live_feed_min_minutes: String(s.liveFeedMinMinutes),
+    pending_catalogue_rebuild: (await isCatalogueRebuildPending()) ? "1" : "0",
     company_billing_beautyfort: JSON.stringify(bfBilling),
     company_billing_bts: JSON.stringify(btsBilling),
   });

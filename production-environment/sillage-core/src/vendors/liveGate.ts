@@ -1,12 +1,8 @@
 /**
- * Hard gates on live vendor API usage.
+ * Interval gates on live vendor API usage (call-based, not a daily download cap).
  *
- * BeautyFort has a very small daily SOAP budget (~40). Hitting live on every settings save or
- * dashboard "Sync" click would burn the quota and risk a ban. Scheduled catalogue syncs must
- * prefer the on-disk feed cache unless enough time has passed and the daily cap still has room.
- *
- * Per-vendor daily caps live on sil_vendors (live_max_per_day / store_*). Legacy setting keys
- * like beautyfort_live_max_per_day remain as fallback for databases migrated but not backfilled.
+ * Each vendor is gated independently by `live_feed_min_minutes` since its last live fetch.
+ * Daily download counters are recorded for diagnostics but never block a call.
  */
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
@@ -78,28 +74,6 @@ export async function checkLiveGate(vendor: CacheVendor): Promise<LiveGateResult
     }
   }
 
-  const [countRow] = await query<RowDataPacket & { n: number }>(
-    `SELECT COUNT(*) AS n FROM ${sil("sil_sync_runs")}
-      WHERE source = 'live'
-        AND started_at >= CURDATE()
-        AND (status IN ('success','partial','running','error') OR status IS NOT NULL)`,
-  );
-  // Per-vendor daily counts from dedicated counter settings (more accurate than runs).
-  const [dayCountRow] = await query<RowDataPacket & { setting_value: string }>(
-    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    [`live_fetch_count_${vendor}_${new Date().toISOString().slice(0, 10)}`],
-  );
-  const dayCount = Number(dayCountRow?.setting_value ?? 0);
-  const max = await catalogueMaxPerDay(vendor);
-  if (dayCount >= max) {
-    return {
-      allow: false,
-      reason: `${vendor} live fetch blocked: ${dayCount}/${max} downloads used today`,
-      retryInMinutes: 60,
-    };
-  }
-
-  void countRow;
   return { allow: true, reason: "live allowed", retryInMinutes: 0 };
 }
 
@@ -150,6 +124,7 @@ async function liveFetchesUsedToday(vendor: CacheVendor): Promise<number> {
 /** Combined BF+BTS cooldown for dashboard buttons and POST /sync/run. */
 export async function getRetailLiveCooldown(): Promise<{
   allow: boolean;
+  anyAllow: boolean;
   retryInMinutes: number;
   reason: string;
   cooldownMinutes: number;
@@ -168,17 +143,23 @@ export async function getRetailLiveCooldown(): Promise<{
     liveFetchesUsedToday("bts"),
   ]);
   const retryInMinutes = Math.max(bfGate.retryInMinutes, btsGate.retryInMinutes);
+  /** Both vendors may be called now (manual one-off). */
   const allow = bfGate.allow && btsGate.allow;
+  /** At least one vendor may be called (scheduler should still start). */
+  const anyAllow = bfGate.allow || btsGate.allow;
   const blockers = [bfGate, btsGate].filter((g) => !g.allow).map((g) => g.reason);
   const reason = allow
     ? "live allowed for BeautyFort and BTS"
-    : blockers.join("; ");
+    : anyAllow
+      ? `partial: ${blockers.join("; ")}`
+      : blockers.join("; ");
   const nextAllowedAt =
     allow || retryInMinutes <= 0
       ? null
       : new Date(Date.now() + retryInMinutes * 60_000).toISOString();
   return {
     allow,
+    anyAllow,
     retryInMinutes: allow ? 0 : retryInMinutes,
     reason,
     cooldownMinutes,
@@ -199,7 +180,7 @@ export async function checkWholesalePerfumesStoreGate(): Promise<LiveGateResult>
   } catch {
     vendorRow = null;
   }
-  const { maxPerDay, minMinutes } = resolveWholesalePerfumesStoreLimits(vendorRow);
+  const { minMinutes } = resolveWholesalePerfumesStoreLimits(vendorRow);
 
   const [lastRow] = await query<RowDataPacket & { setting_value: string }>(
     `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
@@ -215,20 +196,6 @@ export async function checkWholesalePerfumesStoreGate(): Promise<LiveGateResult>
         retryInMinutes: minMinutes - elapsed,
       };
     }
-  }
-
-  const day = new Date().toISOString().slice(0, 10);
-  const [dayCountRow] = await query<RowDataPacket & { setting_value: string }>(
-    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    [`live_fetch_count_wholesale-perfumes_store_${day}`],
-  );
-  const dayCount = Number(dayCountRow?.setting_value ?? 0);
-  if (dayCount >= maxPerDay) {
-    return {
-      allow: false,
-      reason: `wholesale-perfumes store live fetch blocked: ${dayCount}/${maxPerDay} downloads used today`,
-      retryInMinutes: 60,
-    };
   }
 
   return { allow: true, reason: "live allowed", retryInMinutes: 0 };

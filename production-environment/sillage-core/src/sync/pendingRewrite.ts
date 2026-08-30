@@ -14,6 +14,7 @@ const log = logger("sync");
 
 const PENDING_PRICE_KEY = "pending_price_rewrite";
 const PENDING_CONTENT_KEY = "pending_content_rewrite";
+const PENDING_REBUILD_KEY = "pending_catalogue_rebuild";
 
 export type RewriteKickStatus = "started" | "queued";
 
@@ -106,6 +107,25 @@ export async function kickPriceRewrite(): Promise<RewriteKickStatus> {
 }
 
 /** Full/cache rewrite for description / volume-mode changes. */
+export async function queueCatalogueRebuild(): Promise<void> {
+  await setSetting(PENDING_REBUILD_KEY, "1");
+}
+
+export async function isCatalogueRebuildPending(): Promise<boolean> {
+  return readFlag(PENDING_REBUILD_KEY);
+}
+
+/** Returns true when a rebuild was waiting, and clears the flag. */
+export async function consumeCatalogueRebuildFlag(): Promise<boolean> {
+  const pending = await readFlag(PENDING_REBUILD_KEY);
+  if (pending) await clearFlag(PENDING_REBUILD_KEY);
+  return pending;
+}
+
+export async function restoreCatalogueRebuildFlag(): Promise<void> {
+  await setSetting(PENDING_REBUILD_KEY, "1");
+}
+
 export async function kickContentRewrite(): Promise<RewriteKickStatus> {
   await flagPending("content");
   return tryStartFromPending();

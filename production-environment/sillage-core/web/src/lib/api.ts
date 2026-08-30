@@ -41,7 +41,10 @@ export const api = {
       ok: boolean;
       started?: boolean;
       alreadyRunning?: boolean;
+      queued?: boolean;
       cooldown?: boolean;
+      scheduleOwnsSync?: boolean;
+      pendingRebuild?: boolean;
       retryInMinutes?: number;
       nextAllowedAt?: string | null;
       detail?: string;
@@ -72,16 +75,22 @@ export const api = {
       cooldownMinutes: number;
       liveFeedMinMinutes: number;
       allow: boolean;
+      anyAllow?: boolean;
       retryInMinutes: number;
       nextAllowedAt: string | null;
       reason: string;
+      syncEnabled?: boolean;
+      pendingRebuild?: boolean;
+      catalogueReady?: boolean;
+      scheduleOwnsFastSync?: boolean;
+      dailyCapEnabled?: boolean;
       beautyfort: {
         allow: boolean;
         reason: string;
         retryInMinutes: number;
         maxPerDay: number;
         usedToday: number;
-        dailyRemaining: number;
+        dailyRemaining: number | null;
       };
       bts: {
         allow: boolean;
@@ -89,7 +98,7 @@ export const api = {
         retryInMinutes: number;
         maxPerDay: number;
         usedToday: number;
-        dailyRemaining: number;
+        dailyRemaining: number | null;
       };
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
@@ -210,6 +219,9 @@ export interface SyncRun {
   errors: number;
   started_at: string;
   finished_at?: string | null;
+  fetched_by_vendor?: Record<string, number> | null;
+  skipped_vendors?: string[];
+  bts_delta?: boolean;
 }
 
 export interface SecretStatus {

@@ -31,8 +31,10 @@ export function Overview() {
   });
 
   const syncRunning = isRunActive(data?.lastSync);
-  const onCooldown = Boolean(live.data && !live.data.allow);
+  const scheduleOn = data.settings.syncEnabled;
+  const onCooldown = Boolean(live.data && !(live.data.anyAllow ?? live.data.allow));
   const cooldownMin = live.data?.retryInMinutes ?? 0;
+  const intervalMin = live.data?.cooldownMinutes ?? 30;
   const run = useMutation({
     mutationFn: () =>
       api.runSync("fast", { vendors: ["beautyfort", "bts"], source: "live" }),
@@ -43,9 +45,13 @@ export function Overview() {
       if (res.alreadyRunning || res.started === false) {
         toast(
           res.detail ??
-            (res.cooldown
-              ? `Wait ${res.retryInMinutes ?? "…"} min before the next sync.`
-              : "Sync already running — watch progress on Sync."),
+            (res.queued
+              ? "Rebuild queued for the next scheduled sync."
+              : res.scheduleOwnsSync
+                ? "Automatic sync is on — use Settings to turn it off for a one-off."
+                : res.cooldown
+                  ? `Wait ${res.retryInMinutes ?? "…"} min before the next sync.`
+                  : "Sync already running — watch progress on Sync."),
           "info",
         );
         return;
@@ -67,7 +73,7 @@ export function Overview() {
   const busy = run.isPending || syncRunning;
   const secretsReady = data.secrets?.ready !== false;
   const missingSecrets = data.secrets?.missing ?? [];
-  const actionsDisabled = busy || onCooldown || !secretsReady;
+  const actionsDisabled = busy || onCooldown || !secretsReady || scheduleOn;
 
   return (
     <div className="space-y-6">
@@ -75,8 +81,8 @@ export function Overview() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-muted">
-            Secrets → Rebuild catalogue (once) → Update prices &amp; stock. Never places vendor
-            orders.{" "}
+            Secrets → Rebuild catalogue (empty shop or queued) → scheduled prices &amp; stock. Never
+            places vendor orders.{" "}
             <Link to="/sync" className="font-medium text-accent hover:underline">
               Sync
             </Link>
@@ -86,9 +92,11 @@ export function Overview() {
           type="button"
           aria-busy={busy}
           title={
-            onCooldown
-              ? `Available in ${cooldownMin} min`
-              : "Update prices & stock for BeautyFort + BTS. Not orders."
+            scheduleOn
+              ? `Scheduled every ${intervalMin} min — turn Sync enabled off for a one-off`
+              : onCooldown
+                ? `Available in ${cooldownMin} min`
+                : "One-off Update prices & stock for BeautyFort + BTS. Not orders."
           }
           className={cn(
             "inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:cursor-not-allowed disabled:opacity-50",
@@ -102,6 +110,8 @@ export function Overview() {
             ? "Syncing…"
             : run.isPending
               ? "Starting…"
+              : scheduleOn
+              ? `Scheduled (${intervalMin}m)`
               : onCooldown
                 ? `Update in ${cooldownMin}m`
                 : "Update prices & stock"}
@@ -122,7 +132,7 @@ export function Overview() {
           <Link to="/sync" className="font-medium text-accent hover:underline">
             Sync
           </Link>{" "}
-          → Rebuild catalogue (empty shop) or Update prices &amp; stock →{" "}
+          → Rebuild catalogue, then leave Sync enabled on for the call interval →{" "}
           <Link to="/products" className="font-medium text-accent hover:underline">
             Products
           </Link>
@@ -211,7 +221,11 @@ export function Overview() {
               </div>
               <div className="text-muted">{fmtDate(data.lastSync.started_at)}</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs tabular-nums sm:grid-cols-3">
-                <span>fetched {data.lastSync.products_fetched}</span>
+                <span>
+                  {data.lastSync.fetched_by_vendor
+                    ? `BF ${data.lastSync.fetched_by_vendor.beautyfort ?? "—"} · BTS ${data.lastSync.fetched_by_vendor.bts ?? "—"}${data.lastSync.bts_delta ? " Δ" : ""}`
+                    : `fetched ${data.lastSync.products_fetched}`}
+                </span>
                 <span>created {data.lastSync.posts_created}</span>
                 <span>updated {data.lastSync.posts_updated}</span>
                 <span>repriced {data.lastSync.prices_updated}</span>
