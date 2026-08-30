@@ -9,10 +9,14 @@ import type { FeedSource, NormalizedProduct } from "../vendors/types.ts";
 import {
   applyPriceStockDelta,
   diffOffers,
+  existingVendorProductIds,
   markDirtyFromPendingOffers,
+  markPriceDirtyFromPendingOffers,
   resolveProductIdentities,
   selectPrimaryOffers,
+  staleOfferRatio,
 } from "./diff.ts";
+import { resolveDeltaSince } from "./deltaSince.ts";
 import { finalizeWordPress } from "./finalize.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
@@ -428,6 +432,16 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         await finalizeWordPress();
       }
     } else if (!options.dryRun) {
+      // BTS delta used to set offer.status='pending' and return without ever
+      // marking sil_products dirty, so WooCommerce never saw BTS price/stock.
+      await resolveProductIdentities(settings);
+      if (summary.created > 0) {
+        const reassigned = await selectPrimaryOffers(settings);
+        if (reassigned > 0) log.info(`${reassigned} products changed their primary offer`);
+      }
+      const priced = await markPriceDirtyFromPendingOffers();
+      if (priced > 0) log.info(`${priced} products marked for a price/stock write`);
+
       const ctx = await buildWriteContext(settings, allVendors, new Map(), new Map(), new Map());
       const written = await writePendingProducts(ctx, "fast", (done, total) =>
         log.progress(`writing ${done}/${total}`),
@@ -436,6 +450,24 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       summary.pricesUpdated = written.pricesUpdated;
       summary.errors += written.errors;
       summary.hiddenNoImage = written.hiddenNoImage;
+
+      const unposted = await countUnpostedDirty();
+      if (unposted > 0) {
+        log.info(`${unposted} new products need WooCommerce posts`);
+        const ctxFull = await buildRewriteWriteContext(settings, allVendors);
+        const created = await writePendingProducts(
+          ctxFull,
+          "full",
+          (done, total) => log.progress(`creating ${done}/${total}`),
+          { unpostedOnly: true },
+        );
+        log.progressEnd();
+        summary.postsCreated += created.postsCreated;
+        summary.postsUpdated += created.postsUpdated;
+        summary.pricesUpdated += created.pricesUpdated;
+        summary.errors += created.errors;
+        summary.hiddenNoImage += created.hiddenNoImage;
+      }
 
       // Stock changes move products in and out of the catalogue, so counts shift.
       await recountTerms(["product_cat", BRAND_TAXONOMY]);
@@ -515,10 +547,24 @@ async function fastSyncVendor(
     }
   }
 
-  if (connector.fetchPriceStock && options.source === "live") {
+  // After a long gap the BTS delta window (even floored) cannot resurrect vanished
+  // SKUs or refresh last_seen on the unchanged majority. Rebuild from the full feed.
+  let forceFullFeed = false;
+  if (vendor.slug === "bts") {
+    const stale = await staleOfferRatio(vendor.id, 7 * 24);
+    if (stale > 0.25) {
+      log.warn(
+        `${vendor.slug}: ${Math.round(stale * 100)}% of offers unseen for 7d — pulling the full catalogue`,
+      );
+      forceFullFeed = true;
+    }
+  }
+
+  if (!forceFullFeed && connector.fetchPriceStock && options.source === "live") {
     // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock.
     const sharedGate = vendor.slug !== "wholesale-perfumes";
-    const since = await lastSuccessfulRun(vendor.id);
+    const lastVendorSuccess = await lastSuccessfulRun(vendor.id);
+    const since = resolveDeltaSince({ lastSuccessAt: lastVendorSuccess, vendorId: vendor.slug });
     try {
       const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
       log.progressEnd();
@@ -530,13 +576,22 @@ async function fastSyncVendor(
         if (vendor.slug === "bts") summary.btsDelta = true;
         const changed = await applyPriceStockDelta(vendor.id, updates);
         summary.updated += changed;
-        return changed;
+
+        const imported = await importMissingDeltaProducts({
+          vendor,
+          connector,
+          updates,
+          since,
+          runId,
+          summary,
+        });
+        return changed + imported;
       }
     } catch (err) {
       log.warn(`${vendor.slug}: delta fetch failed, falling back to a full feed diff`, String(err));
     }
   }
-  // BeautyFort (and delta miss): pull the full feed and diff by checksum.
+  // BeautyFort, stale BTS recovery, and delta miss: pull the full feed and diff by checksum.
   // source=local|cache reads fixtures/disk; source=live hits the vendor (gate already checked).
   await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
   const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
@@ -551,10 +606,72 @@ async function fastSyncVendor(
   summary.created += diff.created;
   summary.vanished += diff.vanished;
 
-  // A fast sync can surface genuinely new products. They are left for the nightly full sync,
-  // which is the only path that creates posts and terms.
-  await markDirtyFromPendingOffers();
   return diff.updated + diff.vanished;
+}
+
+/**
+ * Delta rows only UPDATE existing offers. SKUs BTS added since the last full
+ * import never get a row — pull their catalogue records and upsert without
+ * vanishing the rest of the vendor.
+ */
+async function importMissingDeltaProducts(opts: {
+  vendor: Vendor;
+  connector: ReturnType<typeof createConnector>;
+  updates: Array<{ vendorProductId: string; sku?: string }>;
+  since: Date;
+  runId: number;
+  summary: SyncSummary;
+}): Promise<number> {
+  const { vendor, connector, updates, since, runId, summary } = opts;
+  if (!connector.fetchNormalizedBySkus) return 0;
+
+  const missing = new Map<string, string>();
+  const deltaIds = updates.map((u) => u.vendorProductId);
+  const known = await existingVendorProductIds(vendor.id, deltaIds);
+  for (const u of updates) {
+    if (known.has(u.vendorProductId)) continue;
+    const sku = u.sku?.trim();
+    if (sku) missing.set(u.vendorProductId, sku);
+  }
+
+  if (connector.fetchNewProductKeys) {
+    const days = Math.min(30, Math.max(1, Math.ceil((Date.now() - since.getTime()) / 86_400_000)));
+    try {
+      const news = await connector.fetchNewProductKeys(days, (m) => log.progress(`${vendor.slug}: ${m}`));
+      log.progressEnd();
+      const newsIds = news.map((n) => n.vendorProductId);
+      const newsKnown = await existingVendorProductIds(vendor.id, newsIds);
+      for (const n of news) {
+        if (newsKnown.has(n.vendorProductId)) continue;
+        if (n.sku) missing.set(n.vendorProductId, n.sku);
+      }
+    } catch (err) {
+      log.warn(`${vendor.slug}: new-products listing failed: ${String(err)}`);
+    }
+  }
+
+  if (missing.size === 0) return 0;
+
+  const skus = [...new Set(missing.values())];
+  const products = await connector.fetchNormalizedBySkus(skus, (m) => log.progress(`${vendor.slug}: ${m}`));
+  log.progressEnd();
+  if (products.length === 0) return 0;
+
+  const diff = await diffOffers(vendor, products, runId, { vanish: false });
+  summary.created += diff.created;
+  summary.updated += diff.updated;
+  log.info(`${vendor.slug}: imported ${diff.created} new SKUs from the delta/new-products feed`);
+  return diff.created + diff.updated;
+}
+
+async function countUnpostedDirty(): Promise<number> {
+  const [row] = await query<RowDataPacket & { n: number }>(
+    `SELECT COUNT(*) AS n FROM ${sil("sil_products")} p
+       JOIN ${sil("sil_offers")} o ON o.id = p.primary_offer_id
+      WHERE p.wp_post_id IS NULL
+        AND (p.needs_content_write = 1 OR p.needs_price_write = 1)`,
+  );
+  return Number(row?.n ?? 0);
 }
 
 /**

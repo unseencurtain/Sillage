@@ -326,8 +326,8 @@ export class BTSClient {
         page,
         page_size: 500,
       });
-      all.push(...res.products);
-      if (!res.pagination.has_next_page) break;
+      all.push(...(res.products ?? []));
+      if (!res.pagination?.has_next_page) break;
       page++;
     }
 
@@ -367,6 +367,30 @@ export class BTSClient {
       page: params.page,
       page_size: params.page_size,
     });
+  }
+
+  /** Auto-paginate `getNewProducts`. `days` is clamped to 1–30 by the API. */
+  async getAllNewProducts(
+    days: number,
+    languageCode?: string,
+  ): Promise<NewProductsResponse["products"]> {
+    const all: NewProductsResponse["products"] = [];
+    let page = 1;
+    const clamped = Math.min(30, Math.max(1, Math.trunc(days)));
+
+    while (true) {
+      const res = await this.getNewProducts({
+        days: clamped,
+        language_code: languageCode ?? "en-US",
+        page,
+        page_size: 500,
+      });
+      all.push(...(res.products ?? []));
+      if (!res.pagination?.has_next_page) break;
+      page++;
+    }
+
+    return all;
   }
 
   // ============================================================

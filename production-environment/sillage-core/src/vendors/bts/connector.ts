@@ -196,10 +196,53 @@ export class BtsConnector extends VendorConnector {
 
     return changes.map((c) => ({
       vendorProductId: String(c.id),
+      sku: String(c.product_sku ?? "").trim() || undefined,
       price: Number(c.product_price),
       recommendedPrice: Number(c.recommended_price) > 0 ? Number(c.recommended_price) : null,
       stock: Math.max(0, Math.trunc(Number(c.product_stock))),
     }));
+  }
+
+  /**
+   * Load categories from the on-disk cache first. A live `prepare` after
+   * `recordLiveFetch` from the delta call would be blocked by the interval gate.
+   */
+  override async fetchNormalizedBySkus(skus: string[], progress?: ProgressFn): Promise<NormalizedProduct[]> {
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))];
+    if (unique.length === 0) return [];
+    if (this.categoryNodes.size === 0) {
+      try {
+        await this.prepare("cache", progress);
+      } catch (err) {
+        log.warn(`fetchNormalizedBySkus: category cache unavailable (${String(err)}) — importing without gender`);
+      }
+    }
+
+    const out: NormalizedProduct[] = [];
+    for (let i = 0; i < unique.length; i += 25) {
+      const batch = unique.slice(i, i + 25);
+      progress?.(`hydrating ${Math.min(i + 25, unique.length)}/${unique.length} new BTS SKUs`);
+      const products = await this.client().getProducts(batch, env.bts.language);
+      for (const p of products) {
+        const normalized = this.normalize(p);
+        if (normalized) out.push(normalized);
+      }
+    }
+    return out;
+  }
+
+  override async fetchNewProductKeys(
+    days: number,
+    progress?: ProgressFn,
+  ): Promise<Array<{ vendorProductId: string; sku: string }>> {
+    progress?.(`listing BTS new products (last ${days}d)`);
+    const rows = await this.client().getAllNewProducts(days, env.bts.language);
+    return rows
+      .map((r) => ({
+        vendorProductId: String(r.id ?? "").trim(),
+        sku: String(r.product_sku ?? "").trim(),
+      }))
+      .filter((r) => r.vendorProductId && r.sku);
   }
 
   override async fetchServiceableCountries(): Promise<string[]> {

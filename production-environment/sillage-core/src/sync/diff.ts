@@ -35,6 +35,7 @@ export async function diffOffers(
   vendor: Vendor,
   products: NormalizedProduct[],
   runId: number,
+  options?: { vanish?: boolean },
 ): Promise<DiffResult> {
   const existing = new Map<string, ExistingRow>();
   for (const row of await query<ExistingRow>(
@@ -88,7 +89,7 @@ export async function diffOffers(
     );
   }
 
-  const vanished = await markVanished(vendor.id, runId);
+  const vanished = options?.vanish === false ? 0 : await markVanished(vendor.id, runId);
 
   log.info(
     `${vendor.slug}: ${products.length} fetched, ${created} new, ${updated} updated, ` +
@@ -272,6 +273,48 @@ export async function markDirtyFromPendingOffers(): Promise<number> {
         SET p.needs_content_write = 1, p.needs_price_write = 1`,
   );
   return result.affectedRows;
+}
+
+/** Fast path: push pending offer price/stock to WooCommerce without a content rewrite. */
+export async function markPriceDirtyFromPendingOffers(): Promise<number> {
+  const result = await execute(
+    `UPDATE ${sil("sil_products")} p
+       JOIN ${sil("sil_offers")} o ON o.product_id = p.id AND o.status = 'pending'
+        SET p.needs_price_write = 1`,
+  );
+  return result.affectedRows;
+}
+
+/** Share of non-vanished offers whose last_seen_at is older than `olderThanHours`. */
+export async function staleOfferRatio(vendorId: number, olderThanHours: number): Promise<number> {
+  const hours = Math.max(1, Math.trunc(olderThanHours));
+  const [row] = await query<RowDataPacket & { stale: number; total: number }>(
+    `SELECT
+        SUM(CASE WHEN last_seen_at < DATE_SUB(NOW(), INTERVAL ${hours} HOUR) THEN 1 ELSE 0 END) AS stale,
+        COUNT(*) AS total
+       FROM ${sil("sil_offers")}
+      WHERE vendor_id = ? AND vanished_at IS NULL`,
+    [vendorId],
+  );
+  if (!row || !row.total) return 0;
+  return Number(row.stale) / Number(row.total);
+}
+
+export async function existingVendorProductIds(
+  vendorId: number,
+  ids: string[],
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const slice = ids.slice(i, i + 500);
+    const rows = await query<RowDataPacket & { vendor_product_id: string }>(
+      `SELECT vendor_product_id FROM ${sil("sil_offers")}
+        WHERE vendor_id = ? AND vendor_product_id IN (${slice.map(() => "?").join(",")})`,
+      [vendorId, ...slice],
+    );
+    for (const r of rows) found.add(r.vendor_product_id);
+  }
+  return found;
 }
 
 /** Fast-sync path: apply a price/stock delta straight onto offers, skipping the full feed. */

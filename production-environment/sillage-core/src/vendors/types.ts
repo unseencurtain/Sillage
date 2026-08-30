@@ -50,6 +50,8 @@ export interface VendorCategoryNode {
 /** A price/stock-only update, used by the 30-minute fast sync. */
 export interface PriceStockUpdate {
   vendorProductId: string;
+  /** Vendor SKU / EAN when the delta endpoint provides one (BTS `product_sku`). */
+  sku?: string;
   price: number;
   recommendedPrice: number | null;
   stock: number;
