@@ -33,12 +33,12 @@ Each wholesaler is called on a single interval (Settings → **Minutes between s
 - When a vendor is inside its interval, that vendor is skipped (no silent reuse of a stale on-disk feed)
 - Cron ticks every 5 minutes and starts a run when the interval has elapsed
 
-**What each vendor downloads** (Vendors → Catalogue sync):
-- **BeautyFort:** full stock file (~9k) every allowed call — prices/stock update then
-- **BTS:** `getProductChanges` for the last 48 hours. They usually publish one daily batch, so most 30-minute calls return nothing until that batch appears; prices then catch up within a day. Stale catalogue (>25% unseen 7 days) triggers a full ~45k download
+**How often prices/stock actually move** (Vendors → How often this vendor updates):
+- **BeautyFort:** every check (~30 min) — they have no change-only feed
+- **BTS:** **about once a day** on the shop. We still check every 30 min; empty checks are normal until BTS publishes their daily change batch. A full ~45k rebuild is *not* the daily update (use Sync → Rebuild, or auto-recovery after a week of missed data)
 
 **How to navigate**
-1. **Vendors** → Catalogue sync on BeautyFort / BTS (what a call downloads + last live fetch).
+1. **Vendors** → How often this vendor updates (BeautyFort vs BTS cadences + last live fetch).
 2. **Sync** → BF / BTS ready vs wait-N-min.
 3. **Settings → Schedule → Minutes between syncs** (one number for both the schedule and the API gate).
 

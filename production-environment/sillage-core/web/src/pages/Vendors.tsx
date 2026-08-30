@@ -115,9 +115,9 @@ export function Vendors() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted">
-          BeautyFort + BTS only. Catalogue sync behaviour is per vendor below (what we download each
-          call). Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers
-          (no live vendor download). Credentials:{" "}
+          BeautyFort + BTS only. How often prices/stock move is on each card below — they are not
+          the same. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored
+          offers (no live vendor download). Credentials:{" "}
           <Link to="/secrets" className="font-medium text-accent hover:underline">
             Secrets
           </Link>
@@ -444,35 +444,54 @@ function CatalogueSyncPanel({
 
   return (
     <div className="mt-4 rounded-lg border border-line bg-canvas/50 p-4">
-      <h3 className="text-sm font-semibold">Catalogue sync</h3>
+      <h3 className="text-sm font-semibold">How often this vendor updates</h3>
       <p className="mt-1 text-xs text-muted">
-        How often we may call this wholesaler is shared: every {callIntervalMinutes} minutes (
+        We are allowed to call them every {callIntervalMinutes} minutes (
         <Link to="/settings" className="font-medium text-accent hover:underline">
           Settings → Minutes between syncs
         </Link>
-        ). That is not “{callIntervalMinutes} minutes a day”. Each vendor downloads something different
-        on a call.
+        ). That is a check interval, not “{callIntervalMinutes} minutes of work a day”.
       </p>
       {isBf ? (
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink">
-          <li>
-            Every allowed call: full BeautyFort stock file (~9k SKUs). Prices and stock update then.
-          </li>
-          <li>They do not offer a “changes since” feed — we always pull the whole file.</li>
-        </ul>
+        <dl className="mt-3 space-y-2 text-sm">
+          <div>
+            <dt className="font-medium text-ink">Prices and stock</dt>
+            <dd className="text-muted">
+              Every {callIntervalMinutes} minutes. BeautyFort has no “what changed” feed, so each check
+              re-downloads their full stock file (~9k SKUs) and writes whatever moved.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-ink">Full catalogue rebuild</dt>
+            <dd className="text-muted">
+              Not the regular update. Use Sync → Rebuild catalogue for a first import or a full
+              structure refresh (new products, taxonomy). Optional nightly rebuild is under Settings →
+              Schedule → Advanced (off unless you turned it on).
+            </dd>
+          </div>
+        </dl>
       ) : null}
       {isBts ? (
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink">
-          <li>
-            Every allowed call: <code className="font-mono text-xs">getProductChanges</code> for the
-            last 48 hours (BTS floor). They typically publish one daily change batch, so most 30-minute
-            calls return nothing until that batch appears. Prices and stock then catch up within a day.
-          </li>
-          <li>
-            If more than 25% of BTS offers have not been seen for 7 days, the next call also downloads
-            the full catalogue (~45k) so vanished SKUs and missed batches recover.
-          </li>
-        </ul>
+        <dl className="mt-3 space-y-2 text-sm">
+          <div>
+            <dt className="font-medium text-ink">Prices and stock</dt>
+            <dd className="text-muted">
+              About once a day on the shop. We check every {callIntervalMinutes} minutes, but BTS only
+              publishes a change list roughly once per day. Empty checks in between are normal. When
+              their daily batch appears, the next check applies it — usually within{" "}
+              {callIntervalMinutes} minutes of them publishing.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-ink">Full catalogue rebuild (~45k products)</dt>
+            <dd className="text-muted">
+              Not the daily update. Use Sync → Rebuild catalogue when the shop is empty or you want
+              every BTS product re-imported. It also runs automatically as recovery if more than a
+              quarter of BTS products have not been seen for 7 days (missed batches / vanished SKUs) —
+              that is a safety net, not the normal cadence.
+            </dd>
+          </div>
+        </dl>
       ) : null}
       {!isBf && !isBts ? (
         <p className="mt-2 text-sm text-ink">No live feed for this supplier.</p>
