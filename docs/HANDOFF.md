@@ -75,7 +75,7 @@ Spot-checked on `ovhe` after the lock fix. Re-check with the SQL below if you ch
 | **Vendor MOQ** | BF/BTS `order_config` has **no** `min_order_value_eur`; WPF has 100 but parked | OK — no hard MOQ on retail lanes |
 | **Orders dry-run / auto** | `orders_dry_run=1`, `orders_auto_dispatch=0` | OK — keep unless intentional live spend |
 | **Order ceilings** | max/daily 10000 EUR; poll 15m; notify on | OK — rails only |
-| **Schedule** | Sync page: **Rebuild catalogue** + **Update prices & stock**; Settings **Minutes between syncs** (call interval, not “minutes a day”). What each vendor downloads is on **Vendors → Catalogue sync**. Rebuild queues when the schedule is on. Optional nightly rebuild under Schedule → Advanced. | Update hidden while Sync enabled is on; no silent disk “cache” sync |
+| **Schedule** | Sync page: **Rebuild catalogue** + **Update prices & stock**; Settings **Minutes between syncs** (check interval, not “minutes a day”). Per-vendor cadence is on **Vendors**. Rebuild queues when the schedule is on. Optional nightly rebuild under Schedule → Advanced. | Update hidden while Sync enabled is on; no silent disk “cache” sync |
 | **Live feed gate** | same minutes as schedule; **no daily download cap** | OK — do **not** start a live sync just to reprice (use Settings multiplier Save) |
 | **Description / volume** | `none` / `ranges` | OK — Save of these kicks **full/cache** content rewrite (heavier) |
 | **Shop / CDN URLs** | `wp_base_url` + `image_cdn_base_url` set | Shop URL hot-applies. **Image CDN does not rewrite existing product image URLs** — needs overrides + content rewrite |

@@ -198,16 +198,16 @@ required when changing **Active** or **Serviceable countries**.
 
 Not editable here: `slug`, `sku_prefix`, `currency`. API credentials → **Secrets**.
 
-### Catalogue sync (per vendor)
+### How often each vendor updates
 
-The **Minutes between syncs** field stays on Settings (one number; BeautyFort and BTS cool down independently). It is **not** “30 minutes a day”. What each call **downloads** is documented on the vendor card:
+The **Minutes between syncs** field stays on Settings (one number; BeautyFort and BTS cool down independently). It is a **check interval**, not “30 minutes a day”.
 
-| Vendor | Each allowed call | Why prices can look “daily” |
+| Vendor | Prices and stock on the shop | Full catalogue rebuild |
 |---|---|---|
-| BeautyFort | Full stock file (~9k SKUs). No changes-since API | Prices/stock update on that call |
-| BTS | `getProductChanges` with a **48h lookback floor**. Full catalogue (~45k) if >25% of offers unseen for 7 days | BTS typically publishes **one daily change batch**, so many 30-minute calls are empty until that batch appears |
+| BeautyFort | Every check (~30 min). They have no change-only feed, so each call re-downloads the ~9k stock file | Sync → Rebuild catalogue (first import / structure). Optional nightly rebuild is Advanced and off by default |
+| BTS | **About once a day.** We still check every 30 min; BTS only publishes a daily change batch, so most checks are empty until that batch appears | Same Rebuild button. Also auto-recovery if >25% of BTS offers unseen for 7 days — not the normal path |
 
-Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
+The 48-hour lookback on BTS change checks is an implementation detail (so yesterday’s batch is not missed). It is **not** “BTS updates every 48 hours”. Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
 
 ### Parked: wholesale-perfumes
 

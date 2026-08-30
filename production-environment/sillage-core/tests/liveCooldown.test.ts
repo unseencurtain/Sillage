@@ -50,9 +50,9 @@ describe("retail live cooldown — no silent cache", () => {
     const vendorsSrc = readFileSync(join(import.meta.dir, "../web/src/pages/Vendors.tsx"), "utf8");
     expect(vendorsSrc).not.toContain("liveMaxPerDay");
     expect(vendorsSrc).not.toContain("Live downloads");
-    expect(vendorsSrc).toContain("Catalogue sync");
-    expect(vendorsSrc).toContain("getProductChanges");
-    expect(vendorsSrc).toContain("full BeautyFort stock file");
+    expect(vendorsSrc).toContain("How often this vendor updates");
+    expect(vendorsSrc).toContain("About once a day on the shop");
+    expect(vendorsSrc).toContain("re-downloads their full stock file");
   });
 
   test("settings Save keeps cooldown and fast cadence in lockstep", () => {
