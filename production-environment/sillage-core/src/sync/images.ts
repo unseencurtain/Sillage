@@ -13,23 +13,18 @@ import { join } from "node:path";
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
-import { isPlaceholderImage, isUnusableImage } from "./imageRules.ts";
+import { isUnusableImage, normalizeEan, resolveImageUrl } from "./imageRules.ts";
 
 export {
   isPlaceholderImage,
   isUnusableImage,
   isWeakVendorThumb,
+  normalizeEan,
+  resolveImageUrl,
   shouldHideForMissingImage,
 } from "./imageRules.ts";
 
 const log = logger("images");
-
-function normalizeEan(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const cleaned = raw.trim().replace(/^'+/, "");
-  if (!cleaned || cleaned === "0000000000000" || !/^\d+$/.test(cleaned)) return null;
-  return cleaned.replace(/^0+/, "") || null;
-}
 
 let overridesCache: Map<string, string> | null = null;
 
@@ -81,20 +76,7 @@ export async function buildImageLookup(root = process.cwd()): Promise<ImageLooku
   const fromOffers = await loadOfferImageIndex();
   return {
     resolve(eans, current) {
-      // Prefer curated / cross-vendor images over empty, placeholder, or weak thumbs.
-      for (const raw of eans) {
-        const ean = normalizeEan(raw);
-        if (!ean) continue;
-        const override = overrides.get(ean);
-        if (override && !isUnusableImage(override) && override !== current) return override;
-        const hit = fromOffers.get(ean);
-        if (hit && hit !== current && isUnusableImage(current)) {
-          return hit;
-        }
-      }
-      // Still empty / placeholder / weak BF thumb with no better source — clear so
-      // hide_products_without_image can exclude the product instead of serving a tiny /pic/ URL.
-      return isUnusableImage(current) ? null : current;
+      return resolveImageUrl(eans, current, overrides, fromOffers);
     },
   };
 }

@@ -108,6 +108,8 @@ export const api = {
       vendors: Vendor[];
       globalPriceMultiplier: number;
       globalStockThreshold: number;
+      callIntervalMinutes?: number;
+      lastLiveFetch?: Record<string, string | null>;
     }>("/api/vendors"),
   saveVendor: (slug: string, body: VendorPatch) =>
     request<{
@@ -263,6 +265,7 @@ export interface ProductsPage {
     vendor_price: string;
     primary_ean: string | null;
     vendor: string;
+    shop_visibility?: "visible" | "hidden_no_image" | "hidden_stock";
     image_url: string | null;
   }>;
   total: number;

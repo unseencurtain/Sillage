@@ -27,18 +27,23 @@ A full catalogue that would be impractical to maintain by hand stays aligned wit
 ## 2. Call interval (no daily download cap)
 
 **What it does**  
-Each wholesaler is called on a single interval (Settings → **Minutes between syncs**):
+Each wholesaler is called on a single interval (Settings → **Minutes between syncs**). That number is **how often we may call**, not “minutes a day”:
 - BeautyFort and BTS are gated independently — one cooling down does not block the other
 - There is **no daily download cap**
 - When a vendor is inside its interval, that vendor is skipped (no silent reuse of a stale on-disk feed)
 - Cron ticks every 5 minutes and starts a run when the interval has elapsed
 
+**What each vendor downloads** (Vendors → Catalogue sync):
+- **BeautyFort:** full stock file (~9k) every allowed call — prices/stock update then
+- **BTS:** `getProductChanges` for the last 48 hours. They usually publish one daily batch, so most 30-minute calls return nothing until that batch appears; prices then catch up within a day. Stale catalogue (>25% unseen 7 days) triggers a full ~45k download
+
 **How to navigate**
-1. **Sync** → BF / BTS ready vs wait-N-min.
-2. **Settings → Schedule → Minutes between syncs** (one number for both the schedule and the API gate).
+1. **Vendors** → Catalogue sync on BeautyFort / BTS (what a call downloads + last live fetch).
+2. **Sync** → BF / BTS ready vs wait-N-min.
+3. **Settings → Schedule → Minutes between syncs** (one number for both the schedule and the API gate).
 
 **Value to the client**  
-Keeps wholesaler APIs on a predictable cadence without an extra “downloads per day” knob that no longer does anything.
+Keeps wholesaler APIs on a predictable cadence without an extra “downloads per day” knob that no longer does anything. BTS looking “once a day” is their feed, not a hidden daily cap.
 
 ---
 
@@ -82,19 +87,22 @@ Vendor feeds ship empty descriptions. Products get the **title copied into descr
 
 ---
 
-## 6. Image enrichment (BeautyFort)
+## 6. Image enrichment (BeautyFort) and hide-without-image
 
 **What it does**  
-Many BeautyFort images are tiny `/pic/` thumbs. The sync resolves better images by EAN from:
-- Curated overrides (~4.3k mappings)
-- Matching BTS / other vendor images when available  
+Many BeautyFort images are tiny `/pic/` thumbs; BTS often ships `no_image.webp`. The sync resolves a storefront image by EAN from:
+- Curated overrides (`data/image_overrides.json`)
+- Matching BTS / other vendor images when that URL is actually usable  
+
+If Settings **Hide products without image** is on (default) and the resolved URL is still empty, a placeholder, BTS `no_image`, or a BeautyFort `/pic/` thumb, the product is **excluded from the shop catalogue and search**. It stays in WooCommerce and on the dashboard Products table (Shop = **Hidden · no image**). Stock can still be 1. This is the same `exclude-from-catalog` + `exclude-from-search` terms as the stock-threshold rule.
 
 **How to navigate**
-1. Browse BeautyFort products on the storefront.
-2. Prefer products that previously showed placeholders or weak thumbs — many now show full CDN images.
+1. **Settings → Pricing & catalogue → Hide products without image** — the long help text is the spec.
+2. **Products** — search SKU/EAN; **Shop** column shows why a listing is missing from the store.
+3. Browse BeautyFort products on the storefront; prefer ones that previously showed placeholders — many now show full CDN images after fill.
 
 **Value to the client**  
-Higher conversion from usable product photography without hosting a local media library for 50k+ SKUs.
+Higher conversion from usable product photography, without listing thousands of cards that only have a broken thumb.
 
 ---
 

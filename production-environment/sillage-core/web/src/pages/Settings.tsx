@@ -300,11 +300,22 @@ export function Settings() {
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3 md:col-span-2">
             <Toggle
               label="Hide products without image"
-              hint="Exclude from catalog/search when the resolved image is still missing or a placeholder."
+              hint="On: products stay in WooCommerce (and on Products here) but are excluded from the shop catalogue and search. Stock can still be 1."
               checked={isTruthy(form.hide_products_without_image)}
               disabled={busy}
               onChange={(v) => setBool("hide_products_without_image", v)}
             />
+            <p className="mt-2 text-xs text-muted">
+              After sync, each product’s image is resolved in order: a curated override, then another
+              vendor’s photo for the same EAN, then the winning offer’s URL. If that is still empty, a
+              placeholder, BTS <span className="font-mono">no_image</span>, or a tiny BeautyFort{" "}
+              <span className="font-mono">/pic/</span> thumb, the product gets{" "}
+              <span className="font-mono">exclude-from-catalog</span> +{" "}
+              <span className="font-mono">exclude-from-search</span> (same terms as the stock
+              threshold). Turning this off and saving rewrites visibility so weak thumbs show on the
+              shop. Products → Shop column shows Hidden · no image when this rule is why a listing is
+              missing from the store.
+            </p>
           </div>
         </div>
 
@@ -430,7 +441,7 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help="Call interval for BeautyFort and BTS (and the automatic price/stock cadence). There is no daily download cap. Rebuild catalogue is a button on Sync: first import runs now; after that, with Sync enabled, it queues for the next scheduled call. Order housekeeping still runs every cron tick."
+        help="The schedule clock is shared. What each wholesaler actually downloads lives on Vendors (BeautyFort = full stock file every call; BTS = daily change batch, looked up on every call). There is no daily download cap. Rebuild catalogue is on Sync."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
@@ -466,7 +477,7 @@ export function Settings() {
           </Field>
           <Field
             label="Minutes between syncs"
-            help="How far apart each wholesaler API is called (30, 35, 120, …). Same number for the automatic schedule. BeautyFort and BTS are gated independently — one cooling down does not block the other. No daily download cap."
+            help="Not “30 minutes a day” — this is how often we call each wholesaler (every 30 / 35 / 120 minutes). Same clock for BeautyFort and BTS; they cool down independently. What each call downloads is on Vendors."
           >
             <input
               type="number"
