@@ -4,7 +4,7 @@
 # Usage (from repo root):
 #   ./production-environment/scripts/deploy-vps.sh --host ovhe
 #   # Domains optional — defaults from production-environment/.env, else live-shop defaults:
-#   #   shop=cosmetic.slilverbelt.xyz dash=sillage.slilverbelt.xyz images=images.slilverbelt.xyz
+#   #   shop=prinscosmetic.eu dash=sillage.prinscosmetic.eu images=images.prinscosmetic.eu
 #   ./production-environment/scripts/deploy-vps.sh \
 #       --host ovhe \
 #       [--shop …] [--dash …] [--images …] \
@@ -82,9 +82,9 @@ CREDS="$ROOT/.deploy/vps-dashboard-${HOST}.txt"
 START_EPOCH=$(date +%s)
 
 # Staging defaults when CLI + local .env omit domains (ovhe).
-DEFAULT_SHOP_DOMAIN=cosmetic.slilverbelt.xyz
-DEFAULT_DASH_DOMAIN=sillage.slilverbelt.xyz
-DEFAULT_IMAGES_DOMAIN=images.slilverbelt.xyz
+DEFAULT_SHOP_DOMAIN=prinscosmetic.eu
+DEFAULT_DASH_DOMAIN=sillage.prinscosmetic.eu
+DEFAULT_IMAGES_DOMAIN=images.prinscosmetic.eu
 
 log_step() {
   local msg="$1" now elapsed
@@ -169,7 +169,7 @@ else
 fi
 
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
-"${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/ecom_sites/config ~/${REMOTE_DIR}/sillage-core/data ~/${REMOTE_DIR}/sillage-core/logs ~/ecom_sites/data/media ~/ecom_sites/data/wp/wp-content/plugins ~/Sillage/.feedscratch ~/sillage/scripts"
+"${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/ecom_sites/config ~/${REMOTE_DIR}/sillage-core/data ~/${REMOTE_DIR}/sillage-core/logs ~/ecom_sites/data/media ~/ecom_sites/data/wp/wp-content/plugins ~/${REMOTE_DIR}/.feedscratch ~/sillage/scripts"
 
 "${RSYNC[@]}" "$PE/compose.yaml" "$HOST:~/${REMOTE_DIR}/compose.yaml"
 "${RSYNC[@]}" "$PE/.env.example" "$HOST:~/${REMOTE_DIR}/.env.example"
@@ -225,7 +225,7 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
 
   LPS_URL="https://${IMAGES_DOMAIN:-images.${SHOP_DOMAIN#*.}}"
   if [[ -z "$IMAGES_DOMAIN" ]]; then
-    LPS_URL="${LPS_MEDIA_BASE_URL:-https://images.slilverbelt.xyz}"
+    LPS_URL="${LPS_MEDIA_BASE_URL:-https://images.prinscosmetic.eu}"
   else
     LPS_URL="https://${IMAGES_DOMAIN}"
   fi
@@ -239,7 +239,7 @@ VALKEY_IMAGE=valkey/valkey:8-alpine
 LPS_MEDIA_IMAGE=nginx:alpine
 
 DATA_DIR=/home/ubuntu/ecom_sites/data
-FEEDSCRATCH_DIR=/home/ubuntu/Sillage/.feedscratch
+FEEDSCRATCH_DIR=/home/ubuntu/sillage/.feedscratch
 SILLAGE_LOGS_DIR=/home/ubuntu/${REMOTE_DIR}/sillage-core/logs
 IMAGE_OVERRIDES_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/image_overrides.json
 SILLAGE_SECRETS_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env
@@ -420,7 +420,7 @@ if [[ -f "$HOME/ecom_sites/compose.yaml" ]]; then
 fi
 
 mkdir -p "$DATA_DIR/media" "$DATA_DIR/wp" "$DATA_DIR/wp-db" \
-  "$HOME/sillage/sillage-core/logs" "$HOME/Sillage/.feedscratch"
+  "$HOME/sillage/sillage-core/logs" "$HOME/sillage/.feedscratch"
 # Ensure image overrides + secrets overlay files exist for bind mounts (file, not directory).
 [[ -f "$HOME/sillage/sillage-core/data/image_overrides.json" ]] \
   || echo '{}' > "$HOME/sillage/sillage-core/data/image_overrides.json"

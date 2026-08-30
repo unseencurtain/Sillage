@@ -33,10 +33,10 @@ python3 production-environment/python-analysis/beautyfort-enriched/restore_found
   --dest ~/ecom_sites/data/media \
   --media-src /path/from/old-vps/media \   # optional
   --brasty-root /home/ubuntu/brasty \      # optional
-  --from-cdn                               # while images.slilverbelt.xyz still serves
+  --from-cdn                               # while images.prinscosmetic.eu still serves
 ```
 
-Only `images.slilverbelt.xyz` URLs need files on disk. Shopify / BTS / ocean URLs are hotlinks.
+Only `images.prinscosmetic.eu` URLs need files on disk. Shopify / BTS / ocean URLs are hotlinks.
 
 ---
 
@@ -115,14 +115,14 @@ key): existing `image_overrides.json` → Brasty EAN file → `oceanfragrances.c
 
 **Brasty camera placeholders are not photos.** About 1,200 files in the dump are the same
 graphic (grey camera, “BRASTY / BRANDED STYLE”, green bar) saved as `EAN.jpg` (often WebP
-bytes). Example: `https://images.slilverbelt.xyz/8809598454323.jpg`. Matcher skips them by
+bytes). Example: `https://images.prinscosmetic.eu/8809598454323.jpg`. Matcher skips them by
 MD5 (`brasty_placeholders.py`). Never copy those onto the CDN. If one is already in
 `image_overrides.json` / `~/ecom_sites/data/media/`, delete the file, drop the override
 keys, recreate core/cron, and **full** rewrite-only so hide-without-image applies again.
 
 1. Export products that still lack a usable photo (dashboard Products JSON or SQL dump).
 2. Run the matcher; copy Brasty hits into `~/ecom_sites/data/media/` (CDN
-   `https://images.slilverbelt.xyz/<original-stem>.jpg`).
+   `https://images.prinscosmetic.eu/<original-stem>.jpg`).
 3. Merge the delta into `sillage-core/data/image_overrides.json` on the VPS **and** in git.
 4. Recreate core/cron, then **full** rewrite-only (see [After overrides change](#after-overrides-change)).
 
@@ -197,17 +197,17 @@ watermarked files outside `data/wp/`:
 2. Dedicated **`lps-media`** container (`nginx:alpine`) mounts that path read-only as its
    document root (`/usr/share/nginx/html`). No PHP, no DB, no WooCommerce.
 3. **Preferred public URLs:** `https://images.<domain>/<file>` (root of the media container).
-   - VPS: host Caddy site `images.slilverbelt.xyz` → `127.0.0.1:105` (`lps-media`)
+   - VPS: host Caddy site `images.prinscosmetic.eu` → `127.0.0.1:105` (`lps-media`)
    - Deploy with `--images images.example.com` (optional Porkbun A via `--dns`)
 4. **Fallback path** (unchanged): `https://<shop>/lps-media/<file>`
    - Local compose: `shop-gateway` (Caddy) `handle_path /lps-media/*` → `lps-media`
    - VPS: shop site still has `handle_path /lps-media/*` → `:105`
 5. `ecom` does **not** mount or Alias media — Apache never serves product images.
 6. **Configurable base URL** (no code change to flip hosts later):
-   - Dashboard / `sil_settings.image_cdn_base_url` (default `https://images.slilverbelt.xyz`)
+   - Dashboard / `sil_settings.image_cdn_base_url` (default `https://images.prinscosmetic.eu`)
    - Tool env (first match): `LPS_MEDIA_BASE_URL` → `IMAGE_HOST_BASE_URL` → `PUBLIC_URL_BASE`
    - Host scripts (`host_override_images.py`, Brasty `build-overrides`) write absolute URLs like
-     `https://images.slilverbelt.xyz/<EAN>.jpg`
+     `https://images.prinscosmetic.eu/<EAN>.jpg`
    - Changing the base does **not** rewrite WooCommerce rows by itself: update
      `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
      `bun run sync -- --rewrite-all`

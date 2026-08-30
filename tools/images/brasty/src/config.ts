@@ -118,7 +118,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       process.env.LPS_MEDIA_BASE_URL?.trim() ||
       process.env.IMAGE_HOST_BASE_URL?.trim() ||
       process.env.PUBLIC_URL_BASE?.trim() ||
-      "https://images.slilverbelt.xyz"
+      "https://images.prinscosmetic.eu"
     ).replace(/\/$/, ""),
     imageOverridesPath: resolvePath(
       envString(

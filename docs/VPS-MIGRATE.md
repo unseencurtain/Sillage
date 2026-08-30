@@ -19,7 +19,7 @@ Photos are **not** in git. Git has the EAN → URL map and a restore script. The
 | `python-analysis/beautyfort-enriched/brasty_placeholders.py` | Skip Brasty camera “no photo” graphics |
 
 Hotlinked URLs (Shopify CDN, `images.btswholesaler.com`, oceanfragrances) do **not** need
-to sit on disk. Only `https://images.slilverbelt.xyz/<file>` (or your new CDN host) does.
+to sit on disk. Only `https://images.prinscosmetic.eu/<file>` (or your new CDN host) does.
 
 ---
 
@@ -74,7 +74,7 @@ python3 production-environment/python-analysis/beautyfort-enriched/restore_found
   --overrides production-environment/sillage-core/data/image_overrides.json \
   --dest ~/ecom_sites/data/media \
   --brasty-root /home/ubuntu/brasty \    # if you copied the dump
-  --from-cdn                             # pulls remaining files from images.slilverbelt.xyz
+  --from-cdn                             # pulls remaining files from images.prinscosmetic.eu
 ```
 
 `--from-cdn` only works while the **old** CDN still answers. If that host is gone, you need

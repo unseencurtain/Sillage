@@ -19,6 +19,9 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 page, shopper rules, everyday recipes. **Update that file in the same change** when dashboard
 labels, Settings knobs, or shopper behaviour change.
 
+**[Change domains](docs/DOMAIN-MIGRATION.md)** — shop / dashboard / image hostnames.
+**[Folder structure](docs/FOLDER-STRUCTURE.md)** — GitHub tree vs live VPS.
+
 Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIENT-FEATURE-WALKTHROUGH.md).
 
 ## Repository layout

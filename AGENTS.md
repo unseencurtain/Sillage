@@ -18,6 +18,9 @@ documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md) (engine
 copy, Settings sections, order buttons, or shopper rules (cart, checkout, tracking, hide-without-image),
 **update `CLIENT-GUIDE.md` in the same commit** so clients and the owner stay in sync.
 
+**Change shop / dashboard / image hostnames:** [`docs/DOMAIN-MIGRATION.md`](docs/DOMAIN-MIGRATION.md).
+What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
+
 ## Layout
 
 | Path | What it is |

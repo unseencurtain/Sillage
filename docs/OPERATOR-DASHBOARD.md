@@ -4,7 +4,7 @@
 This file is the **engineering** map of every control (API routes, setting keys). When you rename
 a button or change shopper behaviour, update **both** this file and `CLIENT-GUIDE.md`.
 
-Live UI: `https://sillage.slilverbelt.xyz` (VPS `ovhe`). This retail shop syncs **BeautyFort**
+Live UI: `https://sillage.prinscosmetic.eu` (VPS `ovhe`). This retail shop syncs **BeautyFort**
 and **BTS** only. wholesale-perfumes is parked for
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — inactive, excluded from
 `--vendor=all`, not editable here.

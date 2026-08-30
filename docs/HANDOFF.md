@@ -11,7 +11,8 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 |---|---|
 | **Live VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. App dir `~/sillage/`; data `~/ecom_sites/data/`. |
 | **Unused VPS** | SSH `ovh` — `51.79.255.226`. Empty; do not deploy here unless deliberately repurposed. |
-| **Public URLs** | Shop `https://cosmetic.slilverbelt.xyz` · Dashboard `https://sillage.slilverbelt.xyz` · Images `https://images.slilverbelt.xyz` |
+| **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu` |
+| **Domain change** | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) · trees: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |
 | **Hub images** | `unseencurtain/sillage-core:<tag>`, `unseencurtain/sillage-wordpress:<tag>` |
@@ -109,7 +110,7 @@ SELECT id, mode, source, status, prices_updated, started_at
 - **B2B is a separate project** — own compose / own repo when ready; not bolted onto this shop.
 - **`orders_dry_run` stays `1`** unless you intentionally dispatch live vendor orders (no sandbox).
 - **Images:** host volume `~/ecom_sites/data/media` → `lps-media`; public CDN
-  `images.slilverbelt.xyz`. **Git has the EAN map, not the JPEGs** (~380 MB). New VPS:
+  `images.prinscosmetic.eu`. **Git has the EAN map, not the JPEGs** (~380 MB). New VPS:
   [`VPS-MIGRATE.md`](VPS-MIGRATE.md) + `restore_found_images.py`. Brasty dump on the VPS at
   `/home/ubuntu/brasty/` (every filename is digits + `.jpg` = EAN). Matcher:
   `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`. Canonical map:
@@ -149,9 +150,9 @@ Polish **this retail shop (BF+BTS) first.** B2B later on its own infrastructure.
 ```bash
 ./production-environment/scripts/deploy-vps.sh \
   --host ovhe \
-  --shop cosmetic.slilverbelt.xyz \
-  --dash sillage.slilverbelt.xyz \
-  --images images.slilverbelt.xyz \
+  --shop prinscosmetic.eu \
+  --dash sillage.prinscosmetic.eu \
+  --images images.prinscosmetic.eu \
   --skip-build   # omit to build+push Hub images first
 ```
 

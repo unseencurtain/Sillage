@@ -11,6 +11,8 @@ only the one deep doc you need. Do not wander the tree.
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | Move shop + photos to a **new** VPS | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) |
+| Change shop / dash / image hosts | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) |
+| What lives where (repo + VPS) | [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | Photos, Brasty, overrides | [`specs/S3-images.md`](specs/S3-images.md) |
 | BTS v2.1 orders + tracking | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
 | Hard rules (no PHP product SQL, dry-run) | [`../AGENTS.md`](../AGENTS.md) |
@@ -22,8 +24,8 @@ Live SSH: `ovhe` (`ubuntu@139.99.61.71`). App `~/sillage/`, data `~/ecom_sites/d
 
 ## What this system is
 
-BeautyFort + BTS catalogues → WooCommerce shop `https://cosmetic.slilverbelt.xyz`,
-ops dashboard `https://sillage.slilverbelt.xyz`, image CDN `https://images.slilverbelt.xyz`.
+BeautyFort + BTS catalogues → WooCommerce shop `https://prinscosmetic.eu`,
+ops dashboard `https://sillage.prinscosmetic.eu`, image CDN `https://images.prinscosmetic.eu`.
 
 Bun (`sillage-core`) writes products into MariaDB. The WordPress plugin is a thin bridge
 (REST, cart rules, tracking notes). **PHP must not grow product-write paths.**
@@ -55,7 +57,7 @@ Brasty = photo dump only (filename stem = EAN). Not vendors.
 | Matcher + `restore_found_images.py` | MariaDB (`earth` + `sillage`) |
 
 Shopify / BTS / oceanfragrances URLs in the override map are **hotlinks**. Only
-`images.slilverbelt.xyz/<file>` bytes must sit in `ecom_sites/data/media/`.
+`images.prinscosmetic.eu/<file>` bytes must sit in `ecom_sites/data/media/`.
 
 ---
 
@@ -124,8 +126,9 @@ docker exec -e MYSQL_PWD="$(grep ^MYSQL_ROOT_PWD= ~/sillage/.env | cut -d= -f2-)
     SELECT id, status, dry_run, our_reference, vendor_order_number, last_error
       FROM sillage.sil_vendor_orders;
   '
-curl -sI https://cosmetic.slilverbelt.xyz/ | head -5
-curl -sI https://sillage.slilverbelt.xyz/login | head -5
+curl -sI https://prinscosmetic.eu/ | head -5
+curl -sI https://sillage.prinscosmetic.eu/login | head -5
+curl -sI https://images.prinscosmetic.eu/0000030160668.jpg | head -5
 ```
 
 Shop writes on the Sync table should read `New n · Updated n · Prices n`, not `+ ~ $`.

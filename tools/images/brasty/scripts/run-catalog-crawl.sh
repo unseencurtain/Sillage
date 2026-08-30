@@ -9,5 +9,5 @@ export CATALOG_MAX_PAGES="${CATALOG_MAX_PAGES:-0}"
 export CATALOG_START_PAGE="${CATALOG_START_PAGE:-1}"
 export POLITENESS_DELAY_MS="${POLITENESS_DELAY_MS:-1500}"
 export CONCURRENCY="${CONCURRENCY:-1}"
-export LPS_MEDIA_BASE_URL="${LPS_MEDIA_BASE_URL:-https://images.slilverbelt.xyz}"
+export LPS_MEDIA_BASE_URL="${LPS_MEDIA_BASE_URL:-https://images.prinscosmetic.eu}"
 exec npm run crawl-catalog

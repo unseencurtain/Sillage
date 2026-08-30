@@ -6,7 +6,7 @@ Sources (later ones do not clobber earlier hits, and nothing overwrites an
 existing image_overrides.json key):
 
   1. Existing overrides
-  2. Brasty folder on the VPS (filename stem = EAN → https://images.slilverbelt.xyz/<EAN>.jpg
+  2. Brasty folder on the VPS (filename stem = EAN → https://images.prinscosmetic.eu/<EAN>.jpg
      after the file is copied into lps-media). Skip camera 'no photo' placeholders
      (brasty_placeholders.py).
   3. oceanfragrances.csv (EAN column, Image URL)
@@ -160,7 +160,7 @@ def main() -> int:
         default="",
         help="Walk this tree to skip Brasty camera 'no photo' placeholders by MD5",
     )
-    ap.add_argument("--public-base", default="https://images.slilverbelt.xyz")
+    ap.add_argument("--public-base", default="https://images.prinscosmetic.eu")
     ap.add_argument("--out-delta", required=True)
     ap.add_argument("--out-merged")
     ap.add_argument("--out-report", default="")
