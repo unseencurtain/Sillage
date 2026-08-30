@@ -15,6 +15,7 @@
 import type {
   BTSConfig,
   Product,
+  Pagination,
   ProductListResponse,
   GetListProductsParams,
   FeedStatus,
@@ -46,6 +47,29 @@ export class BTSRequestError extends Error {
     super(message);
     this.name = "BTSRequestError";
   }
+}
+
+/**
+ * BTS v2.1 returns HTTP 404 `{"message":"no products found"}` for an empty
+ * product list (no changes, unknown SKUs, last page). That is not a transport
+ * failure — treat it as zero rows.
+ */
+export function isBtsEmptyCatalog(err: unknown): boolean {
+  if (!(err instanceof BTSRequestError)) return false;
+  if (err.statusCode !== 404) return false;
+  const detail = typeof err.details === "string" ? err.details : JSON.stringify(err.details ?? "");
+  return `${err.message}\n${detail}`.toLowerCase().includes("no products found");
+}
+
+function emptyPagination(): Pagination {
+  return {
+    current_page: 1,
+    page_size: 0,
+    total_products: 0,
+    total_pages: 0,
+    has_next_page: false,
+    has_previous_page: false,
+  };
 }
 
 // ─── Response normalizers ────────────────────────────────────
@@ -209,13 +233,21 @@ export class BTSClient {
   async getListProducts(
     params: GetListProductsParams = {},
   ): Promise<ProductListResponse> {
-    const raw = await this.get<Record<string, unknown>>("getListProducts", {
-      page: params.page,
-      page_size: params.page_size,
-      language_code: params.language_code ?? "en-US",
-      category_ids: params.category_ids,
-      manufacturer_names: params.manufacturer_names,
-    });
+    let raw: Record<string, unknown>;
+    try {
+      raw = await this.get<Record<string, unknown>>("getListProducts", {
+        page: params.page,
+        page_size: params.page_size,
+        language_code: params.language_code ?? "en-US",
+        category_ids: params.category_ids,
+        manufacturer_names: params.manufacturer_names,
+      });
+    } catch (err) {
+      if (isBtsEmptyCatalog(err)) {
+        return { pagination: emptyPagination(), products: [] };
+      }
+      throw err;
+    }
     const rawProducts = (raw["products"] ?? []) as Record<string, unknown>[];
     return {
       pagination: raw["pagination"] as ProductListResponse["pagination"],
@@ -270,10 +302,16 @@ export class BTSClient {
     skus.forEach((sku, i) => url.searchParams.append(`product_sku[${i}]`, sku));
     url.searchParams.set("language_code", languageCode ?? "en-US");
 
-    const raw = await this.executeRequest<unknown>(url.toString(), {
-      method: "GET",
-      headers: this.authHeaders,
-    });
+    let raw: unknown;
+    try {
+      raw = await this.executeRequest<unknown>(url.toString(), {
+        method: "GET",
+        headers: this.authHeaders,
+      });
+    } catch (err) {
+      if (isBtsEmptyCatalog(err)) return [];
+      throw err;
+    }
 
     // API may return an array or an object keyed by index
     const arr: Record<string, unknown>[] = Array.isArray(raw)
@@ -301,12 +339,23 @@ export class BTSClient {
   async getProductChanges(
     params: GetProductChangesParams,
   ): Promise<ProductChangesResponse> {
-    return this.get<ProductChangesResponse>("getProductChanges", {
-      since: params.since,
-      language_code: params.language_code ?? "en-US",
-      page: params.page,
-      page_size: params.page_size,
-    });
+    try {
+      return await this.get<ProductChangesResponse>("getProductChanges", {
+        since: params.since,
+        language_code: params.language_code ?? "en-US",
+        page: params.page,
+        page_size: params.page_size,
+      });
+    } catch (err) {
+      if (isBtsEmptyCatalog(err)) {
+        return {
+          query: { since: params.since, language_code: params.language_code ?? "en-US" },
+          pagination: emptyPagination(),
+          products: [],
+        };
+      }
+      throw err;
+    }
   }
 
   /**
@@ -327,7 +376,7 @@ export class BTSClient {
         page_size: 500,
       });
       all.push(...(res.products ?? []));
-      if (!res.pagination?.has_next_page) break;
+      if (!res.pagination?.has_next_page || (res.products ?? []).length === 0) break;
       page++;
     }
 
@@ -361,12 +410,27 @@ export class BTSClient {
   async getNewProducts(
     params: GetNewProductsParams = {},
   ): Promise<NewProductsResponse> {
-    return this.get<NewProductsResponse>("getNewProducts", {
-      days: params.days,
-      language_code: params.language_code ?? "en-US",
-      page: params.page,
-      page_size: params.page_size,
-    });
+    try {
+      return await this.get<NewProductsResponse>("getNewProducts", {
+        days: params.days,
+        language_code: params.language_code ?? "en-US",
+        page: params.page,
+        page_size: params.page_size,
+      });
+    } catch (err) {
+      if (isBtsEmptyCatalog(err)) {
+        return {
+          query: {
+            days: params.days ?? 7,
+            since: "",
+            language_code: params.language_code ?? "en-US",
+          },
+          pagination: emptyPagination(),
+          products: [],
+        };
+      }
+      throw err;
+    }
   }
 
   /** Auto-paginate `getNewProducts`. `days` is clamped to 1–30 by the API. */
