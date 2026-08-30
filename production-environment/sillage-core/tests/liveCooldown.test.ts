@@ -40,9 +40,10 @@ describe("retail live cooldown — no silent cache", () => {
     expect(btsSrc).not.toContain("live gated — cached");
   });
 
-  test("scheduler skips live ticks during cooldown", () => {
+  test("scheduler skips live ticks only when both vendors are cooling", () => {
     expect(scheduleSrc).toContain("getRetailLiveCooldown");
-    expect(scheduleSrc).toContain("skip live");
+    expect(scheduleSrc).toContain("both vendors cooling");
+    expect(scheduleSrc).toContain("anyAllow");
   });
 
   test("settings Save keeps cooldown and fast cadence in lockstep", () => {

@@ -430,7 +430,7 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help="Update prices & stock on a timer (and after each manual sync). Rebuild catalogue is a button on Sync — not required every night. Order housekeeping still runs every cron tick."
+        help="Call interval for BeautyFort and BTS (and the automatic price/stock cadence). There is no daily download cap. Rebuild catalogue is a button on Sync: first import runs now; after that, with Sync enabled, it queues for the next scheduled call. Order housekeeping still runs every cron tick."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
@@ -466,7 +466,7 @@ export function Settings() {
           </Field>
           <Field
             label="Minutes between syncs"
-            help="One number for auto schedule and the vendor API cooldown. After Rebuild or Update, both Sync buttons stay disabled for this many minutes (default 60 — protects BeautyFort’s daily download cap). 30 is allowed if you accept less headroom."
+            help="How far apart each wholesaler API is called (30, 35, 120, …). Same number for the automatic schedule. BeautyFort and BTS are gated independently — one cooling down does not block the other. No daily download cap."
           >
             <input
               type="number"
@@ -493,7 +493,7 @@ export function Settings() {
             <div className="rounded-lg border border-line/70 bg-panel px-4 py-3">
               <Toggle
                 label="Nightly rebuild enabled"
-                hint="Optional. Prefer the Rebuild catalogue button on Sync. When on, attempts one full rebuild after the hour below."
+                hint="Optional extra full import after this hour. Prefer Rebuild on Sync (queues for the next call). When on, one full rebuild is attempted after the hour below."
                 checked={isTruthy(form.full_sync_enabled)}
                 disabled={busy}
                 onChange={(v) => setBool("full_sync_enabled", v)}

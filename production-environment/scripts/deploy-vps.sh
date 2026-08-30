@@ -556,6 +556,10 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
 
 docker compose --env-file .env up -d
 docker exec sillage-core bun run migrate
+# Drop unused Hub tags / dangling layers so day-2 deploys do not pile up 20+ images.
+docker image prune -af
+echo "Images after prune:"
+docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
   -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;" || true
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true

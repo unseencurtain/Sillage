@@ -34,6 +34,10 @@ import { normalizeVolume, vendorStorefrontLabel } from "./volume.ts";
 import { buildWriteContext, writePendingProducts, type WriteContext, type WriteMode } from "./writer.ts";
 import type { CacheVendor } from "../vendors/feedCache.ts";
 import { checkLiveGate, recordLiveFetch } from "../vendors/liveGate.ts";
+import {
+  consumeCatalogueRebuildFlag,
+  restoreCatalogueRebuildFlag,
+} from "./pendingRewrite.ts";
 
 const log = logger("sync");
 
@@ -119,6 +123,11 @@ export interface SyncSummary {
   errors: number;
   /** Products hidden because the resolved image was still missing/placeholder. */
   hiddenNoImage: number;
+  /** Per-vendor rows touched in this run (full catalogue size or BTS delta count). */
+  fetchedByVendor?: Record<string, number>;
+  skippedVendors?: string[];
+  /** True when BTS used the changes API rather than a full catalogue pull. */
+  btsDelta?: boolean;
 }
 
 async function startRun(mode: WriteMode, source: FeedSource, vendorId: number | null): Promise<number> {
@@ -208,6 +217,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     termsCreated: 0,
     errors: 0,
     hiddenNoImage: 0,
+    fetchedByVendor: {},
+    skippedVendors: [],
+    btsDelta: false,
   };
 
   try {
@@ -227,6 +239,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
     runId = await startRun(options.mode, options.source, selected.length === 1 ? selected[0]!.id : null);
     summary.runId = runId;
+    if (options.mode === "full" && !options.rewriteOnly) {
+      await consumeCatalogueRebuildFlag();
+    }
     log.info(
       `run ${runId}: ${options.mode} sync from ${options.source}` +
         (options.rewriteOnly ? " (rewrite-only, no vendor fetch)" : "") +
@@ -285,6 +300,15 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       }
 
       // ── Full path ──────────────────────────────────────────────────────────
+      if (options.source === "live" && vendor.slug !== "wholesale-perfumes") {
+        const gate = await checkLiveGate(vendor.slug as CacheVendor);
+        if (!gate.allow) {
+          log.warn(`${vendor.slug}: skipping live catalogue rebuild — ${gate.reason}`);
+          summary.skippedVendors = [...(summary.skippedVendors ?? []), vendor.slug];
+          continue;
+        }
+      }
+
       const fetchStarted = Date.now();
       await connector.prepare(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
       const raw = await connector.fetchRaw(options.source, (m) => log.progress(`${vendor.slug}: ${m}`));
@@ -305,6 +329,8 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
 
       const diff = await diffOffers(vendor, products, runId);
       summary.fetched += diff.fetched;
+      summary.fetchedByVendor = summary.fetchedByVendor ?? {};
+      summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + diff.fetched;
       summary.created += diff.created;
       summary.updated += diff.updated;
       summary.vanished += diff.vanished;
@@ -337,6 +363,17 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         // Do not sync pa_vendor — LPS storefront labels must not appear on product pages.
         // Retail vendor identity stays on `_sillage_vendor` postmeta only.
       }
+    }
+
+    const skippedAll =
+      (summary.skippedVendors?.length ?? 0) > 0 &&
+      selected.every((v) => summary.skippedVendors!.includes(v.slug));
+    if (skippedAll) {
+      log.warn("all selected vendors were inside their call interval — no catalogue writes");
+      summary.durationMs = Date.now() - startedAt;
+      await finishRun(runId, startedAt, summary);
+      if (options.mode === "full" && !options.rewriteOnly) await restoreCatalogueRebuildFlag();
+      return summary;
     }
 
     if (options.mode === "full") {
@@ -419,6 +456,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     summary.durationMs = Date.now() - startedAt;
     const aborted = err instanceof SyncAbortedError || String(err).includes("aborted");
     if (runId > 0) {
+      if (options.mode === "full" && !options.rewriteOnly) {
+        await restoreCatalogueRebuildFlag();
+      }
       await finishRun(runId, startedAt, summary, err);
       await recordEvent(
         aborted ? "warn" : "error",
@@ -470,6 +510,7 @@ async function fastSyncVendor(
     if (!gate.allow) {
       // Do not fall back to a stale on-disk feed — operator/schedule must wait out the cooldown.
       log.warn(`${vendor.slug}: skipping live price/stock sync — ${gate.reason}`);
+      summary.skippedVendors = [...(summary.skippedVendors ?? []), vendor.slug];
       return 0;
     }
   }
@@ -484,6 +525,9 @@ async function fastSyncVendor(
       if (updates) {
         if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
         summary.fetched += updates.length;
+        summary.fetchedByVendor = summary.fetchedByVendor ?? {};
+        summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + updates.length;
+        if (vendor.slug === "bts") summary.btsDelta = true;
         const changed = await applyPriceStockDelta(vendor.id, updates);
         summary.updated += changed;
         return changed;
@@ -501,6 +545,8 @@ async function fastSyncVendor(
   const products = raw.map((r) => connector.normalize(r)).filter((p): p is NormalizedProduct => p !== null);
   const diff = await diffOffers(vendor, products, runId);
   summary.fetched += diff.fetched;
+  summary.fetchedByVendor = summary.fetchedByVendor ?? {};
+  summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + diff.fetched;
   summary.updated += diff.updated;
   summary.created += diff.created;
   summary.vanished += diff.vanished;

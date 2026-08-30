@@ -11,6 +11,8 @@ describe("pending price rewrite on Save", () => {
     expect(pendingSrc).toContain("export async function kickPriceRewrite");
     expect(pendingSrc).toContain("export async function kickContentRewrite");
     expect(pendingSrc).toContain("export async function drainPendingRewrites");
+    expect(pendingSrc).toContain("export async function queueCatalogueRebuild");
+    expect(pendingSrc).toContain("pending_catalogue_rebuild");
     expect(pendingSrc).toContain('rewriteOnly: true');
     expect(pendingSrc).toContain('source: "cache"');
   });

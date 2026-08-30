@@ -19,6 +19,26 @@ function isRunFinished(run: SyncRun) {
   return ["success", "partial", "error"].includes(run.status);
 }
 
+function fetchedLabel(r: SyncRun) {
+  const by = r.fetched_by_vendor;
+  if (by && (by.beautyfort != null || by.bts != null)) {
+    const skipped = new Set(r.skipped_vendors ?? []);
+    const bf =
+      skipped.has("beautyfort")
+        ? "BF skipped"
+        : by.beautyfort != null
+          ? `BF ${Number(by.beautyfort).toLocaleString()}`
+          : "BF —";
+    const bts = skipped.has("bts")
+      ? "BTS skipped"
+      : by.bts != null
+        ? `BTS ${Number(by.bts).toLocaleString()}${r.bts_delta ? " Δ" : ""}`
+        : "BTS —";
+    return `${bf} · ${bts}`;
+  }
+  return r.products_fetched == null ? "—" : Number(r.products_fetched).toLocaleString();
+}
+
 function modeLabel(mode: string, source: string) {
   if (source === "cache" && mode === "fast") return "Price rewrite";
   if (source === "cache" && mode === "full") return "Content rewrite";
@@ -65,7 +85,11 @@ export function Sync() {
   const syncRunning = isRunActive(newest);
   const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set);
   const cooldownMin = live.data?.retryInMinutes ?? 0;
-  const onCooldown = (live.data && !live.data.allow) || cooldownMin > 0;
+  const onCooldown = Boolean(live.data && !(live.data.anyAllow ?? live.data.allow));
+  const scheduleOn = live.data?.syncEnabled === true;
+  const pendingRebuild = live.data?.pendingRebuild === true;
+  const catalogueReady = live.data?.catalogueReady !== false;
+  const intervalMin = live.data?.cooldownMinutes ?? 30;
 
   const run = useMutation({
     mutationFn: (opts: { mode: "fast" | "full" }) =>
@@ -75,12 +99,18 @@ export function Sync() {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["overview"] });
       qc.invalidateQueries({ queryKey: ["live-status"] });
+      if (res.queued) {
+        toast(res.detail ?? "Catalogue rebuild queued for the next scheduled sync.", "ok");
+        return;
+      }
       if (res.alreadyRunning || res.started === false) {
         toast(
           res.detail ??
-            (res.cooldown
-              ? `Wait ${res.retryInMinutes ?? "…"} min before the next vendor sync.`
-              : "Sync already running — watch progress below."),
+            (res.scheduleOwnsSync
+              ? "Automatic sync is on — turn Sync enabled off for a one-off update."
+              : res.cooldown
+                ? `Wait ${res.retryInMinutes ?? "…"} min before the next vendor call.`
+                : "Sync already running — watch progress below."),
           "info",
         );
         return;
@@ -109,7 +139,9 @@ export function Sync() {
 
   const starting = run.isPending;
   const busy = starting || syncRunning;
-  const actionsDisabled = busy || onCooldown || secretsMissing.length > 0;
+  const secretsBlock = secretsMissing.length > 0;
+  const fastDisabled = busy || secretsBlock || scheduleOn || onCooldown;
+  const rebuildDisabled = busy || secretsBlock || (pendingRebuild && scheduleOn && catalogueReady);
 
   useEffect(() => {
     if (watchingRunId.current === -1 && newest && isRunActive(newest)) {
@@ -149,19 +181,21 @@ export function Sync() {
     ? "Abort the active run between batches and turn Sync enabled off until you Run again"
     : "No sync running";
 
-  const cooldownHint = onCooldown
-    ? `Available in ${cooldownMin} min (vendor API cooldown — protects BeautyFort daily caps).`
-    : `Cooldown ${live.data?.cooldownMinutes ?? "…"} min after each live sync.`;
+  const cooldownHint = scheduleOn
+    ? `Automatic price & stock every ${intervalMin} min. Update is a one-off only when Sync enabled is off.`
+    : onCooldown
+      ? `Next vendor call in ${cooldownMin} min.`
+      : `Call interval ${intervalMin} min after each live fetch (no daily download cap).`;
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
         <p className="text-sm text-muted">
-          Two actions only: <strong className="font-medium text-ink">Rebuild catalogue</strong>{" "}
-          (first import / full rebuild) and{" "}
-          <strong className="font-medium text-ink">Update prices &amp; stock</strong>. Never places
-          vendor orders.
+          <strong className="font-medium text-ink">Rebuild catalogue</strong> queues a full BeautyFort
+          + BTS import for the next scheduled call (or runs now if the shop is empty / sync is off).{" "}
+          <strong className="font-medium text-ink">Update prices &amp; stock</strong> is a one-off —
+          hide it while the schedule is on.
         </p>
       </header>
 
@@ -181,16 +215,20 @@ export function Sync() {
           <div className="max-w-xl space-y-2">
             <h2 className="text-lg font-semibold tracking-tight text-ink">Catalogue actions</h2>
             <p className="text-sm text-muted">
-              Empty shop → Rebuild once. After that, use Update prices &amp; stock (or the
-              automatic schedule). Buttons stay disabled during a run and during the cooldown.
+              Empty shop → Rebuild now. After that, leave Sync enabled on and the cadence calls each
+              wholesaler API on the interval. Rebuild while scheduled: next call becomes a catalogue
+              rebuild, not an immediate extra download.
             </p>
-            <p className={cn("text-xs", onCooldown ? "font-medium text-amber-800" : "text-muted")}>
+            <p className={cn("text-xs", scheduleOn || onCooldown ? "font-medium text-amber-800" : "text-muted")}>
               {cooldownHint}
             </p>
             {live.data ? (
               <p className="font-mono text-xs text-muted">
-                BF {live.data.beautyfort.dailyRemaining}/{live.data.beautyfort.maxPerDay} left today
-                · BTS {live.data.bts.dailyRemaining}/{live.data.bts.maxPerDay} left today
+                BF {live.data.beautyfort.allow ? "ready" : `wait ${live.data.beautyfort.retryInMinutes}m`}
+                {" · "}
+                BTS {live.data.bts.allow ? "ready" : `wait ${live.data.bts.retryInMinutes}m`}
+                {pendingRebuild ? " · rebuild queued" : ""}
+                {scheduleOn ? " · schedule on" : " · schedule off"}
               </p>
             ) : null}
           </div>
@@ -205,34 +243,44 @@ export function Sync() {
                     ? "bg-accent text-accent-ink opacity-95 ring-2 ring-accent/30 ring-offset-2 ring-offset-panel"
                     : "bg-accent text-accent-ink hover:opacity-95",
                 )}
-                disabled={actionsDisabled}
+                disabled={fastDisabled}
                 title={
-                  onCooldown
-                    ? cooldownHint
-                    : "Download live price/stock changes for BeautyFort + BTS"
+                  scheduleOn
+                    ? "Schedule is on — it will call BeautyFort + BTS on the interval. Turn Sync enabled off for a one-off."
+                    : onCooldown
+                      ? cooldownHint
+                      : "One-off live price/stock for BeautyFort + BTS"
                 }
                 onClick={() => run.mutate({ mode: "fast" })}
               >
-                {busy ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
+                {busy && run.variables?.mode === "fast" ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Play size={18} />
+                )}
                 {syncRunning
                   ? "Syncing…"
-                  : onCooldown
-                    ? `Update in ${cooldownMin}m`
-                    : "Update prices & stock"}
+                  : scheduleOn
+                    ? `Scheduled (${intervalMin}m)`
+                    : onCooldown
+                      ? `Update in ${cooldownMin}m`
+                      : "Update prices & stock"}
               </button>
               <button
                 type="button"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-line bg-panel px-4 py-3 text-sm font-semibold transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={actionsDisabled}
+                disabled={rebuildDisabled}
                 title={
-                  onCooldown
-                    ? cooldownHint
-                    : "Full catalogue rebuild — taxonomy, new products, vanish, park WPF"
+                  pendingRebuild
+                    ? "Already queued — the next scheduled call will rebuild the catalogue"
+                    : scheduleOn && catalogueReady
+                      ? "Queue a full BeautyFort + BTS rebuild for the next scheduled call"
+                      : "Full catalogue rebuild now — taxonomy, new products, vanish"
                 }
                 onClick={() => run.mutate({ mode: "full" })}
               >
                 <RefreshCw size={16} />
-                {onCooldown ? `Rebuild in ${cooldownMin}m` : "Rebuild catalogue"}
+                {pendingRebuild ? "Rebuild queued" : "Rebuild catalogue"}
               </button>
               <button
                 type="button"
@@ -253,8 +301,8 @@ export function Sync() {
             </div>
             <p className="max-w-sm text-right text-xs text-muted">
               {syncRunning
-                ? "Stop aborts between batches and turns Sync enabled off until you Run again."
-                : "Set the cooldown under Settings → Minutes between syncs."}
+                ? "Stop aborts between batches and turns Sync enabled off until you toggle it back on."
+                : "Minutes between syncs is under Settings. Daily download caps are off — only the call interval applies."}
             </p>
           </div>
         </div>
@@ -334,7 +382,7 @@ export function Sync() {
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} />
                   </td>
-                  <td className="px-4 py-3 font-mono tabular-nums">{r.products_fetched}</td>
+                  <td className="px-4 py-3 font-mono text-xs tabular-nums">{fetchedLabel(r)}</td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     +{r.posts_created} ~{r.posts_updated} $ {r.prices_updated}
                     {r.errors ? ` !${r.errors}` : ""}

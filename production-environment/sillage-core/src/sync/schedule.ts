@@ -18,8 +18,8 @@ import { todayAtHourUtc, toMysqlUtc } from "../lib/timezone.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
-import { getRetailLiveCooldown, inHalfHourSlot } from "../vendors/liveGate.ts";
-import { runSync, type SyncSummary } from "./run.ts";
+import { getRetailLiveCooldown } from "../vendors/liveGate.ts";
+import type { SyncSummary } from "./run.ts";
 
 const log = logger("schedule");
 
@@ -82,7 +82,11 @@ export function normaliseHour(hour: number): number {
 }
 
 /** The scheduling rules, with every input supplied. Pure, so it can be tested exhaustively. */
-export function decide(settings: GlobalSettings, timing: ScheduleTiming): ScheduleDecision {
+export function decide(
+  settings: GlobalSettings,
+  timing: ScheduleTiming,
+  pendingRebuild = false,
+): ScheduleDecision {
   if (!settings.syncEnabled) {
     return { action: "skip", reason: "sync_enabled is off" };
   }
@@ -101,12 +105,18 @@ export function decide(settings: GlobalSettings, timing: ScheduleTiming): Schedu
     return { action: "full", reason: "no successful run on record, seeding the catalogue" };
   }
   if (since >= settings.fastSyncMinutes) {
+    if (pendingRebuild) {
+      return {
+        action: "full",
+        reason: `queued catalogue rebuild is due (${since} min since last run)`,
+      };
+    }
     return { action: "fast", reason: `${since} min since the last run, cadence is ${settings.fastSyncMinutes} min` };
   }
 
   return {
     action: "skip",
-    reason: `${since} min since the last run, next fast sync at ${settings.fastSyncMinutes} min`,
+    reason: `${since} min since the last run, next ${pendingRebuild ? "rebuild" : "fast sync"} at ${settings.fastSyncMinutes} min`,
   };
 }
 
@@ -115,19 +125,12 @@ export async function decideSchedule(settings: GlobalSettings): Promise<Schedule
     return { action: "skip", reason: "sync_enabled is off" };
   }
 
-  // Catalogue syncs only open on the :00 and :30 walls (cron ticks every 5 minutes).
-  // Combined with live_feed_min_minutes (default 60) this caps live downloads to ~1/hour.
-  const [clock] = await query<RowDataPacket & { m: number }>(`SELECT MINUTE(NOW()) AS m`);
-  if (!inHalfHourSlot(Number(clock?.m ?? 99))) {
-    return {
-      action: "skip",
-      reason: `outside :00/:30 sync window (minute=${clock?.m})`,
-    };
-  }
-
+  const { isCatalogueRebuildPending } = await import("./pendingRewrite.ts");
+  const pendingRebuild = await isCatalogueRebuildPending();
   return decide(
     settings,
     await loadTiming(normaliseHour(settings.fullSyncHour), settings.scheduleTimezone),
+    pendingRebuild,
   );
 }
 
@@ -155,15 +158,18 @@ export async function runScheduledSync(override?: "full" | "fast"): Promise<Sync
 
   if (settings.syncSource === "live") {
     const cooldown = await getRetailLiveCooldown();
-    if (!cooldown.allow) {
+    // Per-vendor gates still skip BeautyFort or BTS inside the run. Do not abort the whole
+    // tick when only one wholesaler is still inside its call interval.
+    if (!cooldown.anyAllow) {
       log.info(
-        `tick: skip live ${decision.action} — cooldown ${cooldown.retryInMinutes}m (${cooldown.reason})`,
+        `tick: skip live ${decision.action} — both vendors cooling ${cooldown.retryInMinutes}m (${cooldown.reason})`,
       );
       return null;
     }
   }
 
   try {
+    const { runSync } = await import("./run.ts");
     return await runSync({ mode: decision.action, source: settings.syncSource });
   } catch (err) {
     // Overlap is expected, not exceptional: a full sync can outlast the tick interval, and the
