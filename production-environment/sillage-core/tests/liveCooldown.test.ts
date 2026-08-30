@@ -46,6 +46,12 @@ describe("retail live cooldown — no silent cache", () => {
     expect(scheduleSrc).toContain("anyAllow");
   });
 
+  test("Vendors UI does not expose the retired daily download cap", () => {
+    const vendorsSrc = readFileSync(join(import.meta.dir, "../web/src/pages/Vendors.tsx"), "utf8");
+    expect(vendorsSrc).not.toContain("liveMaxPerDay");
+    expect(vendorsSrc).not.toContain("Live downloads");
+  });
+
   test("settings Save keeps cooldown and fast cadence in lockstep", () => {
     expect(apiSrc).toContain('key === "live_feed_min_minutes"');
     expect(apiSrc).toContain('await setSetting("fast_sync_minutes", persist)');

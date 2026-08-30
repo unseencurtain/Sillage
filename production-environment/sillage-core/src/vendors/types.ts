@@ -1,6 +1,6 @@
 /**
  * Where a connector reads its feed from.
- * - `live` — vendor API, subject to the hard live-gate (min interval + daily cap); falls back to cache
+ * - `live` — vendor API, subject to the per-vendor call interval; blocked (no silent cache) when cooling
  * - `cache` — on-disk feed from the last successful live download (never hits the vendor)
  * - `local` — checked-in fixtures under `.feedscratch` (offline tests)
  */

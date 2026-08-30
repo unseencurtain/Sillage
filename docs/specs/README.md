@@ -17,7 +17,7 @@ dashboard controls (Settings, Vendors, Sync, Orders). Parked WPF / dead knobs ca
 | S1-writer | [Deep spec](S1-writer.md) — the batched SQL hot path | `sillage-core/src/sync/writer.ts` | 52.7k cold import under 8 min; all five derived tables in CONTEXT §3 consistent afterwards |
 | S1-pricing | Multiplier, RRP clamp, stock-threshold visibility | `sillage-core/src/sync/pricing.ts` | Pure functions, unit-tested against the edge cases in DATA-PROFILE |
 | S1-plugin | `sillage-bridge`, the seven items in CONTEXT §5 | `.../plugins/sillage-bridge/` | Images render from vendor URLs with zero `wp-content/uploads` requests; EAN search resolves exactly |
-| S1-schedule | 30-min fast sync + nightly full sync via container cron | `sillage-core/src/sync/`, `crontab` | Both cadences run unattended and log to `sil_sync_runs` |
+| S1-schedule | Call-interval fast sync + Rebuild button (optional nightly full) via container cron | `sillage-core/src/sync/`, `crontab` | Due ticks run unattended and log to `sil_sync_runs` |
 | S1-verify | The verification pass | — | Every check in the plan's Verification section passes |
 
 ## Stage 2

@@ -255,10 +255,10 @@ cadence is a settings edit, not a rebuild.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `sync_enabled` | `1` | Master kill switch. Manual runs still work when off |
-| `fast_sync_minutes` | `60` | Schedule cadence; kept equal to `live_feed_min_minutes` from Settings |
-| `live_feed_min_minutes` | `60` | Vendor API cooldown; dashboard disables Rebuild/Update until elapsed |
-| `full_sync_enabled` | `1` | Optional nightly full rebuild (prefer Sync → Rebuild button) |
+| `sync_enabled` | `1` | Schedule kill switch. Manual Update works when off and does not turn this back on |
+| `fast_sync_minutes` | `30` | Schedule cadence; kept equal to `live_feed_min_minutes` from Settings |
+| `live_feed_min_minutes` | `30` | Per-vendor call interval. Daily download counters are recorded but never block |
+| `full_sync_enabled` | `0` | Optional nightly full rebuild (prefer Sync → Rebuild button) |
 | `schedule_timezone` | `UTC` | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
 | `full_sync_hour` | `3` | Hour of day (0–23) in `schedule_timezone` for optional nightly full |
 | `sync_source` | `live` | `live` hits vendors (no silent disk fallback when gated); `local` = fixtures; `cache` = rewrite-only internal |
