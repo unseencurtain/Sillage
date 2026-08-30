@@ -51,7 +51,7 @@ SKIP_URL = re.compile(
 )
 
 
-def http_get(url: str, ua: str = UA, timeout: int = 22) -> tuple[int, bytes, str]:
+def http_get(url: str, ua: str = UA, timeout: int = 12) -> tuple[int, bytes, str]:
     req = urllib.request.Request(
         url,
         headers={
@@ -63,7 +63,18 @@ def http_get(url: str, ua: str = UA, timeout: int = 22) -> tuple[int, bytes, str
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             ctype = resp.headers.get("Content-Type") or ""
-            return resp.status, resp.read(), ctype
+            # Cap the body. A stalled or huge CDN reply used to block a worker
+            # forever and freeze the whole pool (no new {ean}.jpg, high CPU).
+            chunks: list[bytes] = []
+            total = 0
+            limit = 2_000_000
+            while total < limit:
+                piece = resp.read(min(65_536, limit - total))
+                if not piece:
+                    break
+                chunks.append(piece)
+                total += len(piece)
+            return resp.status, b"".join(chunks), ctype
     except urllib.error.HTTPError as exc:
         body = exc.read() if exc.fp else b""
         return exc.code, body, exc.headers.get("Content-Type") or ""
@@ -289,10 +300,10 @@ def load_products(csv_path: Path) -> dict[str, dict[str, str]]:
     return by_ean
 
 
-def already_found(progress_path: Path) -> set[str]:
-    found: set[str] = set()
+def already_done(progress_path: Path, skip_miss: bool) -> set[str]:
+    done: set[str] = set()
     if not progress_path.exists():
-        return found
+        return done
     with progress_path.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -303,9 +314,12 @@ def already_found(progress_path: Path) -> set[str]:
             except json.JSONDecodeError:
                 continue
             ean = normalize_ean(row.get("lookup_ean"))
-            if ean and row.get("status") == "found":
-                found.add(ean)
-    return found
+            if not ean:
+                continue
+            status = row.get("status")
+            if status == "found" or (skip_miss and status == "miss"):
+                done.add(ean)
+    return done
 
 
 def append_progress(path: Path, lock: Lock, row: dict) -> None:
@@ -371,7 +385,9 @@ def main() -> int:
     progress_path = reports / "progress.jsonl"
 
     products = load_products(csv_path)
-    skip = already_found(progress_path)
+    # Resume: always skip EANs we already saved. Skip previous misses unless
+    # --retry-miss, so a restart does not re-walk 800 dead Open Facts rows first.
+    skip = already_done(progress_path, skip_miss=not args.retry_miss)
     todo_rows = [row for norm, row in products.items() if norm not in skip]
     if args.limit:
         todo_rows = todo_rows[: args.limit]
