@@ -1,11 +1,12 @@
 # Missing-image products — fill by EAN
 
 Shop products hidden by **Hide products without image** are exported, then
-photos are fetched **by EAN only**. “Barcode” in this kit means the product
-**EAN** (EAN-13 / UPC / GTIN digits in `primary_ean` and extra `eans`).
+photos are fetched with a mix of tricks. “Barcode” here means the product
+**EAN** (EAN-13 / UPC / GTIN). Rows with no EAN are skipped.
 
-We do **not** search Google/Bing by product name. A source photo is saved only
-when that source says it belongs to the **same EAN**.
+Order: Open Facts / Go-UPC **by EAN** → Open Facts search by **brand + name**
+(keep only if the result EAN matches) → Bing Images for
+`EAN + brand + name`. Files are always `{ean}.jpg`.
 
 ## Live VPS work dir
 
