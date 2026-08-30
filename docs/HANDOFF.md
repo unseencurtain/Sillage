@@ -108,8 +108,9 @@ SELECT id, mode, source, status, prices_updated, started_at
   (EAN `.jpg`). Matcher: `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`.
   Canonical map: `sillage-core/data/image_overrides.json` (bind-mounted; recreate core/cron
   after edits). Playwright crawl `tools/images/brasty/` is for EANs not in that dump.
-  After a merge: **`--mode=full --source=cache --rewrite-only`** (fast rewrite ignores
-  `needs_content_write`).
+  **Skip Brasty camera placeholders** (grey camera + BRASTY watermark — not a product photo;
+  MD5s in `python-analysis/beautyfort-enriched/brasty_placeholders.py`). After a merge:
+  **`--mode=full --source=cache --rewrite-only`** (fast rewrite ignores `needs_content_write`).
 - **Theme target: Kadence.** Bridge must stay theme-agnostic; Blocksy-specific shims are legacy,
   not the long-term model. Lots of shop UI belongs in **sillage-bridge**, not the theme.
 

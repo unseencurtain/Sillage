@@ -89,6 +89,13 @@ It walks BeautyFort **and** BTS shop rows whose resolved URL is empty / placehol
 key): existing `image_overrides.json` → Brasty EAN file → `oceanfragrances.csv` → Shopify
 `products_export_1.csv`.
 
+**Brasty camera placeholders are not photos.** About 1,200 files in the dump are the same
+graphic (grey camera, “BRASTY / BRANDED STYLE”, green bar) saved as `EAN.jpg` (often WebP
+bytes). Example: `https://images.slilverbelt.xyz/8809598454323.jpg`. Matcher skips them by
+MD5 (`brasty_placeholders.py`). Never copy those onto the CDN. If one is already in
+`image_overrides.json` / `~/ecom_sites/data/media/`, delete the file, drop the override
+keys, recreate core/cron, and **full** rewrite-only so hide-without-image applies again.
+
 1. Export products that still lack a usable photo (dashboard Products JSON or SQL dump).
 2. Run the matcher; copy Brasty hits into `~/ecom_sites/data/media/` (CDN
    `https://images.slilverbelt.xyz/<original-stem>.jpg`).

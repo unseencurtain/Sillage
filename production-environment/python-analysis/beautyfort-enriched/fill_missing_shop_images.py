@@ -7,7 +7,8 @@ existing image_overrides.json key):
 
   1. Existing overrides
   2. Brasty folder on the VPS (filename stem = EAN → https://images.slilverbelt.xyz/<EAN>.jpg
-     after the file is copied into lps-media)
+     after the file is copied into lps-media). Skip camera 'no photo' placeholders
+     (brasty_placeholders.py).
   3. oceanfragrances.csv (EAN column, Image URL)
   4. Shopify products_export_1.csv (Variant Barcode, Image Src)
 
@@ -40,6 +41,7 @@ from collections import Counter
 
 # Allow running as a sibling of enrich.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from brasty_placeholders import file_is_brasty_placeholder  # noqa: E402
 from enrich import (  # noqa: E402
     is_placeholder_image,
     load_ocean_csv_index,
@@ -92,23 +94,44 @@ def parse_eans(primary: str | None, raw_eans) -> list[str]:
     return out
 
 
-def load_brasty_index(path: str, public_base: str) -> dict[str, str]:
-    """Map normalized EAN → public CDN URL. Filename stem may include leading zeros."""
+def load_brasty_index(path: str, public_base: str, brasty_root: str = "") -> dict[str, str]:
+    """Map normalized EAN → public CDN URL. Filename stem may include leading zeros.
+
+    If ``brasty_root`` is set, walk that tree and skip Brasty's camera 'no photo'
+    graphic (see brasty_placeholders.py). ``path`` is then only a fallback name list.
+    """
     index: dict[str, str] = {}
     base = public_base.rstrip("/")
+    skipped_placeholder = 0
+
+    def add_stem(stem: str) -> None:
+        ean = normalize_ean(stem)
+        if not ean or ean in index:
+            return
+        index[ean] = f"{base}/{stem}.jpg"
+
+    if brasty_root and os.path.isdir(brasty_root):
+        for dirpath, _, files in os.walk(brasty_root):
+            for fn in files:
+                disk = os.path.join(dirpath, fn)
+                stem, _ext = os.path.splitext(fn)
+                if file_is_brasty_placeholder(disk):
+                    skipped_placeholder += 1
+                    continue
+                add_stem(stem)
+        if skipped_placeholder:
+            print(f"skipped {skipped_placeholder} Brasty camera placeholders", file=sys.stderr)
+        return index
+
     with open(path, encoding="utf-8") as f:
         for line in f:
-            stem = line.strip()
-            if not stem:
+            raw = line.strip()
+            if not raw:
                 continue
-            stem = os.path.basename(stem)
+            stem = os.path.basename(raw)
             if "." in stem:
                 stem = stem.rsplit(".", 1)[0]
-            ean = normalize_ean(stem)
-            if not ean or ean in index:
-                continue
-            # Public file keeps the original (often zero-padded) basename when copied.
-            index[ean] = f"{base}/{stem}.jpg"
+            add_stem(stem)
     return index
 
 
@@ -132,6 +155,11 @@ def main() -> int:
     ap.add_argument("--ocean", required=True)
     ap.add_argument("--shopify", required=True)
     ap.add_argument("--brasty-eans", help="One EAN/filename per line from the VPS Brasty dump")
+    ap.add_argument(
+        "--brasty-root",
+        default="",
+        help="Walk this tree to skip Brasty camera 'no photo' placeholders by MD5",
+    )
     ap.add_argument("--public-base", default="https://images.slilverbelt.xyz")
     ap.add_argument("--out-delta", required=True)
     ap.add_argument("--out-merged")
@@ -145,7 +173,11 @@ def main() -> int:
     overrides = load_overrides(args.overrides)
     ocean = load_ocean_csv_index(args.ocean)
     shopify = load_shopify_index(args.shopify)
-    brasty = load_brasty_index(args.brasty_eans, args.public_base) if args.brasty_eans else {}
+    brasty = (
+        load_brasty_index(args.brasty_eans, args.public_base, args.brasty_root)
+        if args.brasty_eans
+        else {}
+    )
 
     sources = [
         ("overrides", overrides),
