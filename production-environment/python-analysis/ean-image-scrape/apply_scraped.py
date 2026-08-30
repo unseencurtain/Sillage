@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Copy barcode-named scrapes onto the Sillage CDN and merge image_overrides.json."""
+"""Zip scraped photos for inspection.
+
+By default this does **not** write the shop, CDN, or image_overrides.json.
+Pass --apply-to-shop only after someone has inspected ~/sillage/ean-image-scrape/scraped/.
+"""
 from __future__ import annotations
 
 import argparse
@@ -75,13 +79,19 @@ def main() -> int:
         default=os.path.expanduser("~/sillage/sillage-core/data/image_overrides.json"),
     )
     ap.add_argument("--rewrite", action="store_true", help="recreate core/cron and run rewrite-only")
+    ap.add_argument(
+        "--apply-to-shop",
+        action="store_true",
+        help="write CDN + overrides (off by default — inspect scraped/ first)",
+    )
     args = ap.parse_args()
 
     work = Path(args.work_dir)
     scraped = work / "scraped"
     media = Path(args.media)
     overrides_path = Path(args.overrides)
-    media.mkdir(parents=True, exist_ok=True)
+    reports = work / "reports"
+    reports.mkdir(exist_ok=True)
 
     files = {
         normalize_ean(p.stem): p
@@ -89,6 +99,26 @@ def main() -> int:
         if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
     }
     files = {k: v for k, v in files.items() if k}
+
+    zip_path = work / "scraped-ean-images.zip"
+    if files:
+        subprocess.check_call(["zip", "-qr", str(zip_path), "scraped"], cwd=str(work))
+
+    if not args.apply_to_shop:
+        print(
+            json.dumps(
+                {
+                    "mode": "inspect-only",
+                    "scraped_files": len(files),
+                    "zip": str(zip_path),
+                    "shop_updated": False,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    media.mkdir(parents=True, exist_ok=True)
 
     products: list[dict[str, str]] = []
     with (work / "missing-products.csv").open(encoding="utf-8") as fh:
