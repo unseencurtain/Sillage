@@ -272,6 +272,7 @@ export async function writePendingProducts(
   ctx: WriteContext,
   mode: WriteMode,
   onProgress?: (done: number, total: number) => void,
+  options?: { unpostedOnly?: boolean },
 ): Promise<WriteResult> {
   const result: WriteResult = {
     postsCreated: 0,
@@ -284,10 +285,13 @@ export async function writePendingProducts(
 
   // The fast sync never creates products; that is the nightly full sync's job. Restricting it to
   // rows that already have a post keeps the 30-minute path to price, stock and visibility only.
-  const where =
+  let where =
     mode === "fast"
       ? "p.needs_price_write = 1 AND p.wp_post_id IS NOT NULL"
       : "(p.needs_content_write = 1 OR p.needs_price_write = 1)";
+  if (options?.unpostedOnly) {
+    where = `(${where}) AND p.wp_post_id IS NULL`;
+  }
 
   const [{ total = 0 } = {}] = await query<RowDataPacket & { total: number }>(
     `SELECT COUNT(*) AS total FROM ${sil("sil_products")} p

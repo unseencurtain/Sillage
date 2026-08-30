@@ -35,6 +35,18 @@ export abstract class VendorConnector {
    */
   fetchPriceStock?(since: Date, progress?: ProgressFn): Promise<PriceStockUpdate[] | null>;
 
+  /**
+   * Hydrate a small set of SKUs into normalized products (BTS `getProducts`, 25/call).
+   * Used to import SKUs that appear in a delta but have no offer row yet.
+   */
+  fetchNormalizedBySkus?(skus: string[], progress?: ProgressFn): Promise<NormalizedProduct[]>;
+
+  /** Recently published vendor product ids + SKUs, when the vendor exposes a new-arrivals feed. */
+  fetchNewProductKeys?(
+    days: number,
+    progress?: ProgressFn,
+  ): Promise<Array<{ vendorProductId: string; sku: string }>>;
+
   /** Countries this vendor will ship to, when discoverable from the API. */
   fetchServiceableCountries?(): Promise<string[]>;
 
