@@ -1,5 +1,8 @@
 # Sillage — Feature Delivery Walkthrough
 
+**How to use the shop and dashboard day to day:** [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md)
+(written for humans). This page is a **demo script** for a live review, not the user manual.
+
 **Project:** Multi-vendor perfume/cosmetics dropshipping sync (BeautyFort + BTS → WooCommerce)  
 **Ops dashboard:** https://sillage.slilverbelt.xyz  
 **Storefront:** https://cosmetic.slilverbelt.xyz  

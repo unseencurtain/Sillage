@@ -1,5 +1,9 @@
 # Operator dashboard — BeautyFort + BTS
 
+**Clients / humans:** use [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md) (how to use the shop and dashboard).
+This file is the **engineering** map of every control (API routes, setting keys). When you rename
+a button or change shopper behaviour, update **both** this file and `CLIENT-GUIDE.md`.
+
 Live UI: `https://sillage.slilverbelt.xyz` (VPS `ovhe`). This retail shop syncs **BeautyFort**
 and **BTS** only. wholesale-perfumes is parked for
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — inactive, excluded from

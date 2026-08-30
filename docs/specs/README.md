@@ -3,6 +3,9 @@
 Each task below is self-contained: read `../CONTEXT.md`, then your row here, then the deep spec if
 one is linked. Acceptance criteria are what "done" means — not aspirations.
 
+**Clients / humans:** [CLIENT-GUIDE.md](../CLIENT-GUIDE.md) — how to use the shop and dashboard.
+Keep it matching live UI in the same change as any user-visible behaviour.
+
 **Operator reference:** [OPERATOR-DASHBOARD.md](../OPERATOR-DASHBOARD.md) — BeautyFort + BTS
 dashboard controls (Settings, Vendors, Sync, Orders). Parked WPF / dead knobs called out.
 

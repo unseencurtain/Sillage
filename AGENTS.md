@@ -12,7 +12,11 @@ write to. Then read only the one spec under `docs/specs/` that covers your task.
 everything you need is in those files.
 
 **Operator dashboard:** every Settings / Vendors / Sync / Orders control for this retail shop is
-documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
+documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md) (engineers).
+
+**Client / human how-to:** [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md). If you change dashboard
+copy, Settings sections, order buttons, or shopper rules (cart, checkout, tracking, hide-without-image),
+**update `CLIENT-GUIDE.md` in the same commit** so clients and the owner stay in sync.
 
 ## Layout
 
@@ -24,7 +28,7 @@ documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
 | `production-environment/ecom_sites/` | Host data mounts + WP/nginx/MariaDB config (`lps-media` media dir) |
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |
-| `docs/` | Context, decisions, data profile, task specs |
+| `docs/` | Client how-to [`CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md); engineers start at `CONTEXT.md` |
 | `b2b-wholesale/` | Thin pointer → [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |
 | `tools/images/` | Offline image tools (Brasty Playwright scrape, etc.) |
 
@@ -38,6 +42,8 @@ documented in [`docs/OPERATOR-DASHBOARD.md`](docs/OPERATOR-DASHBOARD.md).
 4. **Orders are HPOS.** WooCommerce 11 stores orders in `wp_wc_orders`, not `wp_posts`.
 5. **Placing a vendor order spends real money.** There is no sandbox on either API. Respect the
    dry-run flag and the dispatch safety rails.
+6. **Client-facing behaviour has a human doc.** Keep [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md)
+   matching the live UI and shop rules in the same change.
 
 ## Commands
 
