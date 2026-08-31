@@ -76,6 +76,11 @@ Needs **three** site blocks (shop, dashboard, images). Example:
 
 ```caddy
 prinscosmetic.eu {
+	# Required on every shop host — docs/CRAWLER-SHIELD.md
+	@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
+	handle @heavybot {
+		respond "Forbidden" 403
+	}
 	handle_path /lps-media/* {
 		reverse_proxy localhost:105
 	}

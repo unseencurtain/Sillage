@@ -10,6 +10,7 @@ only the one deep doc you need. Do not wander the tree.
 | Schema, containers, what PHP may write | [`CONTEXT.md`](CONTEXT.md) |
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
+| **AI crawler / ecom 150% CPU** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — Caddy `@heavybot` 403, copy onto every client VPS |
 | Move shop + photos to a **new** VPS | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) |
 | Change shop / dash / image hosts | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) |
 | What lives where (repo + VPS) | [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |

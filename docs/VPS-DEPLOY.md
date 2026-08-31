@@ -23,7 +23,7 @@ You run everything from your **laptop** in a clone of this repo. The VPS never n
 | `~/sillage/compose.yaml` | Entire stack (ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron) |
 | `~/sillage/.env` | All secrets + image tags + domains |
 | `~/ecom_sites/data/{wp,wp-db,media}` | Host volumes (WP, MariaDB, product images) |
-| Host Caddy (`/etc/caddy/Caddyfile`) | TLS edge → `:104` / `:105` / `:4000` |
+| Host Caddy (`/etc/caddy/Caddyfile`) | TLS edge → `:104` / `:105` / `:4000`. Shop block **must** include the AI-crawler 403 — [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) |
 
 Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`). Minimal rsync covers compose, config, plugin, and `image_overrides.json` only — **not** a full source-tree sync. After the first deploy, day-2 updates are Hub pull + that thin rsync.
 
@@ -209,6 +209,7 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 |---|---|
 | Secrets | Only in `~/sillage/.env` and laptop `.deploy/` — never commit |
 | Ports | Caddy :80/:443 public; app ports on `127.0.0.1` only |
+| AI crawlers | Shop Caddy `@heavybot` 403 (ClaudeBot / GPTBot / CCBot / …). Images CDN stays open. [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) |
 | Money | Vendor order APIs have no sandbox; keep dry-run on until intentional |
 | Images | Prefer Hub pulls; never commit Docker Hub tokens |
 
@@ -221,6 +222,7 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 | `ERR_NAME_NOT_RESOLVED` | DNS / local cache |
 | Dashboard SQL denied | Re-run deploy (grants) or apply `ecom_sites/config/sillage-grants.sql` |
 | Image pull denied | `docker login` on laptop; confirm `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` in `.env` |
+| `ecom` at 150%+ CPU, cron idle | AI crawler walking `/product`. Confirm UA in Apache access log; Caddy `@heavybot` must be first in the shop site. [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) |
 | Let’s Encrypt fail | DNS must point here; 80/443 open |
 | Old split stack still running | Deploy stops `~/redis` + `~/ecom_sites` compose projects before starting `~/sillage` |
 

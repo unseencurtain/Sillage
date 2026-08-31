@@ -20,6 +20,7 @@ copy, Settings sections, order buttons, or shopper rules (cart, checkout, tracki
 
 **Change shop / dashboard / image hostnames:** [`docs/DOMAIN-MIGRATION.md`](docs/DOMAIN-MIGRATION.md).
 What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
+**Shop CPU / AI crawlers:** [`docs/CRAWLER-SHIELD.md`](docs/CRAWLER-SHIELD.md) — required on every VPS.
 
 ## Layout
 

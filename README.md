@@ -156,6 +156,7 @@ bun test
 |---|---|
 | Secrets | `.env` mode `600`; never in git; deploy writes to `.deploy/` only |
 | Network | Caddy terminates TLS; sillage-core bound to `127.0.0.1:4000`; MariaDB `127.0.0.1:3307` |
+| AI crawlers | Shop host 403s ClaudeBot / GPTBot / CCBot / … before PHP. See [`docs/CRAWLER-SHIELD.md`](docs/CRAWLER-SHIELD.md) |
 | Firewall | ufw allows 22/80/443 only on bootstrapped hosts |
 | DB | `sillage` user: ALL on `sillage.*`; narrow DML/SELECT on listed `earth.wp_*` tables only (see `sillage-grants.sql`) |
 | Orders | Dry-run default; live dispatch is explicit and spends real money |
