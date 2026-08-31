@@ -418,10 +418,26 @@ ${SHOP_DOMAIN} {
 			header_down -Via
 		}
 	}
-	reverse_proxy localhost:${WP_PORT}
+	header {
+		-Server
+		-Via
+		-X-Powered-By
+	}
+	reverse_proxy localhost:${WP_PORT} {
+		header_down -Server
+		header_down -Via
+		header_down -X-Powered-By
+	}
 }
 ${DASH_DOMAIN} {
-	reverse_proxy localhost:4000
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:4000 {
+		header_down -Server
+		header_down -Via
+	}
 }
 ${IMAGES_SITE_BLOCK}
 EOF

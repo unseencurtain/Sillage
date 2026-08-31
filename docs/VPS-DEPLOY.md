@@ -209,7 +209,7 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 |---|---|
 | Secrets | Only in `~/sillage/.env` and laptop `.deploy/` — never commit |
 | Ports | Caddy :80/:443 public; app ports on `127.0.0.1` only |
-| Images CDN | `lps-media` nginx: no directory listing, no version in 404s, image files only. Caddy strips `Server` / `Via` on `images.*` |
+| Identity headers | Caddy strips `Server`, `Via`, and `X-Powered-By` on shop / dash / images. PHP `expose_php=Off`; Apache `ServerTokens Prod` |
 | Money | Vendor order APIs have no sandbox; keep dry-run on until intentional |
 | Images | Prefer Hub pulls; never commit Docker Hub tokens |
 
