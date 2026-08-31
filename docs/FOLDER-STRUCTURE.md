@@ -88,7 +88,8 @@ Host Caddy (`/etc/caddy/Caddyfile`) is **not** inside `~/sillage`. It terminates
 proxies `:104` (shop), `:4000` (dashboard), `:105` (images). The shop site must 403
 AI training crawlers — snippet
 [`ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet),
-story [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md).
+story [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md). The images site strips `Server` / `Via`
+and `lps-media` 404s are plain text (no nginx version).
 
 ---
 

@@ -209,7 +209,7 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 |---|---|
 | Secrets | Only in `~/sillage/.env` and laptop `.deploy/` — never commit |
 | Ports | Caddy :80/:443 public; app ports on `127.0.0.1` only |
-| AI crawlers | Shop Caddy `@heavybot` 403 (ClaudeBot / GPTBot / CCBot / …). Images CDN stays open. [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) |
+| Images CDN | `lps-media` nginx: no directory listing, no version in 404s, image files only. Caddy strips `Server` / `Via` on `images.*` |
 | Money | Vendor order APIs have no sandbox; keep dry-run on until intentional |
 | Images | Prefer Hub pulls; never commit Docker Hub tokens |
 
