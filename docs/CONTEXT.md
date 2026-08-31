@@ -26,7 +26,9 @@ Networks are **external** and must exist before `docker compose up`:
 **Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
 (on VPS: `~/ecom_sites/data/media`) is bind-mounted read-only into `lps-media` at
 `/usr/share/nginx/html` (never a named/anonymous Docker volume). Preferred public URLs are
-`https://images.<domain>/<file>` (Caddy site → `lps-media` document root). Shop path
+`https://images.<domain>/<file>` (Caddy site → `lps-media` document root). The CDN
+does not list files, does not advertise nginx’s version on 404s, and only serves
+image extensions. Shop path
 `https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
 `shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
 Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). New image

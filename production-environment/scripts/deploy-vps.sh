@@ -388,7 +388,14 @@ MEDIA_PORT="${MEDIA_PORT:-105}"
 IMAGES_SITE_BLOCK=""
 if [[ -n "${IMAGES_DOMAIN:-}" ]]; then
   IMAGES_SITE_BLOCK="${IMAGES_DOMAIN} {
-	reverse_proxy localhost:${MEDIA_PORT}
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:${MEDIA_PORT} {
+		header_down -Server
+		header_down -Via
+	}
 }"
 fi
 
@@ -402,7 +409,14 @@ ${SHOP_DOMAIN} {
 		respond "Forbidden" 403
 	}
 	handle_path /lps-media/* {
-		reverse_proxy localhost:${MEDIA_PORT}
+		header {
+			-Server
+			-Via
+		}
+		reverse_proxy localhost:${MEDIA_PORT} {
+			header_down -Server
+			header_down -Via
+		}
 	}
 	reverse_proxy localhost:${WP_PORT}
 }

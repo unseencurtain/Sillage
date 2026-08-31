@@ -82,7 +82,14 @@ prinscosmetic.eu {
 		respond "Forbidden" 403
 	}
 	handle_path /lps-media/* {
-		reverse_proxy localhost:105
+		header {
+			-Server
+			-Via
+		}
+		reverse_proxy localhost:105 {
+			header_down -Server
+			header_down -Via
+		}
 	}
 	reverse_proxy localhost:104
 }
@@ -90,7 +97,14 @@ sillage.prinscosmetic.eu {
 	reverse_proxy localhost:4000
 }
 images.prinscosmetic.eu {
-	reverse_proxy localhost:105
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:105 {
+		header_down -Server
+		header_down -Via
+	}
 }
 ```
 
