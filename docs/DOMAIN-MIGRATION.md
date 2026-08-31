@@ -91,10 +91,26 @@ prinscosmetic.eu {
 			header_down -Via
 		}
 	}
-	reverse_proxy localhost:104
+	header {
+		-Server
+		-Via
+		-X-Powered-By
+	}
+	reverse_proxy localhost:104 {
+		header_down -Server
+		header_down -Via
+		header_down -X-Powered-By
+	}
 }
 sillage.prinscosmetic.eu {
-	reverse_proxy localhost:4000
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:4000 {
+		header_down -Server
+		header_down -Via
+	}
 }
 images.prinscosmetic.eu {
 	header {

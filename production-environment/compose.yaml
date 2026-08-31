@@ -110,6 +110,7 @@ services:
     volumes:
       - ${DATA_DIR:-./ecom_sites/data}/wp:/var/www/html
       - ${PHP_INI:-./ecom_sites/config/php.ini}:/usr/local/etc/php/conf.d/conf.ini:ro
+      - ${APACHE_HIDE_CONF:-./ecom_sites/config/apache-hide-version.conf}:/etc/apache2/conf-enabled/z-hide-version.conf:ro
     environment:
       WORDPRESS_DB_HOST: ecom-db
       WORDPRESS_DB_USER: ${MYSQL_USER:-lime}

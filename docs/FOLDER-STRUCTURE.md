@@ -34,7 +34,7 @@ Sillage/
 │   │   ├── data/image_overrides.json  EAN → photo URL (in git)
 │   │   └── data/found-images-manifest.json
 │   ├── ecom_sites/
-│   │   ├── config/                    php.ini, MariaDB, lps-media nginx
+│   │   ├── config/                    php.ini, Apache hide-version, MariaDB, lps-media nginx
 │   │   └── data/wp/wp-content/plugins/sillage-bridge/   only WP path in git
 │   ├── python-analysis/               Photo matcher / restore / EAN scrape
 │   │   └── ean-image-scrape/          Export missing + EAN-only download
