@@ -85,7 +85,10 @@ Docker reads:
 | `sillage-core` / `sillage-cron` | overrides + secrets + logs + `~/sillage/.feedscratch` |
 
 Host Caddy (`/etc/caddy/Caddyfile`) is **not** inside `~/sillage`. It terminates TLS and
-proxies `:104` (shop), `:4000` (dashboard), `:105` (images).
+proxies `:104` (shop), `:4000` (dashboard), `:105` (images). The shop site must 403
+AI training crawlers — snippet
+[`ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet),
+story [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md).
 
 ---
 

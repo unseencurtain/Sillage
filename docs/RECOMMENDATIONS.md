@@ -22,6 +22,14 @@ Checked on live `ovhe` (`sillage-core:e706d10` at audit time) plus the BTS v2.1 
 - GitHub restore: override map + CDN filename manifest + `restore_found_images.py` + migrate
   runbook. Binaries stay out of git on purpose (~380 MB).
 
+## Edge (2026-08-31)
+
+Shop Caddy **must** 403 AI training crawlers (`ClaudeBot` and the rest). Live
+already has it. New VPS: `deploy-vps.sh` writes it. Manual paste:
+[`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md).
+
+---
+
 ## Do next (priority)
 
 1. **Deploy this image** and poll vendor order id `3` so the cancelled BTS test row leaves

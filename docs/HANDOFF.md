@@ -28,6 +28,17 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **BTS tracking** | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
 | **Health / recs** | [`RECOMMENDATIONS.md`](RECOMMENDATIONS.md) |
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
+| **Crawler shield** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — copy the Caddy `@heavybot` 403 onto every client VPS |
+
+---
+
+## What changed (2026-08-31) — ClaudeBot melted the shop
+
+`ecom` at 150%+ CPU was **not** leftover scrape. Anthropic **ClaudeBot**
+(`216.73.217.16`, UA `ClaudeBot/1.0`) was walking every public `/product` and
+`/?p=` page through Apache prefork. Caddy on the shop host now 403s that class
+of crawler. Copy the same block onto every client VPS:
+[`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md). Do not kill MariaDB to “fix CPU”.
 
 ---
 

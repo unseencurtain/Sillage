@@ -394,6 +394,13 @@ fi
 
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
+	# AI training crawlers walk every /product and /brand page. Prefork PHP
+	# cannot survive that on a ~4 GB box. Images CDN stays open (cheap files).
+	# See docs/CRAWLER-SHIELD.md
+	@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
+	handle @heavybot {
+		respond "Forbidden" 403
+	}
 	handle_path /lps-media/* {
 		reverse_proxy localhost:${MEDIA_PORT}
 	}
