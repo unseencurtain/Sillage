@@ -284,9 +284,8 @@ whoever maintains the server. You do not need it for daily markup changes.
 These rules are on purpose. They match how dropship dispatch works.
 
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
-image** is on. They still exist in WooCommerce and on **Products**. Weak BeautyFort `/pic/`
-thumbs, BTS `no_image`, empty Woo meta, and the literal word `None` all count as “no photo”.
-The shop never shows the grey WooCommerce camera placeholder on a catalogue-visible product.
+image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. Extra files sitting in the
+EAN scrape folder are **not** shop photos until someone inspects them — many are tiny or generic.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
 + enough stock, not **Keep hidden**) are listed in the sitemap. Catalogue-hidden products are
 told not to be indexed. The sitemap is a static file Caddy serves (PHP does not build it). It

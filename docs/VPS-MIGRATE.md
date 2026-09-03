@@ -55,8 +55,8 @@ docker exec -e MYSQL_PWD="$PW" ecom-db mariadb-dump -uroot --all-databases --sin
 
 Import on the new host into `ecom-db` after compose has created the empty volume.
 
-Optional: rsync `/home/ubuntu/brasty/` if you still want the photo dump for future matching
-(3.7 GB). Not required for the shop if `data/media/` copied cleanly.
+Optional: the old `~/brasty/` dump is gone on ovhe (2026-09-03). Shop photos restore from
+`data/media/` + `image_overrides.json` only.
 
 ---
 

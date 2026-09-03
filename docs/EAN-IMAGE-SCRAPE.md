@@ -12,12 +12,18 @@ Order: Open Facts / Go-UPC **by EAN** → Open Facts search by **brand + name**
 
 `~/sillage/ean-image-scrape/` on `ovhe`.
 
+`scraped/{ean}.jpg` is **not** a quality guarantee. A live size pass (2026-09-03):
+**13,204** files, **~1,943 under 8 KB** (likely icons / generic marks / empty).
+“CAN fill 9,621” on the in-stock no-image card mostly means “a scrape file exists”,
+not “a bottle photo is ready for the shop.” Inspect before `--apply-to-shop`.
+
 | File | What |
 |---|---|
 | `missing-products.csv` | sku, name, brand, vendor, **EAN**, extras, slug |
-| `scraped/{ean}.jpg` | photos found by EAN |
-| `scraped-ean-images.zip` | zip of `scraped/` for download |
+| `scraped/{ean}.jpg` | Unreviewed lookup result named by EAN |
 | `reports/progress.jsonl` | resume log |
+
+Do not keep a second zip of `scraped/` on the VPS; the folder is enough.
 
 Rows with no real EAN are skipped (`skipped_no_barcode` in `export-summary.json`).
 

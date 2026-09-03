@@ -54,26 +54,30 @@ After cleanup, home should look like this:
 
 ```
 /home/ubuntu/
+├── START-HERE.txt                     One-page live reminder
+├── photo-inventory/                   Live CAN/CANNOT CSVs (2026-09-03)
 ├── sillage/                           App (compose + env + thin binds)
 │   ├── .env                           Secrets + image tags + the three domains
 │   ├── compose.yaml
 │   ├── .feedscratch/                  Vendor feed cache (writable)
-│   ├── backups/                       Dated SQL dumps (optional)
-│   ├── ean-image-scrape/              EAN-only photo scrape (CSV + scraped/ + zip)
-│   ├── scripts/vps-bootstrap.sh
+│   ├── ean-image-scrape/              Unreviewed EAN scrape (scraped/ is NOT the shop CDN)
+│   ├── python-analysis/               Inventory + sitemap helpers copied for ovhe
+│   ├── scripts/                       vps-bootstrap.sh, write-sitemaps.py
 │   ├── sillage-core/
 │   │   ├── data/image_overrides.json
 │   │   ├── data/secrets.overlay.env
 │   │   └── logs/
 │   └── ecom_sites/config/             php.ini, mariadb.vps.cnf, lps-media nginx
 ├── ecom_sites/data/                   Bind-mounted data (do not delete)
-│   ├── wp/                            WordPress (wp-config has SILLAGE_DASHBOARD_URL)
+│   ├── wp/                            WordPress
 │   ├── wp-db/                         MariaDB files
-│   └── media/                         Product images for images.* CDN
-├── brasty/                            Photo dump (EAN.jpg). Keep.
-├── ovhe-backup/ovhe-backup.zip        Optional dated archive only
+│   ├── media/                         **Shop CDN photos** (images.prinscosmetic.eu)
+│   └── sitemaps/                      Static robots + wp-sitemap*.xml (Caddy)
 └── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile
 ```
+
+**Removed on purpose (2026-09-03):** `~/brasty/` (dump; needed hits copied to media),
+`~/ovhe-backup/`, `~/sillage/backups/`, duplicate download zips.
 
 Docker reads:
 
@@ -112,4 +116,4 @@ These were **not** used by the running stack after the single-compose move:
 | `~/ecom_sites/.env.legacy-unused` | Leftover split-env scrap |
 
 **Never delete:** `~/sillage/.env`, `~/sillage/sillage-core/data/secrets.overlay.env`,
-`~/ecom_sites/data/`, `~/brasty/`.
+`~/ecom_sites/data/`.

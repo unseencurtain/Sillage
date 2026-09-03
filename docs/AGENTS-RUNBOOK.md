@@ -35,7 +35,9 @@ Bun (`sillage-core`) writes products into MariaDB. The WordPress plugin is a thi
 (REST, cart rules, tracking notes). **PHP must not grow product-write paths.**
 
 wholesale-perfumes is parked (B2B, other repo). Ocean = `oceanfragrances.csv` images only.
-Brasty = photo dump only (filename stem = EAN). Not vendors.
+Brasty = optional Playwright tool in git (`tools/images/brasty/`). The VPS dump
+`~/brasty/` was deleted 2026-09-03; needed hits live in `~/ecom_sites/data/media/`.
+Not a vendor.
 
 ---
 
@@ -57,8 +59,8 @@ Brasty = photo dump only (filename stem = EAN). Not vendors.
 | In git | Not in git (restore separately) |
 |---|---|
 | App, plugin, compose, docs | `~/sillage/.env`, `secrets.overlay.env` |
-| `sillage-core/data/image_overrides.json` (~11k EAN → URL) | `~/ecom_sites/data/media/` (~4k CDN files, ~380 MB) |
-| `found-images-manifest.json` (CDN filenames) | `/home/ubuntu/brasty/` (~36k files, 3.7 GB) |
+| `sillage-core/data/image_overrides.json` (~11k EAN → URL) | `~/ecom_sites/data/media/` (CDN JPEGs) |
+| `found-images-manifest.json` (CDN filenames) | Unreviewed scrape `~/sillage/ean-image-scrape/scraped/` (not shop until inspected) |
 | Matcher + `restore_found_images.py` | MariaDB (`earth` + `sillage`) |
 
 Shopify / BTS / oceanfragrances URLs in the override map are **hotlinks**. Only
@@ -149,5 +151,5 @@ Shop writes on the Sync table should read `New n · Updated n · Prices n`, not 
    want the handful of BF←BTS extra-EAN fills written to Woo.
 4. 71 published products may still lack `product_brand` term links (fast sync never writes
    brands). A full content rewrite of those SKUs attaches them.
-5. Keep hunting photos for the ~12k leftover EANs (Brasty scrape / manual). Do not turn
-   hide-without-image off.
+5. Hunt real photos for leftover no-image SKUs. Do not turn hide-without-image off.
+   Do not dump the unreviewed EAN scrape onto the shop.

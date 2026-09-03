@@ -321,7 +321,7 @@ can illustrate any vendor's product.
 | Image source | Where | Notes |
 |---|---|---|
 | oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
-| Brasty | VPS folders `/home/ubuntu/brasty/{in_stock,out_of_stock,sale,new,back_in_stock,hot_deals}` (zero-padded EAN `.jpg`); scrape tool `tools/images/brasty/` | Image source only. Match by **EAN**. Copy hits into `~/ecom_sites/data/media/` (CDN `https://images.prinscosmetic.eu/<file>`). Playwright crawl is optional for new photos. Explicitly **not** a supplier |
+| Brasty | Was VPS `~/brasty/` (removed 2026-09-03). Needed missing-SKU files copied to `~/ecom_sites/data/media/`. Tool `tools/images/brasty/` remains in git. Skip camera placeholders (`brasty_placeholders.py`). Not a supplier |
 | Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export (`Variant Barcode` → `Image Src`) |
 | Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
 | wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |
