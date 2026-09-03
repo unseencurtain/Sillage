@@ -9,7 +9,7 @@
     "start": "bun run src/server/index.ts",
     "migrate": "bun run src/cli/migrate.ts",
     "sync": "bun run src/cli/sync.ts",
-    "schedule": "bun run src/cli/schedule.ts",
+    "sitemap": "bun run src/cli/sitemap.ts",
     "orders": "bun run src/cli/orders.ts",
     "doctor": "bun run src/cli/doctor.ts",
     "test": "bun test",

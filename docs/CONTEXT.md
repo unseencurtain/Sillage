@@ -241,6 +241,11 @@ This is a closed list. If a task seems to require adding write logic here, it be
    postmeta only. No dual-catalog / B2B UI here — B2B is
    [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
    WPF on this install is parked via `product_visibility` from sillage-core.
+10. **SEO** — Bun writes static sitemaps (`src/sync/sitemaps.ts`, Caddy serves
+    `/wp-sitemap*.xml` + `/robots.txt`). PHP (`Sillage_Seo`) only **disables** core
+    WP sitemaps and sends `noindex` on hidden product HTML. Do not query the
+    catalogue in PHP for Google. Fast sync (dashboard **Minutes between syncs**)
+    does not rebuild sitemaps.
 
 **The plugin must not depend on the active theme.** Blocksy today; target **Kadence**. Theme-aware
 code is allowed only as a guarded, additive shim that no-ops elsewhere.

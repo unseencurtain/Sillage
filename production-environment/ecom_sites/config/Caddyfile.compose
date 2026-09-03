@@ -15,6 +15,14 @@
 			header_down -Via
 		}
 	}
+	handle /robots.txt {
+		root * /srv/sitemaps
+		file_server
+	}
+	handle /wp-sitemap* {
+		root * /srv/sitemaps
+		file_server
+	}
 	reverse_proxy ecom:80 {
 		header_down -Server
 		header_down -Via

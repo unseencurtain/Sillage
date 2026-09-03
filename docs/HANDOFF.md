@@ -138,10 +138,13 @@ SELECT id, mode, source, status, prices_updated, started_at
 
 ## Next work (priority)
 
-1. **Photos still missing** — ~12.4k shop products have EANs that are not in the 36k Brasty
-   dump (intersection was ~8.4k). Only **31** SKUs have an empty barcode. Continue Brasty
-   scrape or manual overrides. Victoria’s Secret `0197575132998` / `BF-F558351` is one of those.
-   Hide-without-image stays on. Restore/migrate photos: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
+1. **Photos still missing on the shop** — 13,358 hidden (no usable Woo thumb). We already
+   have files/URLs for 13,191 of those (CDN / overrides / unreviewed scrape / Brasty) —
+   **do not apply scrape until inspected.** Truly no bytes anywhere: **167**. Wholesale
+   export.csv has EANs only (no image URLs). Pack + one-shot download:
+   `python-analysis/photo-pack/`. Migrate: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
+   **Google listing** is Bun static sitemaps + Caddy ([`SEO.md`](SEO.md)); dashboard
+   **Minutes between syncs** is price/stock only and does not rebuild sitemaps.
 2. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
 3. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
 4. **Fill company billing** before first live BeautyFort order.

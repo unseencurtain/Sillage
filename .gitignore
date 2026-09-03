@@ -51,7 +51,9 @@ production-environment/python-analysis/beautyfort-enriched/output/image_override
 production-environment/python-analysis/beautyfort-enriched/__pycache__/
 production-environment/python-analysis/.env
 
-# Image tools — session, secrets, downloads, findings (never commit images)
+# Runtime photo pack (JPEG bytes + zip). Scripts live under python-analysis/photo-pack/
+/photo-pack/
+tmp-image-inventory/
 tools/images/brasty/node_modules/
 tools/images/brasty/dist/
 tools/images/brasty/.env

@@ -418,6 +418,20 @@ ${SHOP_DOMAIN} {
 			header_down -Via
 		}
 	}
+	# Product listing for Google: static files from Bun, not PHP.
+	# Fast price/stock sync does not rewrite these. See docs/SEO.md
+	handle /robots.txt {
+		root * /home/ubuntu/ecom_sites/data/sitemaps
+		file_server
+		header Cache-Control "public, max-age=3600"
+		header -Server
+	}
+	handle /wp-sitemap* {
+		root * /home/ubuntu/ecom_sites/data/sitemaps
+		file_server
+		header Cache-Control "public, max-age=86400"
+		header -Server
+	}
 	header {
 		-Server
 		-Via

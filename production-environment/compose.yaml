@@ -40,12 +40,15 @@ x-sillage-common: &sillage-common
     PUBLIC_URL_BASE: ${PUBLIC_URL_BASE:-}
     # Dashboard Secrets UI writes here; applied on boot + each sync (hot-reload).
     SILLAGE_SECRETS_FILE: /app/data/secrets.overlay.env
+    SITEMAP_DIR: /app/data/sitemaps
   volumes:
     - ${SILLAGE_LOGS_DIR:-./sillage-core/logs}:/app/logs
     - ${FEEDSCRATCH_DIR:-../.feedscratch}:/app/.feedscratch
     - ${IMAGE_OVERRIDES_FILE:-./sillage-core/data/image_overrides.json}:/app/data/image_overrides.json:ro
     # Must be a file (touch before first up). Writable so the Secrets API can persist keys.
     - ${SILLAGE_SECRETS_FILE:-./sillage-core/data/secrets.overlay.env}:/app/data/secrets.overlay.env
+    # Host path Caddy serves as /wp-sitemap*.xml. Inside the container always /app/data/sitemaps.
+    - ${SITEMAP_HOST_DIR:-./ecom_sites/data/sitemaps}:/app/data/sitemaps
 
 services:
   ecom-db:
@@ -154,6 +157,7 @@ services:
       - lps-media
     volumes:
       - ${GATEWAY_CADDYFILE:-./ecom_sites/config/Caddyfile.compose}:/etc/caddy/Caddyfile:ro
+      - ${SITEMAP_HOST_DIR:-./ecom_sites/data/sitemaps}:/srv/sitemaps:ro
 
 networks:
   ecom_network:
