@@ -288,10 +288,10 @@ image** is on. They still exist in WooCommerce and on **Products**. Weak BeautyF
 thumbs, BTS `no_image`, empty Woo meta, and the literal word `None` all count as “no photo”.
 The shop never shows the grey WooCommerce camera placeholder on a catalogue-visible product.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
-+ enough stock, not **Keep hidden**) are offered to Google in the sitemap. Catalogue-hidden
-products are told not to be indexed. That follows the same rewrite as **Minutes between syncs** —
-change that number on Settings and the next scheduled check uses it. There is no separate “SEO
-timer”.
++ enough stock, not **Keep hidden**) are listed in the sitemap. Catalogue-hidden products are
+told not to be indexed. The sitemap is a static file Caddy serves (PHP does not build it). It
+refreshes when the catalogue is fully rebuilt, not on every **Minutes between syncs** tick —
+that setting is only how often wholesale **price and stock** are checked.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those

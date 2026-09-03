@@ -37,6 +37,11 @@ docker exec sillage-core bun run sitemap
 Full sync in Bun calls `writeProductSitemaps()` at the end. Fast ticks do not,
 unless they created brand-new Woo posts.
 
+**Live image `sillage-core:a0f03e1` does not include that Bun writer yet.** Until the
+next Hub deploy, ovhe writes the same XML with
+`python3 ~/sillage/scripts/write-sitemaps.py` (host cron `0 19 * * *` UTC, after the
+Dhaka 23:00 full rebuild). Caddy still serves the files either way.
+
 ## Plugin (`Sillage_Seo` 1.1.2)
 
 Request-time only, cheap:
