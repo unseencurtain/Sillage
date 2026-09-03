@@ -138,13 +138,16 @@ SELECT id, mode, source, status, prices_updated, started_at
 
 ## Next work (priority)
 
-1. **Photos still missing on the shop** — 13,358 hidden (no usable Woo thumb). We already
-   have files/URLs for 13,191 of those (CDN / overrides / unreviewed scrape / Brasty) —
-   **do not apply scrape until inspected.** Truly no bytes anywhere: **167**. Wholesale
-   export.csv has EANs only (no image URLs). Pack + one-shot download:
-   `python-analysis/photo-pack/`. Migrate: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
-   **Google listing** is Bun static sitemaps + Caddy ([`SEO.md`](SEO.md)); dashboard
+1. **Photos still missing on the shop** — live recount **2026-09-03 20:39 UTC on ovhe**
+   (`~/photo-inventory/COUNTS.json`): published 54,509 · visible 25,978 · no usable Woo
+   thumb **13,360** (9,775 in stock, 3,585 OOS). CAN fill **13,191** · CANNOT **169**.
+   Overview no/weak-image in-stock card: CAN **9,621** · CANNOT **153**. Lists + zip live
+   on the VPS (`~/photo-inventory/`, `~/photo-inventory.zip`, `~/sillage-photo-pack.zip`).
+   Rebuild: `bash ~/sillage/python-analysis/photo-pack/run_on_vps.sh`. **Do not apply
+   scrape/Brasty until inspected.** Wholesale export.csv is EANs only (no URLs).
+   **Google listing** is Bun/host static sitemaps + Caddy ([`SEO.md`](SEO.md)); dashboard
    **Minutes between syncs** is price/stock only and does not rebuild sitemaps.
+   Hide-without-image and orders dry-run stay on. Product photos were **not** rewritten.
 2. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
 3. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
 4. **Fill company billing** before first live BeautyFort order.
