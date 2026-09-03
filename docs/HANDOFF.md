@@ -29,6 +29,69 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **Health / recs** | [`RECOMMENDATIONS.md`](RECOMMENDATIONS.md) |
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | **Crawler shield** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — copy the Caddy `@heavybot` 403 onto every client VPS |
+| **Google / sitemaps** | [`SEO.md`](SEO.md) — static XML, Caddy, not Minutes between syncs |
+
+---
+
+## Right now (2026-09-03 evening) — start here
+
+This is the live box `ovhe` (`ovh-experi`). Do not invent a second copy of the shop.
+
+### What customers see
+
+| Thing | State |
+|---|---|
+| Shop / dashboard / CDN | `prinscosmetic.eu` / `sillage.prinscosmetic.eu` / `images.prinscosmetic.eu` |
+| Hide products without image | **On** |
+| Orders | **Dry-run on**, auto-dispatch **off** |
+| Fast sync | Every **30** minutes (Settings → Minutes between syncs) — **price and stock only** |
+| Product photos | **Not** bulk-replaced. Catalogue still hides SKUs with no/weak Woo thumb |
+| Google sitemap | **Live.** Caddy serves `~/ecom_sites/data/sitemaps/` (no PHP). Plugin **1.1.2** turns off WP core sitemaps and `noindex`s hidden product HTML |
+
+### The “9,621 already have a file” line (easy to misread)
+
+That number is **not** “9,621 good bottle photos ready to publish.” It means: for the Overview **in-stock + no/weak image** card, a *file or URL exists somewhere on disk*. Breakdown from the live lists (`~/photo-inventory/`):
+
+| What | Count | Quality | On the shop? |
+|---|---|---|---|
+| **EAN scrape** (`~/sillage/ean-image-scrape/scraped/`) | **9,594** | Unreviewed Bing / Open Facts hits. **~1,943 files are under 8 KB** (icons / empty / generic likely). Applied once before and **reverted**. Treat as junk until inspected | **No** |
+| **Brasty real shots** (not the grey camera graphic) | **~31** | Real product photos by EAN filename; camera placeholders skipped | **Yes — copied to CDN and rewritten 2026-09-03** (shop visible **26,005**, hidden-no-image **9,747**) |
+| **Nothing anywhere** | **~153** | No CDN, override, scrape, or real Brasty file | Hidden |
+
+**The directory that is allowed to serve shop photos** is `~/ecom_sites/data/media/` (`https://images.prinscosmetic.eu/<file>`). Shopify / BTS / ocean URLs in `image_overrides.json` are hotlinks; they do not need a file on disk.
+
+Do **not** attach the 9,594 scrape files until a human has looked at them. Generic marks / logos / camera icons are not shop photos.
+
+### SEO vs Docker Hub
+
+Static sitemap **is already on the website** (Caddy + files on disk + nightly host cron `0 19 * * *` UTC → `write-sitemaps.py`).
+
+The **running** Hub image is still `unseencurtain/sillage-core:a0f03e1` (3 days old). It does **not** contain the Bun `writeProductSitemaps` code. Until someone with `docker login` runs `production-environment/scripts/build-push-images.sh` and the VPS pulls that tag, Bun will not rewrite sitemaps; Python cron will. Plugin 1.1.2 **is** already in the live `ecom` container.
+
+Minutes between syncs does **not** rebuild the sitemap.
+
+### Deleted on ovhe (do not restore)
+
+- `~/ovhe-backup/` (Aug 23 zip)
+- `~/sillage/backups/` (Aug 7 pre-scratch SQL)
+- Unused Docker tags (`sillage-core` SHAs other than `a0f03e1`, leftover `cailiin/sillage-core`)
+- Docker build cache, unused Zed (~430 MB)
+- Agent `/tmp` dumps
+- **`~/brasty/`** — 3.7 GB dump. Only ~31 EANs matched missing shop photos; those JPEGs now live in `~/ecom_sites/data/media/`. The rest did not match the hidden-no-image catalogue
+- Duplicate zips: `sillage-photo-pack.zip`, `photo-inventory.zip`, `ean-image-scrape/scraped-ean-images.zip` (folders kept where needed)
+
+### Keep (source of truth)
+
+| Keep | Why |
+|---|---|
+| `~/sillage/` + `~/sillage/.env` | Running app |
+| `~/ecom_sites/data/{wp,wp-db,media,sitemaps}` | Shop, DB, **CDN photos**, Google XML |
+| `~/sillage/sillage-core/data/image_overrides.json` | EAN → URL |
+| `~/sillage/ean-image-scrape/scraped/` | Unreviewed scrape (not shop) until inspected or deleted on purpose |
+| `~/photo-inventory/` | Live CAN/CANNOT CSVs from 2026-09-03 |
+| `~/caddy/Caddyfile` | Symlink to `/etc/caddy/Caddyfile` |
+
+Rebuild lists: `bash ~/sillage/python-analysis/photo-pack/run_on_vps.sh`
 
 ---
 
@@ -121,16 +184,14 @@ SELECT id, mode, source, status, prices_updated, started_at
   only; storefront labels LPS01/LPS02 live in `sil_vendors.storefront_label`.
 - **B2B is a separate project** — own compose / own repo when ready; not bolted onto this shop.
 - **`orders_dry_run` stays `1`** unless you intentionally dispatch live vendor orders (no sandbox).
-- **Images:** host volume `~/ecom_sites/data/media` → `lps-media`; public CDN
-  `images.prinscosmetic.eu`. **Git has the EAN map, not the JPEGs** (~380 MB). New VPS:
-  [`VPS-MIGRATE.md`](VPS-MIGRATE.md) + `restore_found_images.py`. Brasty dump on the VPS at
-  `/home/ubuntu/brasty/` (every filename is digits + `.jpg` = EAN). Matcher:
-  `python-analysis/beautyfort-enriched/fill_missing_shop_images.py`. Canonical map:
-  `sillage-core/data/image_overrides.json` (bind-mounted; recreate core/cron after edits).
-  Playwright crawl `tools/images/brasty/` is for EANs not in that dump.
-  **Skip Brasty camera placeholders** (grey camera + BRASTY watermark — not a product photo;
-  MD5s in `python-analysis/beautyfort-enriched/brasty_placeholders.py`). After a merge:
-  **`--mode=full --source=cache --rewrite-only`** (fast rewrite ignores `needs_content_write`).
+- **Images:** the only directory the shop CDN serves is `~/ecom_sites/data/media/`
+  (`https://images.prinscosmetic.eu/<file>`). Git tracks `image_overrides.json` (EAN → URL),
+  not JPEG bytes. The old `~/brasty/` dump was removed 2026-09-03 after copying the ~31
+  missing-SKU hits into media. Remaining hidden-no-image SKUs are almost all the unreviewed
+  EAN scrape (`~/sillage/ean-image-scrape/scraped/`) — **not** shop photos until inspected.
+  Skip Brasty camera-placeholder MD5s in `brasty_placeholders.py`. After override edits:
+  recreate `sillage-core` / `sillage-cron`, then
+  `--mode=full --source=cache --rewrite-only`.
 - **Theme target: Kadence.** Bridge must stay theme-agnostic; Blocksy-specific shims are legacy,
   not the long-term model. Lots of shop UI belongs in **sillage-bridge**, not the theme.
 
@@ -138,16 +199,10 @@ SELECT id, mode, source, status, prices_updated, started_at
 
 ## Next work (priority)
 
-1. **Photos still missing on the shop** — live recount **2026-09-03 20:39 UTC on ovhe**
-   (`~/photo-inventory/COUNTS.json`): published 54,509 · visible 25,978 · no usable Woo
-   thumb **13,360** (9,775 in stock, 3,585 OOS). CAN fill **13,191** · CANNOT **169**.
-   Overview no/weak-image in-stock card: CAN **9,621** · CANNOT **153**. Lists + zip live
-   on the VPS (`~/photo-inventory/`, `~/photo-inventory.zip`, `~/sillage-photo-pack.zip`).
-   Rebuild: `bash ~/sillage/python-analysis/photo-pack/run_on_vps.sh`. **Do not apply
-   scrape/Brasty until inspected.** Wholesale export.csv is EANs only (no URLs).
-   **Google listing** is Bun/host static sitemaps + Caddy ([`SEO.md`](SEO.md)); dashboard
-   **Minutes between syncs** is price/stock only and does not rebuild sitemaps.
-   Hide-without-image and orders dry-run stay on. Product photos were **not** rewritten.
+1. **Photos still missing on the shop** — in-stock no/weak image ≈ **9,775**. Almost all
+   “we have a file” rows are **unreviewed EAN scrape**, not proven product shots. Do not
+   apply `scraped/` until inspected. ~153 have nothing. Details in **Right now** above.
+   Google listing: [`SEO.md`](SEO.md). Hide-without-image and orders dry-run stay on.
 2. **Polish retail UI for Kadence** — replace Blocksy-specific assumptions; guarded theme shims only.
 3. **More shop UI through sillage-bridge** — filters, catalog helpers, cart/checkout polish.
 4. **Fill company billing** before first live BeautyFort order.

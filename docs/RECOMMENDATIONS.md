@@ -6,7 +6,8 @@ Checked on live `ovhe` (`sillage-core:e706d10` at audit time) plus the BTS v2.1 
 
 - Shop, dashboard, CDN containers up. Hide-without-image **on**. Daily full rebuild **on**
   (23:00 `Asia/Dhaka`). Fast live sync succeeding (BTS Δ / BF full pages).
-- Image overrides bind-mounted (~10,936 keys). Brasty camera placeholders purged from CDN.
+- Image overrides bind-mounted. Shop CDN is `~/ecom_sites/data/media/` only. Brasty dump
+  removed 2026-09-03. Unreviewed EAN scrape is **not** on the shop.
 - Orders dry-run **on**, auto-dispatch **off**. Cron still polls live rows every 15 minutes.
 - BTS catalogue JWT v2.1 is correct; empty product lists as HTTP 404 `no products found`
   are treated as empty.

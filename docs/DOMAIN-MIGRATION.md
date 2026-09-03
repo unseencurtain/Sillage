@@ -264,7 +264,7 @@ grep SILLAGE_DASHBOARD ~/ecom_sites/data/wp/wp-config.php
 - Do not search-replace the whole MariaDB dump. You will break serialized PHP.
 - Do not change `SILLAGE_CORE_URL` to a public HTTPS URL.
 - Do not turn **Hide products without image** off to “fix” broken CDN URLs.
-- Do not delete `~/ecom_sites/data/` or `~/brasty/` — those are the shop and the photo dump.
+- Do not delete `~/ecom_sites/data/` — WordPress, MariaDB, CDN media, sitemaps.
 
 Folder layout after a tidy VPS: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md).  
 Moving the whole server (not just the name): [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
