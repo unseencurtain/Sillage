@@ -286,6 +286,8 @@ These rules are on purpose. They match how dropship dispatch works.
 image** is on. They still exist in WooCommerce and on **Products**. Weak BeautyFort `/pic/`
 thumbs, BTS `no_image`, empty Woo meta, and the literal word `None` all count as “no photo”.
 The shop never shows the grey WooCommerce camera placeholder on a catalogue-visible product.
+Google is allowed to crawl the shop; catalogue-hidden products are told not to be indexed so
+thin “no photo” pages do not compete with real listings.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those
