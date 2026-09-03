@@ -66,7 +66,7 @@ Do **not** attach the 9,594 scrape files until a human has looked at them. Gener
 
 Static sitemap **is already on the website** (Caddy + files on disk + nightly host cron `0 19 * * *` UTC → `write-sitemaps.py`).
 
-The **running** Hub image is still `unseencurtain/sillage-core:a0f03e1` (3 days old). It does **not** contain the Bun `writeProductSitemaps` code. Until someone with `docker login` runs `production-environment/scripts/build-push-images.sh` and the VPS pulls that tag, Bun will not rewrite sitemaps; Python cron will. Plugin 1.1.2 **is** already in the live `ecom` container.
+Running Hub image is **`unseencurtain/sillage-core:2269d11`** (pushed 2026-09-03 from ovhe). It includes the Bun sitemap writer; host cron `write-sitemaps.py` remains as backup. Plugin 1.1.2 is in the live `ecom` container.
 
 Minutes between syncs does **not** rebuild the sitemap.
 
