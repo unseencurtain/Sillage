@@ -131,7 +131,7 @@ invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignor
 
 **Schedule:** cron every 5 minutes; when Sync enabled is on, a due tick runs fast price/stock
 (or a queued rebuild). **Daily full catalogue rebuild** is a first-class Settings control (keep
-on for this shop). Incremental 30-minute checks still run. BTS 25%/7-day stale recovery stays
+on for this shop). Incremental checks still run at **Minutes between syncs**. BTS 25%/7-day stale recovery stays
 emergency-only. Order housekeeping runs every tick.
 
 `--vendor=all` never includes parked wholesale-perfumes.
@@ -206,12 +206,12 @@ Not editable here: `slug`, `sku_prefix`, `currency`. API credentials → **Secre
 
 ### How often each vendor updates
 
-The **Minutes between syncs** field stays on Settings (one number; BeautyFort and BTS cool down independently). It is a **check interval**, not “30 minutes a day”.
+The **Minutes between syncs** field stays on Settings (one number; BeautyFort and BTS cool down independently). It is a **check interval** — the value you type (30, 40, …), not a hardcoded 30 and not “30 minutes a day”.
 
 | Vendor | Prices and stock on the shop | Full catalogue rebuild |
 |---|---|---|
-| BeautyFort | Every check (~30 min). They have no change-only feed, so each call re-downloads the ~9k stock file | Settings → Daily full catalogue rebuild (routine). Manual: Sync → Rebuild catalogue |
-| BTS | **About once a day.** We still check every 30 min; BTS only publishes a daily change batch, so most checks are empty until that batch appears | Same daily rebuild (creates WP categories for referenced BTS nodes). Emergency: auto-recovery if >25% of BTS offers unseen for 7 days — not the normal path |
+| BeautyFort | Every check at that interval. They have no change-only feed, so each call re-downloads the ~9k stock file | Settings → Daily full catalogue rebuild (routine). Manual: Sync → Rebuild catalogue |
+| BTS | **About once a day.** We still check on that interval; BTS only publishes a daily change batch, so most checks are empty until that batch appears | Same daily rebuild (creates WP categories for referenced BTS nodes). Emergency: auto-recovery if >25% of BTS offers unseen for 7 days — not the normal path |
 
 The 48-hour lookback on BTS change checks is an implementation detail (so yesterday’s batch is not missed). It is **not** “BTS updates every 48 hours”. Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
 

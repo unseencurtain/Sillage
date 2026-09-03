@@ -1,6 +1,51 @@
 # SEO / Googlebot — retail shop
 
-How Google sees `prinscosmetic.eu`, what we block on purpose, and the sitemap bug we patch.
+**Who owns listing:** Bun writes static XML. **Caddy serves the files.** PHP does not
+build sitemaps.
+
+**Minutes between syncs** (Sillage dashboard — 30, 40, whatever you set) is for
+**wholesale price and stock**. Google does not need that. Fast sync does **not**
+rebuild the sitemap and does **not** tell Google that prices changed.
+
+Nightly **Daily full catalogue rebuild** (and a full content rewrite) refreshes the
+static sitemap: which products exist and are shop-visible. That is a few seconds of
+SQL + disk in Bun, then Caddy. Apache workers stay idle.
+
+Google still hits PHP only when it opens a product **page** (`/product/slug/`). That
+is a normal page view. We do not put price/stock JSON-LD on those pages on purpose.
+
+## Files Caddy serves (no PHP)
+
+Host dir: `~/ecom_sites/data/sitemaps/`
+
+| URL | File |
+|---|---|
+| `/robots.txt` | `robots.txt` (points at the index) |
+| `/wp-sitemap.xml` | index of product sitemap pages |
+| `/wp-sitemap-posts-product-N.xml` | 2000 shop-visible product URLs each |
+
+Rebuild:
+
+```bash
+# on VPS, without waiting for a Hub image (same SQL as Bun)
+python3 production-environment/scripts/write-sitemaps.py
+
+# after sillage-core image includes the writer:
+docker exec sillage-core bun run sitemap
+```
+
+Full sync in Bun calls `writeProductSitemaps()` at the end. Fast ticks do not,
+unless they created brand-new Woo posts.
+
+## Plugin (`Sillage_Seo` 1.1.2)
+
+Request-time only, cheap:
+
+- **Disable WordPress core sitemaps** so PHP never runs a 54k-row sitemap query.
+- **`noindex,nofollow`** on a catalogue-hidden product HTML page if Google still
+  opens that URL.
+
+Do not add Googlebot to the Caddy AI-crawler block ([`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md)).
 
 ## Verdict (live checks, 2026-09-03)
 
@@ -8,66 +53,18 @@ How Google sees `prinscosmetic.eu`, what we block on purpose, and the sitemap bu
 |---|---|
 | Googlebot → `/` and `/product/…` | **HTTP 200** (not blocked) |
 | Caddy `@heavybot` vs Googlebot | **Does not match** — only ClaudeBot / GPTBot / CCBot / Bytespider / Amazonbot / meta-externalagent |
-| `robots.txt` | SEO-safe; points at `wp-sitemap.xml`; does **not** Disallow products |
-| Product `noindex` (shop-visible) | **No** — only `max-image-preview:large` |
-| Canonical on product pages | Correct absolute `https://prinscosmetic.eu/product/…/` |
-| Auth / redirects for Googlebot | None on product URLs |
-| Product JSON-LD | **Missing** (theme/Woo default may omit) — ranking quality gap, not a crawl block |
-| Full-page cache | **None** — Valkey is object cache only; Googlebot still runs full Apache/PHP/Woo (~0.9s TTFB) |
+| Product sitemap | Static files from Bun/Caddy; **not** PHP |
+| Hidden products in sitemap | **Omitted** (same `exclude-from-catalog` / `exclude-from-search` as the shop) |
+| Price / stock in sitemap | **None** |
 
-## Critical bug we fix in the bridge
-
-Core WordPress sitemap pagination ([Trac #51912](https://core.trac.wordpress.org/ticket/51912) / #65375):
-
-- Index lists `wp-sitemap-posts-product-1.xml` … `product-28.xml` (~54 509 products at 2000/page).
-- Page **1** returns **200**.
-- Pages **2–28** return **HTTP 404** with a **valid XML body**.
-- Google Search Console / Googlebot **ignore 404 sitemaps**, so only ~2000 products were reliably discoverable via sitemap.
-
-**Fix:** `Sillage_Seo` in the bridge (`pre_handle_404` + clear 404 on sitemap `template_redirect`). After deploy, every `wp-sitemap-posts-product-N.xml` must return **200**.
-
-Also:
-
-- Drop the **users** sitemap (`/author/sugar/`).
-- Send **`noindex, nofollow`** on catalogue-hidden products (`! $product->is_visible()` — no image / stock / operator pin). They stay Published for sync but should not rank.
-
-## What Google can index vs what the shop shows
-
-| State | Shop loop | Google |
-|---|---|---|
-| In stock + usable photo | Visible | Indexable |
-| Hidden · no image / stock / pinned | Hidden from `/shop` | **noindex** after bridge 1.1.0 |
-| Direct `/product/slug/` URL | Still HTTP 200 | Crawlable; hidden ones noindex |
-
-Hide-without-image stays **on**. Do not unhide the catalogue to “help SEO”.
-
-## Caddy vs Google
-
-```caddy
-@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
-```
-
-`Googlebot`, `Googlebot-Image`, and `Google-Extended` are **not** in that list. Do not add them.
-
-AI training crawlers stay 403 so the 4 GB prefork box does not melt ([`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md)).
-
-## After deploy — operator checklist
+After Caddy is serving the files (Caddy user must be able to traverse
+`~/ecom_sites/data/sitemaps` — `write-sitemaps.py` sets the execute bit on parent dirs):
 
 ```bash
-# must be 200 (was 404)
+curl -sI https://prinscosmetic.eu/wp-sitemap.xml | head -5
 curl -sI -A 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' \
   https://prinscosmetic.eu/wp-sitemap-posts-product-2.xml | head -5
-
-# still 200
-curl -sI -A 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' \
-  https://prinscosmetic.eu/product/SOME-VISIBLE-SLUG/ | head -5
-
-# ClaudeBot still blocked
-curl -sI -A 'Mozilla/5.0 (compatible; ClaudeBot/1.0)' https://prinscosmetic.eu/ | head -5
 ```
 
 In Google Search Console: resubmit `https://prinscosmetic.eu/wp-sitemap.xml`.
 
-## Deploy note
-
-Bridge files are rsynced by `deploy-vps.sh` into `wp-content/plugins/sillage-bridge/`. No Hub image rebuild required for this PHP-only change — copy the plugin onto the VPS and flush caches if needed (`docker exec ecom` object-cache / reopen sitemap URL).

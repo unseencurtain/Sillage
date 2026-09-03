@@ -18,6 +18,7 @@ import {
 } from "./diff.ts";
 import { resolveDeltaSince } from "./deltaSince.ts";
 import { finalizeWordPress } from "./finalize.ts";
+import { writeProductSitemaps } from "./sitemaps.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
@@ -283,6 +284,11 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
           await recountTerms(["product_cat", BRAND_TAXONOMY]);
         }
         await finalizeWordPress();
+        if (options.mode === "full") {
+          await writeProductSitemaps().catch((err) => {
+            log.warn(`static sitemap write failed (shop data is still correct): ${String(err)}`);
+          });
+        }
       }
       summary.durationMs = Date.now() - startedAt;
       await finishRun(runId, startedAt, summary);
@@ -430,6 +436,9 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         await recountTerms(["product_cat", BRAND_TAXONOMY, ...Object.values(ATTRIBUTE_TAXONOMIES)]);
         await rebuildCategoryLookup();
         await finalizeWordPress();
+        await writeProductSitemaps().catch((err) => {
+          log.warn(`static sitemap write failed (shop data is still correct): ${String(err)}`);
+        });
       }
     } else if (!options.dryRun) {
       // BTS delta used to set offer.status='pending' and return without ever
@@ -472,6 +481,13 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       // Stock changes move products in and out of the catalogue, so counts shift.
       await recountTerms(["product_cat", BRAND_TAXONOMY]);
       await finalizeWordPress();
+      // New Woo posts from this fast tick should be listed. Price/stock-only
+      // changes must not rebuild the sitemap (that would recrawl PHP).
+      if (summary.postsCreated > 0) {
+        await writeProductSitemaps().catch((err) => {
+          log.warn(`static sitemap write failed (shop data is still correct): ${String(err)}`);
+        });
+      }
     }
 
     summary.durationMs = Date.now() - startedAt;

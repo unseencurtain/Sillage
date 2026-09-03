@@ -11,12 +11,13 @@ only the one deep doc you need. Do not wander the tree.
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | **AI crawler / ecom 150% CPU** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — Caddy `@heavybot` 403, copy onto every client VPS |
-| **Google / sitemaps / SEO** | [`SEO.md`](SEO.md) — Googlebot allowed; fix product sitemap 404s |
+| **Google / sitemaps / SEO** | [`SEO.md`](SEO.md) — Bun writes static sitemaps; Caddy serves them; PHP does not |
 | Move shop + photos to a **new** VPS | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) |
 | Change shop / dash / image hosts | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) |
 | What lives where (repo + VPS) | [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | Photos, Brasty, overrides | [`specs/S3-images.md`](specs/S3-images.md) |
 | Missing photos by **EAN** | [`EAN-IMAGE-SCRAPE.md`](EAN-IMAGE-SCRAPE.md) |
+| Photo pack (zip + one-shot download server) | [`../production-environment/python-analysis/photo-pack/README.md`](../production-environment/python-analysis/photo-pack/README.md) |
 | BTS v2.1 orders + tracking | [`BTS-ORDERS.md`](BTS-ORDERS.md) |
 | Hard rules (no PHP product SQL, dry-run) | [`../AGENTS.md`](../AGENTS.md) |
 
@@ -43,8 +44,9 @@ Brasty = photo dump only (filename stem = EAN). Not vendors.
 - Hide-without-image stays **on**. Do not unhide the shop because one SKU lacks a photo.
 - Orders stay **dry-run** (`orders_dry_run=1`) and **manual dispatch** unless someone is
   intentionally spending money. Neither vendor has a sandbox.
-- BTS 30-minute incremental stays. Daily full catalogue rebuild stays on (hour 23,
-  `Asia/Dhaka`). The 25%/7-day BTS stale recovery is emergency only.
+- BTS incremental stays at whatever **Minutes between syncs** is on the dashboard
+  (`fast_sync_minutes`). Daily full catalogue rebuild stays on (hour 23, `Asia/Dhaka`).
+  The 25%/7-day BTS stale recovery is emergency only.
 - Never commit `.env`, `secrets.overlay.env`, `*.pem`, WordPress/MariaDB datadirs, or the
   Brasty JPEG dump.
 

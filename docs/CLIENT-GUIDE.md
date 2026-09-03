@@ -113,18 +113,19 @@ Think of a loop, not a one-off import.
 1. **Secrets** hold the BeautyFort and BTS API keys (set once; you never see the values again).
 2. **Rebuild catalogue** (on **Sync**) creates and structures products the first time, and later
    when you need new products and categories in WordPress.
-3. **Sync enabled** (on **Settings**) leaves the shop on a schedule: about every **30 minutes** it
-   **checks** the wholesalers for price and stock.
+3. **Sync enabled** (on **Settings**) leaves the shop on a schedule. **Minutes between syncs**
+   (same Settings page) is the interval — 30, 40, or whatever you set. That is how often it
+   **checks** the wholesalers for price and stock. It is not a fixed 30 minutes in the code.
 4. **Daily full catalogue rebuild** (on **Settings**, keep this **on**) does a deeper refresh once
    per day (new products, WordPress categories). The hour is in **Operator timezone** (this shop
    uses Asia/Dhaka unless you change it).
 
 How often prices really move on the shop:
 
-- **BeautyFort** — every successful check (~30 minutes). They do not offer a “only what changed”
-  feed, so each check downloads their stock file.
-- **BTS** — **about once a day** on the shop. We still *check* every 30 minutes. Empty checks are
-  normal until BTS publishes their daily change batch. That is their feed, not a hidden cap.
+- **BeautyFort** — every successful check (your **Minutes between syncs**). They do not offer a
+  “only what changed” feed, so each check downloads their stock file.
+- **BTS** — **about once a day** on the shop. We still *check* on that same interval. Empty checks
+  are normal until BTS publishes their daily change batch. That is their feed, not a hidden cap.
 
 **Stop** on the Sync page aborts a run that is in progress and turns **Sync enabled** **off**.
 Turning it back on is a Settings change. Pressing **Update prices & stock** does **not** by itself
@@ -268,8 +269,8 @@ order dry-run is off.
 | **Order safety** | Dry-run, auto-dispatch, max order value, daily spend cap, tracking poll minutes, customer email on tracking |
 | **Advanced** | Volume filter (ranges vs exact ml), description mode, **company billing** (fill BeautyFort **before** the first live BeautyFort order; BTS invoices from their portal) |
 
-**Minutes between syncs** is “how often we are allowed to call”, for example every 30 minutes —
-not a budget of 30 minutes per day.
+**Minutes between syncs** is “how often we are allowed to call” — the number you type on Settings
+(30, 40, …). It is not a budget of minutes per day, and it is not hardcoded.
 
 ### Logs
 
@@ -286,8 +287,11 @@ These rules are on purpose. They match how dropship dispatch works.
 image** is on. They still exist in WooCommerce and on **Products**. Weak BeautyFort `/pic/`
 thumbs, BTS `no_image`, empty Woo meta, and the literal word `None` all count as “no photo”.
 The shop never shows the grey WooCommerce camera placeholder on a catalogue-visible product.
-Google is allowed to crawl the shop; catalogue-hidden products are told not to be indexed so
-thin “no photo” pages do not compete with real listings.
+Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
++ enough stock, not **Keep hidden**) are offered to Google in the sitemap. Catalogue-hidden
+products are told not to be indexed. That follows the same rewrite as **Minutes between syncs** —
+change that number on Settings and the next scheduled check uses it. There is no separate “SEO
+timer”.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those
@@ -326,7 +330,7 @@ the product in WooCommerce.
 
 **I want to pause catalogue updates**  
 Settings → turn **Sync enabled** off, or **Stop** while a run is active. Turn **Sync enabled**
-back on when you want the 30-minute checks again.
+back on when you want the scheduled checks again (interval = **Minutes between syncs**).
 
 **I want to test dispatch without spending**  
 Leave dry-run **on**, auto-dispatch **off**. Orders → **Dry-run**. Read the result. Do not press
@@ -358,7 +362,7 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 |---|---|
 | Shop prices did not change after markup Save | Wait for the rewrite toast / Sync run. If a sync was already running, the rewrite is queued |
 | Sync button says **Scheduled (30m)** and will not click | That is correct while Sync enabled is on |
-| BTS fetched 0 and the run is still success | Normal on most 30-minute checks |
+| BTS fetched 0 and the run is still success | Normal on most interval checks (BTS daily batch) |
 | Overview **Visible in shop** is much smaller than **Published in WP** | Hidden no-image + stock hide. Expected |
 | Red **Orders dry-run is OFF** banner | Turn dry-run back on unless you are deliberately live |
 | Dashboard will not load | Tell whoever runs the server; this guide cannot fix hosting |
