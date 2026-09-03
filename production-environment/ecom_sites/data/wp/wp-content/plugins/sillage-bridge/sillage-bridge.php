@@ -3,7 +3,7 @@
  * Plugin Name:       Sillage Bridge
  * Plugin URI:        https://github.com/sillage/sillage
  * Description:       Thin bridge between WooCommerce and the sillage-core sync engine. Renders vendor-hosted product images, resolves EAN searches, invalidates caches after a bulk import, and relays orders and tracking. All configuration lives in the sillage-core dashboard.
- * Version:           1.0.2
+ * Version:           1.1.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            Sillage
@@ -30,7 +30,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'SILLAGE_BRIDGE_VERSION', '1.0.9' );
+define( 'SILLAGE_BRIDGE_VERSION', '1.1.0' );
 define( 'SILLAGE_BRIDGE_FILE', __FILE__ );
 define( 'SILLAGE_BRIDGE_PATH', plugin_dir_path( __FILE__ ) );
 define( 'SILLAGE_BRIDGE_URL', plugin_dir_url( __FILE__ ) );
@@ -43,6 +43,7 @@ if ( ! defined( 'SILLAGE_DB' ) ) {
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-settings.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-images.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-catalog.php';
+require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-seo.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-search.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-rest.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-orders.php';
@@ -89,6 +90,7 @@ add_action(
 
 		( new Sillage_Images() )->register();
 		( new Sillage_Catalog() )->register();
+		( new Sillage_Seo() )->register();
 		( new Sillage_Search() )->register();
 		( new Sillage_Rest() )->register();
 		( new Sillage_Orders() )->register();
