@@ -10,6 +10,7 @@
 #       [--shop …] [--dash …] [--images …] \
 #       [--dash-user europa] [--wp-user cherry] \
 #       [--media-from ovhe] [--skip-dns-check] \
+#       --finish   # after the operator has activated plugins and customised
 #       [--dns] [--ip 139.99.61.71] \
 #       [--skip-build] [--fresh] [--core-only] [--keep-caddy] [--replace-caddy]
 #
@@ -50,6 +51,7 @@ WP_USER=""
 WP_ADMIN_USER=""
 SKIP_DNS_CHECK=0
 MEDIA_FROM=""
+FINISH=0
 
 usage() {
   sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
@@ -79,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     --wp-user) WP_USER="${2:?}"; check_operator --wp-user "$WP_USER"; shift 2 ;;
     --dns) DO_DNS=1; shift ;;
     --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
+    --finish) FINISH=1; shift ;;
     --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -119,6 +122,14 @@ SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
 SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
 RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
 REMOTE_DIR=sillage
+
+# Fail on the tool, not on a bare "command not found" 200 lines in.
+for _tool in ssh rsync; do
+  command -v "$_tool" >/dev/null || {
+    echo "$_tool is not installed — this script copies the stack to the VPS with it" >&2
+    exit 1
+  }
+done
 CHRONO="$ROOT/.deploy/deploy-CHRONOLOGY.md"
 mkdir -p "$ROOT/.deploy"
 CREDS="$ROOT/.deploy/vps-dashboard-${HOST}.txt"
@@ -176,6 +187,16 @@ pick_domain() {
 SHOP_DOMAIN="$(pick_domain "$CLI_SHOP" "$_R_SHOP" "$LOCAL_SHOP" "$DEFAULT_SHOP_DOMAIN")"
 DASH_DOMAIN="$(pick_domain "$CLI_DASH" "$_R_DASH" "$LOCAL_DASH" "$DEFAULT_DASH_DOMAIN")"
 IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
+
+if [[ "$FINISH" -eq 1 ]]; then
+  # Stage after the operator activates plugins and customises the shop: verify and repair the
+  # settings the engine and orders depend on, then report. Activation is never changed here.
+  echo "==> readiness check on ${HOST} (${SHOP_DOMAIN})"
+  "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/scripts"
+  "${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
+  "${SSH[@]}" "$HOST" "docker cp ~/${REMOTE_DIR}/scripts/wp-readiness.php ecom:/tmp/wp-readiness.php >/dev/null && docker exec -e SHOP_DOMAIN='${SHOP_DOMAIN}' -e WP_READINESS_FIX=1 ecom php /tmp/wp-readiness.php"
+  exit $?
+fi
 
 log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS} keep_caddy=${KEEP_CADDY:-auto}"
 
@@ -317,6 +338,7 @@ fi
 "${RSYNC[@]}" "$PE/scripts/fix-wp-content-perms.sh" "$HOST:~/${REMOTE_DIR}/scripts/fix-wp-content-perms.sh"
 "${RSYNC[@]}" "$PE/scripts/wp-fresh-install.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-fresh-install.php"
 "${RSYNC[@]}" "$PE/scripts/wp-config-patch.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-config-patch.php"
+"${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
 if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"

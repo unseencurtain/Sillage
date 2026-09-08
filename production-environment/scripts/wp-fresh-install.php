@@ -1,9 +1,16 @@
 <?php
 /**
- * First boot inside the WordPress image. Plugins and Blocksy are already in the image.
+ * First boot inside the WordPress image. Plugin and theme files are already in place.
  *
- * Installs the site if needed, activates WooCommerce + redis-cache + sillage-bridge
- * + Blocksy companion, turns on HPOS, EUR, pretty permalinks, Coming soon off.
+ * Installs the site, writes the shop settings that the architecture depends on (HPOS, EUR,
+ * pretty permalinks, Coming soon off), and leaves every plugin and the theme *inactive*.
+ *
+ * Activation is the operator's: they upload the paid Blocksy companion, activate what they
+ * want and customise the shop before any products exist. Set WP_ACTIVATE_PLUGINS=1 for an
+ * unattended install that should come up ready to serve.
+ *
+ * After the operator has activated and customised, `wp-readiness.php` verifies — and with
+ * WP_READINESS_FIX=1 repairs — the settings the engine and orders rely on.
  *
  * WP_ADMIN_USER must be set and must not be "admin".
  */
@@ -50,14 +57,16 @@ update_option('permalink_structure', '/%postname%/');
 update_option('woocommerce_coming_soon', 'no');
 update_option('woocommerce_onboarding_profile', array('skipped' => true));
 
-// Blocksy's companion ships as either the free or the pro directory depending on the
-// image; activate whichever one is present rather than guessing one name.
-foreach (array(
+// Blocksy's companion ships as either the free or the pro directory depending on the image, so
+// report whichever is present rather than guessing one name.
+$plugins = array(
     array('woocommerce/woocommerce.php'),
     array('redis-cache/redis-cache.php'),
     array('sillage-bridge/sillage-bridge.php'),
     array('blocksy-companion-pro/blocksy-companion.php', 'blocksy-companion/blocksy-companion.php'),
-) as $candidates) {
+);
+$activate = getenv('WP_ACTIVATE_PLUGINS') === '1';
+foreach ($plugins as $candidates) {
     $found = null;
     foreach ($candidates as $p) {
         if (file_exists(WP_PLUGIN_DIR . '/' . $p)) {
@@ -69,17 +78,27 @@ foreach (array(
         echo implode(' | ', $candidates) . " missing\n";
         continue;
     }
+    if (!$activate) {
+        echo $found . " present, left inactive for the operator\n";
+        continue;
+    }
     $res = activate_plugin($found);
-    echo $found . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' ok') . PHP_EOL;
+    echo $found . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' activated') . PHP_EOL;
 }
 
 if (function_exists('wp_get_theme') && wp_get_theme('blocksy')->exists()) {
-    switch_theme('blocksy');
-    echo "theme=blocksy\n";
+    if ($activate) {
+        switch_theme('blocksy');
+        echo "theme=blocksy activated\n";
+    } else {
+        echo "theme=blocksy present, left for the operator to activate\n";
+    }
 }
 
-// Leave the front page on "latest posts" and WordPress guesses a permalink for "/",
-// which on a synced shop lands the homepage on whichever product owns that post ID.
+// Leave the front page on "latest posts" and WordPress guesses a permalink for "/", which on a
+// synced shop lands the homepage on whichever product owns that post ID. The shop archive is a
+// placeholder: the operator points this at their own Home page while customising, and
+// wp-readiness.php accepts any published page.
 $shopPage = (int) get_option('woocommerce_shop_page_id');
 if ($shopPage > 0) {
     update_option('show_on_front', 'page');
