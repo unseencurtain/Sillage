@@ -118,7 +118,18 @@ live in Sillage. Cart/order API notes remain under `docs/` here for history.
 Retail LPS ([unseencurtain/Sillage](https://github.com/unseencurtain/Sillage))
 still sells BeautyFort + BTS only.
 EOF
-  git -C "$B2B_WORKDIR" add README.md
+  cat > "$B2B_WORKDIR/sillage-vendor/README.md" <<'EOF'
+# Archive extract — do not deploy
+
+This folder is a snapshot of the wholesale-perfumes connector from August 2026.
+Live code is in [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage):
+
+`production-environment/sillage-core/src/vendors/wholesale-perfumes/`
+
+Shop: https://wholesale.mirainikki.xyz (`SILLAGE_PROFILE=wholesale`).
+Do not wire this extract into a new stack.
+EOF
+  git -C "$B2B_WORKDIR" add README.md sillage-vendor/README.md
   if git -C "$B2B_WORKDIR" diff --cached --quiet; then
     echo "    sillage-b2b README already current"
     return 0

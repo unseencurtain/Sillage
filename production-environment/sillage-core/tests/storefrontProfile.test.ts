@@ -126,4 +126,11 @@ describe("storefront profile", () => {
     expect(htaccess).toContain("RewriteEngine On");
     expect(htaccess).toContain("RewriteRule . /index.php [L]");
   });
+
+  test("sitemap CLI imports from src/cli via ../config, not a bogus ../src path", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/cli/sitemap.ts"), "utf8");
+    expect(src).toContain('from "../config/secrets.ts"');
+    expect(src).toContain('from "../sync/sitemaps.ts"');
+    expect(src).not.toContain('from "../src/');
+  });
 });

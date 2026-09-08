@@ -38,7 +38,8 @@ export function displayedShopImage(
     const fallback = resolved?.trim() ?? "";
     return isUnusableImage(fallback) ? null : fallback;
   }
-  return isUnusableImage(wooThumb) ? null : wooThumb.trim();
+  if (wooThumb === null || isUnusableImage(wooThumb)) return null;
+  return wooThumb.trim();
 }
 
 /** True when Woo meta and the URL we would write are not the same shop photo. */
@@ -122,10 +123,11 @@ function offerEans(primary: string | null | undefined, rawEans: unknown): string
   if (primary) out.push(primary);
   let extra: unknown = rawEans;
   if (typeof extra === "string" && extra.trim()) {
+    const raw = extra;
     try {
-      extra = JSON.parse(extra);
+      extra = JSON.parse(raw);
     } catch {
-      extra = extra.split(/[\s,;]+/);
+      extra = raw.split(/[\s,;]+/);
     }
   }
   if (Array.isArray(extra)) {

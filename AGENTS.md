@@ -39,7 +39,7 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |
 | `docs/` | Client how-to [`CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md); engineers start at `CONTEXT.md` |
-| `b2b-wholesale/` | Thin pointer → [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |
+| `b2b-wholesale/` | Pointer to live wholesale in this repo ([`docs/WHOLESALE-SITE.md`](docs/WHOLESALE-SITE.md)). Old extract: [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (archive, do not deploy) |
 | `tools/images/` | Offline image tools (Brasty Playwright scrape, etc.) |
 
 ## Hard rules
