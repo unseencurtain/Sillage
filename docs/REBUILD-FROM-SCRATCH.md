@@ -529,3 +529,32 @@ it, mounted it, and pointed Caddy at it.
 
 *Guard:* both keys derive from the stack directory, and are corrected on update so an existing
 box moves with a deploy instead of needing a hand.
+
+### The dashboard re-derived a rule instead of reading the answer
+
+Retail's Overview said 675 products were hidden for a missing photo. The real figure was 12,003.
+Of 25,372 hidden products, 9,129 belonged to no reason at all, and the page showed that shortfall
+without comment because nothing added the reasons up.
+
+The hide-reason query tested `sil_offers.image_url = ''`. But an image_url is not a photo. The
+writer runs `isUnusableImage` over it — rejecting placeholders, non-http values and BeautyFort's
+tiny `/pic/` thumbs — and resolves through overrides and other vendors' offers before deciding.
+Re-stating that rule as one SQL predicate could only ever be an approximation, and this one was
+off by a factor of eighteen. The owner spotted it from the outside: the shop looked short of
+photos in a way the dashboard did not admit to.
+
+The fix is not a better predicate. `_external_thumbnail_url` is the writer's verdict already
+recorded — a usable URL or empty, nothing else — so the dashboard reads it instead of recomputing
+it. Verified across 51,201 live products: no placeholder, `/pic/` thumb or non-http value survives
+in that meta. `scripts/export-missing-images.py` selects on the same column, which is why its row
+count and the `hiddenNoImage` a sync reports are the same number rather than two estimates.
+
+*Guard:* the tile now prints `N unattributed — please report this` whenever the reasons fall short
+of the total. That line is the whole point of the fix. A wrong count is invisible; a count that
+fails to add up is not, and this bug survived a full rebuild only because nothing on the page
+contradicted it.
+
+While chasing it, the drop in BeautyFort's product count that prompted the question turned out to
+be real and not ours: the vendor's feed shrank. New-shop image coverage is marginally better than
+the old box's. Worth stating, because "the dashboard was lying" and "we are losing products" were
+the same report and only one of them was true.

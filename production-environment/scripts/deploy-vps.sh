@@ -390,6 +390,7 @@ fi
 # The deploy installs a cron that runs this and then runs it once itself, but never copied it, so
 # the log was three lines of "No such file or directory" and the sitemap directory stayed empty.
 "${RSYNC[@]}" "$PE/scripts/write-sitemaps.py" "$HOST:~/${REMOTE_DIR}/scripts/write-sitemaps.py"
+"${RSYNC[@]}" "$PE/scripts/export-missing-images.py" "$HOST:~/${REMOTE_DIR}/scripts/export-missing-images.py"
 if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"

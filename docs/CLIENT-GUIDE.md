@@ -159,7 +159,7 @@ Health at a glance. Numbers refresh on their own.
 | **Published in WP** | Also includes products that are published but **hidden** from the shop loop |
 | **Sillage products** | Everything Sillage tracks |
 | **Sync on / off** and **orders: dry-run / LIVE** | Snapshot of the two big switches |
-| **Catalogue visibility** | Hidden reasons are exclusive and **add up**: no/weak image, out of stock (has a photo), pinned. Visible + Hidden = Published. The Out of stock card is the WooCommerce stock term (some of those also lack a photo) |
+| **Catalogue visibility** | Hidden reasons are exclusive and **add up**: no photo, out of stock (has a photo), pinned. Visible + Hidden = Published. The Out of stock card counts every out-of-stock product, so it is larger than the out-of-stock share of Hidden; the card names how many of those also lack a photo |
 | **Update prices & stock** / **Scheduled (30m)** | Same action as on Sync. Greyed out while the schedule is on — that is intentional |
 
 This page **never** places a vendor order.
@@ -336,6 +336,14 @@ stock. **Hidden · stock** means the threshold hid it. **Hidden · pinned** mean
 **A photo on the shop is wrong or not good enough**  
 Products → search SKU → **Open photo** to inspect → Shop dropdown → **Keep hidden**. Do not delete
 the product in WooCommerce.
+
+**I want the full list of products that need a photo**  
+Ask your engineer for the missing-photo export. It is a spreadsheet — EAN, name, brand, price,
+stock — of every product the shop is holding back purely because it has no picture to print, and it
+matches the **no photo** figure on the Overview exactly. It is sorted by stock, highest first,
+because that is the order of payoff: a product with stock goes live as soon as it has an image,
+while one at zero stock stays hidden on the stock rule regardless. Send the photos back keyed by
+**EAN** and the next catalogue update publishes them.
 
 **A brand-new shop was just handed to me**  
 It arrives deliberately bare: WordPress is installed and the plugins and theme are uploaded but
