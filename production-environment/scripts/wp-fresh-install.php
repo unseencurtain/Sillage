@@ -121,6 +121,10 @@ if ($secret !== '' && defined('ABSPATH')) {
                 . "\tdefine( 'SILLAGE_DASHBOARD_URL', '" . addcslashes($dash, "'\\") . "' );\n"
                 . "\tdefine( 'SILLAGE_DB', '" . addcslashes($sillageDb, "'\\") . "' );\n"
                 . "\tdefine( 'DISABLE_WP_CRON', true );\n"
+                // The operator installs the paid Blocksy companion by uploading a zip in
+                // wp-admin. Without this, WordPress can decide it cannot write directly and
+                // asks for FTP credentials that do not exist on a container host.
+                . "\tdefine( 'FS_METHOD', 'direct' );\n"
                 . "}\n";
             $marker = "/* That's all, stop editing!";
             $text = strpos($text, $marker) !== false ? str_replace($marker, $block . $marker, $text) : ($text . $block);
