@@ -8,6 +8,7 @@
 #   ./production-environment/scripts/deploy-vps.sh \
 #       --host ovhe \
 #       [--shop …] [--dash …] [--images …] \
+#       [--dash-user europa] [--wp-user cherry] \
 #       [--dns] [--ip 139.99.61.71] \
 #       [--skip-build] [--fresh] [--core-only] [--keep-caddy] [--replace-caddy]
 #
@@ -23,6 +24,9 @@
 #      Caddy is written for this shop. If the VPS already serves other hostnames,
 #      the existing Caddyfile is left alone unless you pass --replace-caddy.
 #
+# Operator names: --dash-user / --wp-user pick the dashboard and WordPress logins.
+# Omit them and a random non-admin pair is generated. "admin" is refused either way.
+#
 # Secrets live in remote ~/sillage/.env (created once; preserved on update).
 set -euo pipefail
 
@@ -37,12 +41,26 @@ FRESH=0
 CLONE_FROM=""
 WITH_WORDPRESS=1
 KEEP_CADDY=""
+DASH_USER=""
 WP_USER=""
 WP_ADMIN_USER=""
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
+}
+
+# Operator logins are chosen or generated, never "admin".
+check_operator() {
+  local flag="$1" name="$2"
+  if [[ "${name,,}" == *admin* ]]; then
+    echo "$flag must not contain \"admin\": $name" >&2
+    exit 1
+  fi
+  if [[ ! "$name" =~ ^[a-z0-9][a-z0-9._-]{1,31}$ ]]; then
+    echo "$flag must be 2-32 chars of a-z 0-9 . _ -: $name" >&2
+    exit 1
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -51,6 +69,8 @@ while [[ $# -gt 0 ]]; do
     --shop) SHOP_DOMAIN="${2:?}"; shift 2 ;;
     --dash) DASH_DOMAIN="${2:?}"; shift 2 ;;
     --images) IMAGES_DOMAIN="${2:?}"; shift 2 ;;
+    --dash-user) DASH_USER="${2:?}"; check_operator --dash-user "$DASH_USER"; shift 2 ;;
+    --wp-user) WP_USER="${2:?}"; check_operator --wp-user "$WP_USER"; shift 2 ;;
     --dns) DO_DNS=1; shift ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -205,6 +225,29 @@ else
   log_step "Skipped image build; using ${CORE_IMAGE} ${WP_IMAGE}"
 fi
 
+# A Hub tag says nothing about the WordPress it carries: an old build can sit under a tag
+# whose live datadir was upgraded in place afterwards, so the running shop reads newer than
+# the image. Deploying it onto an empty VPS installs the old WordPress. Compare the bundled
+# version against the Dockerfile pin before anything writes a datadir.
+if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
+  PIN_WP="$(sed -n 's/^FROM wordpress:\([0-9][0-9.]*\)-php.*/\1/p' "$PE/wordpress-image/Dockerfile" | head -1)"
+  if [[ -z "$PIN_WP" ]]; then
+    echo "Could not read the WordPress pin from wordpress-image/Dockerfile" >&2
+    exit 1
+  fi
+  IMAGE_WP="$("${SSH[@]}" "$HOST" "docker pull -q '$WP_IMAGE' >/dev/null 2>&1 && docker run --rm --entrypoint php '$WP_IMAGE' -r 'include \"/usr/src/wordpress/wp-includes/version.php\"; echo \$wp_version;'" 2>/dev/null || true)"
+  if [[ -z "$IMAGE_WP" ]]; then
+    echo "Could not read WordPress version from ${WP_IMAGE} (missing on Hub?)" >&2
+    exit 1
+  fi
+  if [[ "$IMAGE_WP" != "$PIN_WP" ]]; then
+    echo "${WP_IMAGE} bundles WordPress ${IMAGE_WP}, Dockerfile pins ${PIN_WP}." >&2
+    echo "Rebuild that tag (drop --skip-build) instead of shipping a stale image." >&2
+    exit 1
+  fi
+  log_step "WordPress image carries ${IMAGE_WP} (matches pin)"
+fi
+
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
 REMOTE_DATA=$("${SSH[@]}" "$HOST" 'test -f ~/sillage/.env && set -a && source ~/sillage/.env && set +a && printf %s "${DATA_DIR:-}"' 2>/dev/null || true)
 if [[ -z "$REMOTE_DATA" ]]; then
@@ -262,8 +305,8 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
       [[ "${name,,}" != *admin* ]] && { printf '%s' "$name"; return; }
     done
   }
-  DASH_USER="$(new_operator desk)"
-  WP_USER="$(new_operator shop)"
+  DASH_USER="${DASH_USER:-$(new_operator desk)}"
+  WP_USER="${WP_USER:-$(new_operator shop)}"
 
   # Prefer existing DB passwords when updating an older split-env host.
   LEGACY_ECOM=$("${SSH[@]}" "$HOST" 'test -f ~/ecom_sites/.env && echo yes || echo no')

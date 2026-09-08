@@ -56,6 +56,21 @@ if ! command -v caddy >/dev/null 2>&1; then
 fi
 systemctl enable --now caddy
 
+# A full vendor sync peaks around 2 GB of Bun heap. On a 4 GB box running two shops that
+# is enough for the kernel to OOM-kill whatever it likes — including Apache and MariaDB,
+# which takes the storefront down mid-sync. Swap absorbs the peak instead.
+if ! swapon --show | grep -q '^/swapfile'; then
+  echo "==> 4G swapfile"
+  fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo "/swapfile none swap sw 0 0" >>/etc/fstab
+  mkdir -p /etc/sysctl.d
+  echo "vm.swappiness=10" >/etc/sysctl.d/99-sillage-swap.conf
+  sysctl -p /etc/sysctl.d/99-sillage-swap.conf >/dev/null
+fi
+
 echo "==> firewall"
 ufw allow OpenSSH
 ufw allow 80/tcp
