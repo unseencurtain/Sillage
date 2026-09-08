@@ -18,7 +18,7 @@ import { todayAtHourUtc, toMysqlUtc } from "../lib/timezone.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
-import { getRetailLiveCooldown } from "../vendors/liveGate.ts";
+import { getStorefrontLiveCooldown } from "../vendors/liveGate.ts";
 import type { SyncSummary } from "./run.ts";
 
 const log = logger("schedule");
@@ -157,12 +157,13 @@ export async function runScheduledSync(override?: "full" | "fast"): Promise<Sync
   if (decision.action === "skip") return null;
 
   if (settings.syncSource === "live") {
-    const cooldown = await getRetailLiveCooldown();
-    // Per-vendor gates still skip BeautyFort or BTS inside the run. Do not abort the whole
-    // tick when only one wholesaler is still inside its call interval.
+    const cooldown = await getStorefrontLiveCooldown();
+    // Retail: per-vendor gates still skip BeautyFort or BTS inside the run. Do not abort
+    // the whole tick when only one wholesaler is still inside its call interval.
+    // Wholesale: store-feed gate (hourly XML).
     if (!cooldown.anyAllow) {
       log.info(
-        `tick: skip live ${decision.action} — both vendors cooling ${cooldown.retryInMinutes}m (${cooldown.reason})`,
+        `tick: skip live ${decision.action} — storefront cooling ${cooldown.retryInMinutes}m (${cooldown.reason})`,
       );
       return null;
     }

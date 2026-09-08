@@ -5,21 +5,53 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 
 ---
 
+## Memory — do not invent a different procedure
+
+These are operator rules. If a later message seems to contradict them, **this section wins**.
+Read this checklist and execute it in order. Do not skip an item because a later doc looks older.
+
+1. **Docker Hub builds always happen on ovhe.** That box is already `docker login` as
+   `unseencurtain`. Copy `sillage-core` (and `wordpress-image` only if you were asked to rebuild
+   WordPress) to `~/sillage/`, then on **that VPS** run `~/sillage/scripts/build-push-images.sh`
+   (or `docker build` + `docker push` there). Then point `SILLAGE_CORE_IMAGE` at the new tag and
+   `docker compose --env-file .env --profile wholesale up -d`.
+   - Do **not** install Docker in a cloud-agent pod.
+   - Do **not** copy `~/.docker/config.json` off the VPS.
+   - Do **not** build Hub images on a laptop or agent “because the VPS has only 4 GB”.
+   - Do **not** skip the push because free RAM looks tight — that is how `2269d11`, `51ecd77`,
+     and later tags were pushed from ovhe.
+   - Do **not** rebuild `sillage-wordpress` from `wordpress:latest` unless an operator asked;
+     a WP version bump on the live shop is a real risk. Core-only is the default.
+2. **Wholesale is a second shop, not a suffix on retail.** Containers and folders are
+   `wholesale-*` / `wp-wholesale` / `sitemaps-wholesale`. Never name them `wpf-*` (`WPF` is only
+   the wholesale-perfumes **SKU prefix** in product code). `docker ps` must show two shops, not
+   four containers that all look like “core”.
+3. **Wholesale has its own MariaDB** (`wholesale-db`, datadir `~/ecom_sites/data/wholesale-db`,
+   loopback `:3308`). Do **not** put `earth_wpf` / `sillage_wpf` on retail `ecom-db`. The shop
+   must be movable to another VPS without dragging retail’s database.
+4. **Valkey is the only shared process** while both shops sit on ovhe (retail db 0, wholesale
+   prefix `wholesale:` / db 1). When wholesale moves, it takes its own Valkey. Do not share
+   MariaDB “until then.”
+5. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage). Cursor origin
+   copies can have different SHAs; replay onto GitHub `main`, do not merge the remotes.
+
+---
+
 ## Where things are
 
 | Item | Location |
 |---|---|
 | **Live VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. App dir `~/sillage/`; data `~/ecom_sites/data/`. |
 | **Unused VPS** | SSH `ovh` — `51.79.255.226`. Empty; do not deploy here unless deliberately repurposed. |
-| **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu` |
+| **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu` · **Wholesale shop** `https://wholesale.mirainikki.xyz` · **Wholesale dashboard** `https://sillage-wholesale.mirainikki.xyz` |
 | **Domain change** | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) · trees: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |
 | **Hub images** | `unseencurtain/sillage-core:<tag>`, `unseencurtain/sillage-wordpress:<tag>` |
-| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — continue image/sync work here |
+| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — canonical public tree. Cursor cloud copies can have **parallel SHAs** for the same messages; do not merge remotes. Replay wholesale onto GitHub with a checkout of GitHub `main` + this tree’s files, then `git push github main`. |
 | **Git (pricing lock fix)** | `8628eee` on `main` — dedicated `GET_LOCK` connection + Save-only-on-change. Redeploy if VPS image tag lags. |
 | **Tag baseline** | `pre-scratch-20260808` — restore marker before catalogue wipe + B2B split ([`SCRATCH-RESET.md`](SCRATCH-RESET.md)) |
-| **B2B (later)** | [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) · local pointer `b2b-wholesale/` |
+| **B2B (this VPS)** | [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md) — second WP + `sillage_wpf`, compose profile `wholesale`. Old pointer: [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |
 | **Client how-to (humans)** | [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md) — keep in sync with UI |
 | **Operator UI guide** | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | **Agent runbook** | [`AGENTS-RUNBOOK.md`](AGENTS-RUNBOOK.md) — sync, photos, orders, new VPS |
@@ -30,6 +62,46 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | **Crawler shield** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — copy the Caddy `@heavybot` 403 onto every client VPS |
 | **Google / sitemaps** | [`SEO.md`](SEO.md) — static XML, Caddy, not Minutes between syncs |
+
+---
+
+## Right now (2026-09-08) — wholesale is live on ovhe
+
+Second WordPress on the **same** VPS as retail. Not a replacement of `prinscosmetic.eu`.
+Implementation is this repo (`SILLAGE_PROFILE=wholesale`). Spec: [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md).
+
+| Item | Value |
+|---|---|
+| Shop | https://wholesale.mirainikki.xyz → Caddy → `127.0.0.1:106` (`wholesale-ecom`) |
+| Dashboard | https://sillage-wholesale.mirainikki.xyz → `127.0.0.1:4001` (`wholesale-core`) |
+| WP datadir | `~/ecom_sites/data/wp-wholesale` |
+| MariaDB | **`wholesale-db`** datadir `~/ecom_sites/data/wholesale-db` port `3308` — not `ecom-db` |
+| Woo / engine schemas | `earth_wpf` / `sillage_wpf` **on wholesale-db** |
+| Containers | `wholesale-db`, `wholesale-ecom`, `wholesale-core`, `wholesale-cron` |
+| Valkey | **shared** on ovhe: prefix `wholesale:`, database **1** (retail db 0). Own Valkey when the shop moves. |
+| Vendor | wholesale-perfumes only (BeautyFort + BTS parked) |
+| Plugin | `SILLAGE_CORE_URL=http://wholesale-core:4000` |
+| Hub image | `unseencurtain/sillage-core:a5b94ee` — **built and pushed on ovhe** 2026-09-08. Dashboard Fetched is unique WPF SKUs (not store XML lines). Overview hide reasons are exclusive and add to Hidden. |
+| WordPress | Retail already **7.1**. Wholesale was **7.0.2**; `wp-content` must be `www-data` (uid 33) or Updates fail (`wp-content/upgrade`). |
+
+**Wholesale catalogue (2026-09-08):** 19,083 published = 6,151 visible in shop + 12,932 hidden (6,363 no/weak image + 6,569 out of stock with a photo). Woo `outofstock` term is 8,020 (overlaps no-image). Prices & stock Fetched is unique SKUs, not the ~140k store XML lines. Run #2 was backfilled to 19,083.
+
+**Logins (gitignored).** Do not commit these. On ovhe `~/sillage/.env`:
+
+| Surface | User | Env key |
+|---|---|---|
+| Both dashboards (`/login`) | `DASHBOARD_USER` (usually `admin`) | `DASHBOARD_PASSWORD` |
+| Wholesale wp-admin | `admin` | `WHOLESALE_WP_ADMIN_PASS` (fallback `WPF_WP_ADMIN_PASS`) |
+| Retail wp-admin | `sugar` | existing WP user; not in `.env` |
+
+**Not done yet (next agent):**
+
+1. Do **not** enable live vendor dispatch.
+
+Rename + own MariaDB is **done** (2026-09-08): `docker ps` shows `wholesale-*` not `wpf-*`; `earth_wpf` / `sillage_wpf` live only on `wholesale-db`. Bring-up script (idempotent, skip if containers already healthy): `~/sillage/scripts/bootstrap-wholesale.sh`.
+Leftover cutover script (already applied): `~/sillage/scripts/migrate-wholesale-own-db.sh`.
+
+Retail shop rules below are unchanged.
 
 ---
 
@@ -66,7 +138,10 @@ Do **not** attach the 9,594 scrape files until a human has looked at them. Gener
 
 Static sitemap **is already on the website** (Caddy + files on disk + nightly host cron `0 19 * * *` UTC → `write-sitemaps.py`).
 
-Running Hub image is **`unseencurtain/sillage-core:2269d11`** (pushed 2026-09-03 from ovhe). It includes the Bun sitemap writer; host cron `write-sitemaps.py` remains as backup. Plugin 1.1.2 is in the live `ecom` container.
+Running Hub image is **`unseencurtain/sillage-core:<tag in ~/sillage/.env>`**.
+Rebuild **on ovhe** with `~/sillage/scripts/build-push-images.sh` (or the copy under
+`production-environment/scripts/`). That host is `docker login` as `unseencurtain`.
+Do not build Hub images anywhere else.
 
 Minutes between syncs does **not** rebuild the sitemap.
 
@@ -209,10 +284,10 @@ SELECT id, mode, source, status, prices_updated, started_at
 5. **BTS tracking** — after deploy, poll `SIL-54253-BTS` so Cancelled leaves `submitted`
    ([`BTS-ORDERS.md`](BTS-ORDERS.md)).
 6. **Optional later:** display-time multiplier (no 53k rewrite) — larger WC redesign; not started.
-7. **B2B separately** — new stack in [sillage-b2b](https://github.com/unseencurtain/sillage-b2b);
-   own compose; do not expand this retail repo for WPF.
+7. **Wholesale catalogue** — secrets + first sync on `wholesale.mirainikki.xyz` (sandbox dispatch
+   stays locked). Old [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) is not this shop.
 
-Polish **this retail shop (BF+BTS) first.** B2B later on its own infrastructure.
+Polish **this retail shop (BF+BTS) first.** Wholesale sync is a separate next step on the same VPS.
 
 ---
 
@@ -221,15 +296,21 @@ Polish **this retail shop (BF+BTS) first.** B2B later on its own infrastructure.
 ### Deploy / update (from laptop)
 
 ```bash
+# Hub images: ssh ovhe, copy sillage-core, run ~/sillage/scripts/build-push-images.sh --core-only
+# (docker login as unseencurtain lives there — see Memory). Then:
 ./production-environment/scripts/deploy-vps.sh \
   --host ovhe \
   --shop prinscosmetic.eu \
   --dash sillage.prinscosmetic.eu \
   --images images.prinscosmetic.eu \
-  --skip-build   # omit to build+push Hub images first
+  --skip-build
 ```
 
-Day-2 pull on VPS: `ssh ovhe 'cd ~/sillage && docker compose --env-file .env pull && docker compose --env-file .env up -d'`
+Day-2 pull on VPS (retail + wholesale):
+
+```bash
+ssh ovhe 'cd ~/sillage && docker compose --env-file .env --profile wholesale pull && docker compose --env-file .env --profile wholesale up -d'
+```
 
 Full recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md). Dashboard login file: `.deploy/vps-dashboard-ovhe.txt`.
 
@@ -253,8 +334,9 @@ Changing TZ alone does not rewrite the catalogue.
 
 | Where | Path |
 |---|---|
-| VPS | `~/sillage/sillage-core/data/secrets.overlay.env` |
-| Laptop | `production-environment/sillage-core/data/secrets.overlay.env` |
+| VPS (retail) | `~/sillage/sillage-core/data/secrets.overlay.env` |
+| VPS (wholesale) | `~/sillage/sillage-core/data/secrets.overlay.wholesale.env` |
+| Laptop | `production-environment/sillage-core/data/secrets.overlay.env` (+ `.wpf.env` for wholesale) |
 | Container | `/app/data/secrets.overlay.env` (`SILLAGE_SECRETS_FILE`) |
 
 Set/clear via dashboard **Secrets** (overlay wins over compose `.env`). `touch` the file before

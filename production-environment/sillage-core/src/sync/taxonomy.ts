@@ -1,4 +1,4 @@
-import { sil, wp } from "../config/env.ts";
+import { env, sil, wp } from "../config/env.ts";
 import { execute, query, transaction, type PoolConnection, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, slugify, uniqueTermSlug } from "../lib/slugify.ts";
@@ -635,6 +635,90 @@ export async function parkWholesalePerfumesFromMainStorefront(): Promise<{
     );
   }
   return out;
+}
+
+const RETAIL_VENDOR_SLUGS = ["beautyfort", "bts"] as const;
+
+/**
+ * Park BeautyFort + BTS on the wholesale storefront: force inactive and hide any leftover
+ * products from catalog + search. Idempotent; safe every sync.
+ */
+export async function parkRetailVendorsFromWholesaleStorefront(): Promise<{
+  vendorsDeactivated: number;
+  productsHidden: number;
+}> {
+  const vendorResult = await execute(
+    `UPDATE ${sil("sil_vendors")} SET active = 0 WHERE slug IN (?, ?) AND active <> 0`,
+    [...RETAIL_VENDOR_SLUGS],
+  );
+
+  const visibility = await loadVisibilityTerms();
+  const catalogTt = visibility["exclude-from-catalog"]!.ttId;
+  const searchTt = visibility["exclude-from-search"]!.ttId;
+
+  const hideResult = await execute(
+    `INSERT IGNORE INTO ${wp("term_relationships")} (object_id, term_taxonomy_id, term_order)
+     SELECT p.ID, vis.tt_id, 0
+       FROM ${wp("posts")} p
+       INNER JOIN ${wp("postmeta")} pm
+         ON pm.post_id = p.ID
+        AND pm.meta_key = '_sillage_vendor'
+        AND pm.meta_value IN (?, ?)
+       CROSS JOIN (
+         SELECT ? AS tt_id UNION ALL SELECT ?
+       ) vis
+      WHERE p.post_type = 'product'
+        AND p.post_status = 'publish'`,
+    [RETAIL_VENDOR_SLUGS[0], RETAIL_VENDOR_SLUGS[1], catalogTt, searchTt],
+  );
+
+  await execute(
+    `INSERT INTO ${wp("postmeta")} (post_id, meta_key, meta_value)
+     SELECT p.ID, '_visibility', 'hidden'
+       FROM ${wp("posts")} p
+       INNER JOIN ${wp("postmeta")} pm
+         ON pm.post_id = p.ID
+        AND pm.meta_key = '_sillage_vendor'
+        AND pm.meta_value IN (?, ?)
+      WHERE p.post_type = 'product'
+        AND p.post_status = 'publish'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${wp("postmeta")} existing
+           WHERE existing.post_id = p.ID AND existing.meta_key = '_visibility'
+        )`,
+    [...RETAIL_VENDOR_SLUGS],
+  );
+  await execute(
+    `UPDATE ${wp("postmeta")} pm
+       INNER JOIN ${wp("postmeta")} vendor
+         ON vendor.post_id = pm.post_id
+        AND vendor.meta_key = '_sillage_vendor'
+        AND vendor.meta_value IN (?, ?)
+        SET pm.meta_value = 'hidden'
+      WHERE pm.meta_key = '_visibility'
+        AND pm.meta_value <> 'hidden'`,
+    [...RETAIL_VENDOR_SLUGS],
+  );
+
+  const out = {
+    vendorsDeactivated: Number(vendorResult.affectedRows ?? 0),
+    productsHidden: Number(hideResult.affectedRows ?? 0),
+  };
+  if (out.vendorsDeactivated > 0 || out.productsHidden > 0) {
+    log.info(
+      `parked BeautyFort/BTS from wholesale storefront: vendorOff=${out.vendorsDeactivated} hideRels=${out.productsHidden}`,
+    );
+  }
+  return out;
+}
+
+/** Profile-aware park: WPF off the retail shop, BF/BTS off the wholesale shop. */
+export async function parkForeignVendorsFromStorefront(): Promise<void> {
+  if (env.sillageProfile === "wholesale") {
+    await parkRetailVendorsFromWholesaleStorefront();
+    return;
+  }
+  await parkWholesalePerfumesFromMainStorefront();
 }
 
 /**

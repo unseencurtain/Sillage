@@ -12,7 +12,10 @@
 #       [--skip-build] [--fresh]
 #
 # Flow:
-#   1) build+push Docker Hub images (sillage-core, sillage-wordpress)
+#   1) Hub images: rsync sillage-core onto the VPS and build+push THERE
+#      (docker login lives on the host — ovhe is unseencurtain). Never docker build
+#      on the laptop/agent that invoked this script. Default is --core-only so we
+#      do not bump the live WordPress image.
 #   2) rsync compose/config/plugin/overrides only
 #   3) remote: docker compose pull && up -d && migrate
 #
@@ -161,9 +164,15 @@ CORE_IMAGE="${NAMESPACE}/sillage-core:${TAG}"
 WP_IMAGE="${NAMESPACE}/sillage-wordpress:${TAG}"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  echo "==> build + push images"
-  bash "$PE/scripts/build-push-images.sh" --namespace "$NAMESPACE" --tag "$TAG"
-  log_step "Pushed ${CORE_IMAGE} and ${WP_IMAGE}"
+  echo "==> Hub build on ${HOST} (docker login lives there; this machine does not docker build)"
+  "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/sillage-core ~/${REMOTE_DIR}/scripts"
+  "${RSYNC[@]}" --delete \
+    --exclude data --exclude logs --exclude node_modules --exclude web/dist \
+    --exclude .feedscratch \
+    "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
+  "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
+  "${SSH[@]}" "$HOST" "bash ~/${REMOTE_DIR}/scripts/build-push-images.sh --core-only --namespace '$NAMESPACE' --tag '$TAG'"
+  log_step "Pushed ${CORE_IMAGE} from ${HOST}"
 else
   log_step "Skipped image build; using ${CORE_IMAGE}"
 fi
@@ -176,6 +185,10 @@ echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/config/" "$HOST:~/${REMOTE_DIR}/ecom_sites/config/"
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
+"${RSYNC[@]}" "$PE/scripts/bootstrap-wholesale.sh" "$HOST:~/${REMOTE_DIR}/scripts/bootstrap-wholesale.sh"
+"${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
+"${RSYNC[@]}" "$PE/scripts/migrate-wholesale-own-db.sh" "$HOST:~/${REMOTE_DIR}/scripts/migrate-wholesale-own-db.sh"
+"${RSYNC[@]}" "$PE/scripts/fix-wp-content-perms.sh" "$HOST:~/${REMOTE_DIR}/scripts/fix-wp-content-perms.sh"
 if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"
@@ -183,8 +196,12 @@ fi
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
   "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
+"${SSH[@]}" "$HOST" 'if [[ -d ~/ecom_sites/data/wp-wholesale/wp-content/plugins ]]; then mkdir -p ~/ecom_sites/data/wp-wholesale/wp-content/plugins/sillage-bridge; fi'
+"${RSYNC[@]}" --delete \
+  "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
+  "$HOST:~/ecom_sites/data/wp-wholesale/wp-content/plugins/sillage-bridge/" || true
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
-"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
+"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media ~/ecom_sites/data/sitemaps-wholesale ~/ecom_sites/data/wp-wholesale ~/ecom_sites/data/wholesale-db; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.wholesale.env; echo '{}' > ~/${REMOTE_DIR}/sillage-core/data/image_overrides.wholesale.json; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.wholesale.env"
 log_step "Minimal rsync done"
 
 if [[ -n "$CLONE_FROM" ]]; then
@@ -399,6 +416,62 @@ if [[ -n "${IMAGES_DOMAIN:-}" ]]; then
 }"
 fi
 
+WPF_SITE_BLOCK=""
+if [[ -n "${WHOLESALE_SHOP_DOMAIN:-${WPF_SHOP_DOMAIN:-}}" ]]; then
+  WHOLESALE_SHOP_DOMAIN="${WHOLESALE_SHOP_DOMAIN:-${WPF_SHOP_DOMAIN}}"
+  WHOLESALE_ECOM_PORT="${WHOLESALE_ECOM_PORT:-${WPF_ECOM_PORT:-106}}"
+  WHOLESALE_SILLAGE_PORT="${WHOLESALE_SILLAGE_PORT:-${WPF_SILLAGE_PORT:-4001}}"
+  WHOLESALE_DASH_DOMAIN="${WHOLESALE_DASH_DOMAIN:-${WPF_DASH_DOMAIN:-sillage-wholesale.mirainikki.xyz}}"
+  WPF_SITE_BLOCK="${WHOLESALE_SHOP_DOMAIN} {
+	@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
+	handle @heavybot {
+		respond \"Forbidden\" 403
+	}
+	handle_path /lps-media/* {
+		header {
+			-Server
+			-Via
+		}
+		reverse_proxy localhost:${MEDIA_PORT} {
+			header_down -Server
+			header_down -Via
+		}
+	}
+	handle /robots.txt {
+		root * /home/ubuntu/ecom_sites/data/sitemaps-wholesale
+		file_server
+		header Cache-Control \"public, max-age=3600\"
+		header -Server
+	}
+	handle /wp-sitemap* {
+		root * /home/ubuntu/ecom_sites/data/sitemaps-wholesale
+		file_server
+		header Cache-Control \"public, max-age=86400\"
+		header -Server
+	}
+	header {
+		-Server
+		-Via
+		-X-Powered-By
+	}
+	reverse_proxy localhost:${WHOLESALE_ECOM_PORT} {
+		header_down -Server
+		header_down -Via
+		header_down -X-Powered-By
+	}
+}
+${WHOLESALE_DASH_DOMAIN} {
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:${WHOLESALE_SILLAGE_PORT} {
+		header_down -Server
+		header_down -Via
+	}
+}"
+fi
+
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
 	# AI training crawlers walk every /product and /brand page. Prefork PHP
@@ -454,6 +527,7 @@ ${DASH_DOMAIN} {
 	}
 }
 ${IMAGES_SITE_BLOCK}
+${WPF_SITE_BLOCK}
 EOF
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
@@ -570,6 +644,9 @@ PHP
 fi
 
 export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
+if [[ -f "$HOME/sillage/scripts/fix-wp-content-perms.sh" ]]; then
+  bash "$HOME/sillage/scripts/fix-wp-content-perms.sh" --dir "$DATA_DIR/wp" || true
+fi
 if [[ -f "$DATA_DIR/wp/wp-config.php" ]]; then
   sudo chown "$USER":"$USER" "$DATA_DIR/wp/wp-config.php" || true
   sudo chmod 664 "$DATA_DIR/wp/wp-config.php" || true

@@ -28,8 +28,22 @@ function bool(key: string, fallback: boolean): boolean {
 
 const rootDir = resolve(import.meta.dir, "../..");
 
+export type SillageProfile = "retail" | "wholesale";
+
+export function parseSillageProfile(raw: string): SillageProfile {
+  return raw.trim().toLowerCase() === "wholesale" ? "wholesale" : "retail";
+}
+
+const sillageProfile = parseSillageProfile(opt("SILLAGE_PROFILE", "retail"));
+const lockPrefix =
+  opt("SILLAGE_LOCK_PREFIX") || (sillageProfile === "wholesale" ? "sillage-wholesale" : "sillage");
+
 export const env = {
   rootDir,
+  /** `retail` = BeautyFort + BTS shop. `wholesale` = wholesale-perfumes only, sandbox dispatch. */
+  sillageProfile,
+  /** MariaDB GET_LOCK / IS_USED_LOCK prefix. Must differ per storefront on a shared server. */
+  lockPrefix,
   nodeEnv: opt("NODE_ENV", "development"),
   isProduction: opt("NODE_ENV", "development") === "production",
   logLevel: opt("LOG_LEVEL", "info"),
@@ -123,4 +137,13 @@ export function wp(table: string): string {
 /** Fully-qualified sillage table name. */
 export function sil(table: string): string {
   return `\`${env.db.sillage}\`.\`${table}\``;
+}
+
+/** Advisory lock name. Retail uses `sillage:sync`; wholesale uses `sillage-wholesale:sync`. */
+export function lockName(name: string): string {
+  return `${env.lockPrefix}:${name}`;
+}
+
+export function isWholesaleProfile(): boolean {
+  return env.sillageProfile === "wholesale";
 }

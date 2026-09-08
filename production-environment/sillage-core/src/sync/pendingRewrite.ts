@@ -6,7 +6,7 @@
  */
 import { setSetting } from "../db/settings.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
-import { sil } from "../config/env.ts";
+import { lockName, sil } from "../config/env.ts";
 import { logger } from "../lib/log.ts";
 import { runSync } from "./run.ts";
 
@@ -21,7 +21,7 @@ export type RewriteKickStatus = "started" | "queued";
 export async function isSyncLockHeld(): Promise<boolean> {
   const rows = await query<RowDataPacket & { holder: number | null }>(
     `SELECT IS_USED_LOCK(?) AS holder`,
-    ["sillage:sync"],
+    [lockName("sync")],
   );
   return rows[0]?.holder != null;
 }

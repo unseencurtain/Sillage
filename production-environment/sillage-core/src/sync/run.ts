@@ -1,10 +1,11 @@
-import { applyRuntimeUrls, env, sil } from "../config/env.ts";
+import { applyRuntimeUrls, env, lockName, sil } from "../config/env.ts";
 import { loadSecretsOverlay } from "../config/secrets.ts";
 import { execute, getPool, query, type RowDataPacket } from "../db/pool.ts";
 import type { PoolConnection } from "mysql2/promise";
 import { loadSettings, loadVendors, recordEvent, type GlobalSettings, type Vendor } from "../db/settings.ts";
 import { formatDuration, logger } from "../lib/log.ts";
-import { createConnector, isParkedB2bVendor } from "../vendors/registry.ts";
+import { createConnector, vendorSelectableForSync } from "../vendors/registry.ts";
+import { applyStorefrontProfile } from "../storefront/profile.ts";
 import type { FeedSource, NormalizedProduct } from "../vendors/types.ts";
 import {
   applyPriceStockDelta,
@@ -22,7 +23,7 @@ import { writeProductSitemaps } from "./sitemaps.ts";
 import {
   ATTRIBUTE_TAXONOMIES,
   BRAND_TAXONOMY,
-  parkWholesalePerfumesFromMainStorefront,
+  parkForeignVendorsFromStorefront,
   purgeVendorProductAttributes,
   purgeVendorProductCatLanes,
   purgeWholesalePerfumesBrandProductCats,
@@ -51,7 +52,7 @@ export interface SyncOptions {
   source: FeedSource;
   /**
    * Vendor slugs to include. Empty means every active *retail* vendor
-   * (`--vendor=all` skips parked B2B slugs — see `PARKED_B2B_VENDOR_SLUGS`).
+   * (`--vendor=all` skips parked slugs for this storefront profile).
    */
   vendors?: string[];
   /** Fetch and diff but make no WooCommerce writes. */
@@ -183,13 +184,13 @@ async function finishRun(runId: number, startedAt: number, summary: Partial<Sync
 async function acquireLockOn(conn: PoolConnection, name: string, timeoutSeconds = 0): Promise<boolean> {
   const [rows] = await conn.query<Array<RowDataPacket & { locked: number | null }>>(
     `SELECT GET_LOCK(?, ?) AS locked`,
-    [`sillage:${name}`, timeoutSeconds],
+    [lockName(name), timeoutSeconds],
   );
   return rows[0]?.locked === 1;
 }
 
 async function releaseLockOn(conn: PoolConnection, name: string): Promise<void> {
-  await conn.query(`SELECT RELEASE_LOCK(?)`, [`sillage:${name}`]);
+  await conn.query(`SELECT RELEASE_LOCK(?)`, [lockName(name)]);
 }
 
 export async function runSync(options: SyncOptions): Promise<SyncSummary> {
@@ -231,14 +232,18 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     // A previous Stop must not permanently block the next deliberate run.
     await clearSyncAbort();
 
+    await applyStorefrontProfile();
     const settings = await loadSettings();
     applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
     const allVendors = await loadVendors();
-    // Empty vendors = --vendor=all → retail only (parked B2B excluded). Explicit slug list
-    // may still name wholesale-perfumes for offline tests / a future B2B site.
-    const pool = options.vendors?.length
+    // Empty vendors = --vendor=all → skip parked slugs for this profile.
+    // Retail still allows an explicit wholesale-perfumes slug (offline tests).
+    // Wholesale never selects BeautyFort / BTS, even when named.
+    const named = Boolean(options.vendors?.length);
+    const pool = (named
       ? allVendors.filter((v) => options.vendors!.includes(v.slug))
-      : allVendors.filter((v) => !isParkedB2bVendor(v.slug));
+      : allVendors
+    ).filter((v) => vendorSelectableForSync(v.slug, named));
     const selected = pool.filter((v) => v.active);
     if (selected.length === 0) throw new Error("no active vendors selected");
 
@@ -404,7 +409,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         await purgeVendorProductCatLanes(allVendors, storefrontLabels);
         await purgeVendorProductAttributes();
         await purgeWholesalePerfumesBrandProductCats();
-        await parkWholesalePerfumesFromMainStorefront();
+        await parkForeignVendorsFromStorefront();
       }
 
       await resolveProductIdentities(settings);
@@ -526,7 +531,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
         await releaseLockOn(lockConn, "sync");
         releasedOk = true;
       } catch (err) {
-        log.error(`failed to RELEASE_LOCK(sillage:sync): ${String(err)}`);
+        log.error(`failed to RELEASE_LOCK(${lockName("sync")}): ${String(err)}`);
       }
       lockHeld = false;
     }
@@ -586,18 +591,25 @@ async function fastSyncVendor(
       log.progressEnd();
       if (updates) {
         if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
-        summary.fetched += updates.length;
+        const ids = updates.map((u) => u.vendorProductId);
+        const known = await existingVendorProductIds(vendor.id, ids);
+        const matched = vendor.slug === "wholesale-perfumes"
+          ? updates.filter((u) => known.has(u.vendorProductId))
+          : updates;
+        // Fetched = SKUs in our catalogue we compared, not raw vendor XML lines.
+        // wholesale-perfumes store XML has many rows per product id.
+        summary.fetched += matched.length;
         summary.fetchedByVendor = summary.fetchedByVendor ?? {};
-        summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + updates.length;
+        summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + matched.length;
         if (vendor.slug === "bts") summary.btsDelta = true;
-        const changed = await applyPriceStockDelta(vendor.id, updates);
+        const changed = await applyPriceStockDelta(vendor.id, matched);
         summary.updated += changed;
 
         try {
           const imported = await importMissingDeltaProducts({
             vendor,
             connector,
-            updates,
+            updates: vendor.slug === "wholesale-perfumes" ? matched : updates,
             since,
             runId,
             summary,
@@ -725,7 +737,7 @@ async function buildRewriteWriteContext(
   await purgeVendorProductCatLanes(allVendors, storefrontLabels);
   await purgeVendorProductAttributes();
   await purgeWholesalePerfumesBrandProductCats();
-  await parkWholesalePerfumesFromMainStorefront();
+  await parkForeignVendorsFromStorefront();
   return buildWriteContext(settings, allVendors, categoryMaps, brandMap, attributeMaps);
 }
 

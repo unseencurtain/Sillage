@@ -3,15 +3,24 @@
 **This is the human guide.** It is written for the people who run the shop and the operations
 dashboard — not for developers. Button names and page titles match what you see on screen.
 
-**Live sites (August 2026)**
+**Live sites (September 2026)**
 
 | What | Address |
 |---|---|
-| Customer shop | https://prinscosmetic.eu |
-| Operations dashboard | https://sillage.prinscosmetic.eu |
-| Track an order (customers) | https://prinscosmetic.eu/track-order/ |
+| Customer shop (retail) | https://prinscosmetic.eu |
+| Operations dashboard (retail) | https://sillage.prinscosmetic.eu |
+| Track an order (retail customers) | https://prinscosmetic.eu/track-order/ |
+| Wholesale shop | https://wholesale.mirainikki.xyz |
+| Wholesale operations dashboard | https://sillage-wholesale.mirainikki.xyz |
+
+The wholesale shop is a **different website**: different catalogue (wholesale-perfumes only),
+**€300 minimum order**, and vendor dispatch is **sandbox-only** (dry-run — it does not place a
+real order at the supplier). Do not mix it up with the retail BeautyFort + BTS shop.
 
 Ask the operator who deployed the shop for the dashboard password. It is **not** in this repository.
+Retail and wholesale dashboards use the **same** operator user (`admin` in `DASHBOARD_USER`); the
+password lives only in `~/sillage/.env` on the VPS. Wholesale wp-admin is a separate WordPress
+user (`admin` @ wholesale.mirainikki.xyz); that password is `WHOLESALE_WP_ADMIN_PASS` in the same file.
 
 ---
 
@@ -25,7 +34,7 @@ or **what a sync actually does** change, update **this file in the same change**
   [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) — that file is for builders, not clients.
 - A short **demo script** for a live walkthrough is [`CLIENT-FEATURE-WALKTHROUGH.md`](CLIENT-FEATURE-WALKTHROUGH.md).
 
-*Last reviewed against the live dashboard: 30 August 2026.*
+*Last reviewed against the live dashboard: 8 September 2026.*
 
 ---
 
@@ -47,8 +56,8 @@ Sillage does three jobs:
 Shoppers never see “BeautyFort” or “BTS” as shop categories. They see brands, product types, and
 normal WooCommerce pages. The dashboard is for **you**.
 
-A third wholesaler (wholesale-perfumes) is **not** on this shop. It is parked for a separate B2B
-site later.
+A third wholesaler (wholesale-perfumes) is **not** on the retail shop. It is sold on the
+separate wholesale site (https://wholesale.mirainikki.xyz) with a **€300** minimum order.
 
 ---
 
@@ -147,11 +156,11 @@ Health at a glance. Numbers refresh on their own.
 
 | You see | Meaning |
 |---|---|
-| **Visible in shop** | Listings customers can find in the catalogue |
+| **Visible in shop** | Listings customers can find in the catalogue. This is **smaller** than Published when hide-without-image or out-of-stock is on — a successful rebuild of 19k products does not mean 19k visible |
 | **Published in WP** | Also includes products that are published but **hidden** from the shop loop |
 | **Sillage products** | Everything Sillage tracks |
 | **Sync on / off** and **orders: dry-run / LIVE** | Snapshot of the two big switches |
-| **Catalogue visibility** | How many are hidden for **no/weak image** vs **stock threshold** |
+| **Catalogue visibility** | Hidden reasons are exclusive and **add up**: no/weak image, out of stock (has a photo), pinned. Visible + Hidden = Published. The Out of stock card is the WooCommerce stock term (some of those also lack a photo) |
 | **Update prices & stock** / **Scheduled (30m)** | Same action as on Sync. Greyed out while the schedule is on — that is intentional |
 
 This page **never** places a vendor order.
@@ -168,10 +177,9 @@ This is the catalogue control room.
 
 The **runs table**:
 
-- **Fetched** — `BF n · BTS m`. A **Δ** on BTS means they used the “what changed” API, not a full
-  45k download.
+- **Fetched** — retail: `BF n · BTS m` (a **Δ** on BTS means the “what changed” API). Wholesale: `WPF n` catalogue SKUs compared, **not** the raw hourly store XML line count (that file has many rows per product).
 - **Shop writes** — `New n · Updated n · Prices n` (new WooCommerce products, listing/content
-  rewrites including photos, price/stock writes). Not `+ ~ $`.
+  rewrites including photos, price/stock writes). Not `+ ~ $`. A prices & stock run right after a rebuild often writes **0** — the shop already has those prices.
 
 Empty checks for BTS are success, not failure.
 
@@ -264,7 +272,7 @@ order dry-run is off.
 |---|---|
 | **Shop URLs** | Public shop and image CDN addresses. Saving the image CDN does **not** by itself rewrite every product photo URL |
 | **Pricing & catalogue** | **Price multiplier**, optional **price tiers** (cost bands), **stock threshold**, **Hide products without image** (leave **on**) |
-| **Cart minimum (storefront fee)** | Optional small-order fee on the shop (off by default). Independent of per-vendor minimum order value |
+| **Cart minimum (storefront fee)** | Optional small-order fee on the **retail** shop (off by default). Independent of per-vendor minimum order value. The **wholesale** shop instead **blocks checkout** under €300 |
 | **Schedule** | **Sync enabled**, timezone, **Minutes between syncs** (a *check interval*, not “minutes a day”), **Daily full catalogue rebuild** + hour |
 | **Order safety** | Dry-run, auto-dispatch, max order value, daily spend cap, tracking poll minutes, customer email on tracking |
 | **Advanced** | Volume filter (ranges vs exact ml), description mode, **company billing** (fill BeautyFort **before** the first live BeautyFort order; BTS invoices from their portal) |
@@ -282,6 +290,10 @@ whoever maintains the server. You do not need it for daily markup changes.
 ## 7. What shoppers experience
 
 These rules are on purpose. They match how dropship dispatch works.
+
+**Basket / checkout.** Retail has no supplier minimum. The wholesale shop
+(https://wholesale.mirainikki.xyz) **will not let you check out under €300** — the cart shows how
+much more to add. That is a real supplier rule, not a small-order fee.
 
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
 image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. Extra files sitting in the
@@ -362,7 +374,10 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 | Shop prices did not change after markup Save | Wait for the rewrite toast / Sync run. If a sync was already running, the rewrite is queued |
 | Sync button says **Scheduled (30m)** and will not click | That is correct while Sync enabled is on |
 | BTS fetched 0 and the run is still success | Normal on most interval checks (BTS daily batch) |
-| Overview **Visible in shop** is much smaller than **Published in WP** | Hidden no-image + stock hide. Expected |
+| Overview **Visible in shop** is much smaller than **Published in WP** | Hidden no-image + stock hide. Expected. Check the identity line: visible + hidden = published |
+| Wholesale `https://…/shop/` is Apache **Not Found** | Pretty permalinks need `wp-wholesale/.htaccess`. Bootstrap writes `ecom_sites/config/wordpress.htaccess`. Live fix: copy that file into the WordPress web root. |
+| Wholesale `/shop/` loads but says “Great things are on the horizon” | WooCommerce **Coming soon** mode. Bootstrap now sets `woocommerce_coming_soon=no`. |
+| Sync **Fetched** is ~140k after a prices & stock run | Old count of raw store XML lines. After this fix, Fetched is unique catalogue SKUs (~19k). A run with 0 shop writes right after a rebuild is normal |
 | Red **Orders dry-run is OFF** banner | Turn dry-run back on unless you are deliberately live |
 | Dashboard will not load | Tell whoever runs the server; this guide cannot fix hosting |
 

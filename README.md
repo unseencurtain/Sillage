@@ -8,8 +8,8 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 
 | Surface | Purpose |
 |---|---|
-| WooCommerce storefront | Customer shop (HPOS orders, EUR, vendor categories, tracking page) |
-| Sillage dashboard | Sync controls, orders, settings, dry-run / live dispatch |
+| WooCommerce storefront | Customer shop (HPOS orders, EUR, vendor categories, tracking page). Optional second WP: wholesale.mirainikki.xyz |
+| Sillage dashboard | Sync controls, orders, settings, dry-run / live dispatch (wholesale dashboard is sandbox-locked) |
 | sillage-core | Catalogue sync, pricing, images, order ingest + vendor dispatch |
 | sillage-bridge | Thin WP plugin (REST + shortcodes only — **no product SQL writes**) |
 
@@ -29,7 +29,7 @@ Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIEN
 
 | Path | What it is |
 |---|---|
-| `production-environment/compose.yaml` | Single stack: ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron |
+| `production-environment/compose.yaml` | Single stack: ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron; optional `wholesale-*` (own MariaDB) via profile `wholesale` |
 | `production-environment/.env.example` | All required env keys (copy to `.env`) |
 | `production-environment/sillage-core/` | Sync engine, HTTP API, React dashboard |
 | `production-environment/ecom_sites/` | Host data mounts + WP/nginx/MariaDB config |

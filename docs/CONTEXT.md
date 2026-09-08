@@ -12,12 +12,16 @@ One Docker Compose project: `production-environment/compose.yaml` + one `.env`.
 | Container | Image | Role | Ports |
 |---|---|---|---|
 | `shop-gateway` | `caddy:2-alpine` | Local edge only (`--profile local`). VPS uses host Caddy. | `80:80` (local) |
-| `ecom` | `unseencurtain/sillage-wordpress:<tag>` | Storefront (no product-image serving) | `127.0.0.1:104→80` |
+| `ecom` | `unseencurtain/sillage-wordpress:<tag>` | Retail storefront | `127.0.0.1:104→80` |
+| `wholesale-ecom` | same WordPress image | Wholesale storefront (`--profile wholesale`) | `127.0.0.1:106→80` |
 | `lps-media` | `nginx:alpine` | Static product images only | `127.0.0.1:105→80` |
-| `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | Database | `127.0.0.1:3307:3306` |
-| `valkey` | `valkey/valkey:8-alpine` | Object cache (ephemeral) | internal only |
-| `sillage-core` | `unseencurtain/sillage-core:<tag>` | API + dashboard | `127.0.0.1:4000→4000` |
-| `sillage-cron` | same image as sillage-core | Sync scheduler (supercronic) | internal only |
+| `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | **Retail** MariaDB only (`earth`, `sillage`) | `127.0.0.1:3307:3306` |
+| `wholesale-db` | same MariaDB image | **Wholesale** MariaDB (`earth_wpf`, `sillage_wpf`) | `127.0.0.1:3308:3306` |
+| `valkey` | `valkey/valkey:8-alpine` | Object cache. Shared on ovhe only (retail db 0, wholesale prefix `wholesale:` / db 1) | internal only |
+| `sillage-core` | `unseencurtain/sillage-core:<tag>` | Retail API + dashboard | `127.0.0.1:4000→4000` |
+| `sillage-cron` | same image as sillage-core | Retail sync scheduler | internal only |
+| `wholesale-core` | same image as sillage-core | Wholesale API + dashboard (`SILLAGE_PROFILE=wholesale`) | `127.0.0.1:4001→4000` |
+| `wholesale-cron` | same image | Wholesale sync scheduler | internal only |
 
 Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
@@ -67,20 +71,22 @@ Two things about supercronic that cost time to rediscover:
 
 ### Tooling gaps — plan around these
 
-- The `ecom` container has **no WP-CLI** and **no mysql/mariadb client binary**. It has `php` and
-  `curl`. Anything that needs WordPress bootstrapped goes through the plugin's REST endpoints.
+- The `ecom` / `wholesale-ecom` containers have **no WP-CLI** and **no mysql/mariadb client binary**. They have `php` and `curl`. Anything that needs WordPress bootstrapped goes through the plugin's REST endpoints.
+- Apache inside those containers runs as **www-data (uid 33)** against a host bind-mount. `wp-content` must be owned by uid 33 or wp-admin Updates fail with `Could not create directory.: /var/www/html/wp-content/upgrade`. Fix: `scripts/fix-wp-content-perms.sh`. Do not leave `wp-content` as `ubuntu:ubuntu`.
 - `ecom-db` has no `docker compose` healthcheck dependency from `sillage-core`; the app retries.
 
 ---
 
 ## 2. Databases
 
-Two databases on **one** MariaDB server, so a single connection can transact across both.
+Two MariaDB **servers**. Retail and wholesale do **not** share a database process.
 
-| Database | Owner | Purpose |
-|---|---|---|
-| `earth` | WordPress (user `lime`) | WordPress + WooCommerce. Prefix `wp_` |
-| `sillage` | sillage-core (user `sillage`) | Our own state. Prefix `sil_` |
+| Database | Server | Owner | Purpose |
+|---|---|---|---|
+| `earth` | `ecom-db` | WordPress (`lime`) | Retail WordPress + WooCommerce. Prefix `wp_` |
+| `sillage` | `ecom-db` | sillage-core (`sillage`) | Retail engine. Prefix `sil_` |
+| `earth_wpf` | `wholesale-db` | WordPress (`lime`) | Wholesale WordPress + WooCommerce |
+| `sillage_wpf` | `wholesale-db` | sillage-core (`sillage`) | Wholesale engine. Lock prefix `sillage-wholesale:` |
 
 Credentials are **not** in this file. They live in:
 - `production-environment/.env` — **single** file for MariaDB, WordPress, sillage-core, vendors, Hub image tags, domains (gitignored; template `.env.example`)
@@ -228,7 +234,8 @@ This is a closed list. If a task seems to require adding write logic here, it be
 7. A read-only wp-admin status page linking to the dashboard
 8. Apply the small-order cart fee (global `cart_min_*`) and hard-block cart/checkout when a
    vendor subtotal is below that vendor's `order_config.min_order_value_eur` (storefront-label
-   shortfall message). Same cart/checkout path for BF/BTS plus per-vendor MOQ.
+   shortfall message on retail; wholesale profile uses a “minimum order €X” notice). Same
+   cart/checkout path for BF/BTS plus per-vendor MOQ. Wholesale shop seeds **€300**.
 9. Catalog helpers for the **LPS retail** shop (BF/BTS): enforce WooCommerce catalog visibility
    (`exclude-from-catalog`), strip legacy LPS* cats from widgets/`get_terms`/nav, hide empty
    feed cats, rebuild Blocksy's taxonomy lookup via SQL on finalize (BF/BTS only), replace
@@ -238,9 +245,9 @@ This is a closed list. If a task seems to require adding write logic here, it be
    (`showLabel:false`, often mis-set to unregistered `product_brands`) with
    `[sillage_shop_brands]` (names + counts, scrollable). Optional image-safety CSS. Vendor
    lanes are never `product_cat` and never a visible `pa_vendor` attribute — use `_sillage_vendor`
-   postmeta only. No dual-catalog / B2B UI here — B2B is
-   [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
-   WPF on this install is parked via `product_visibility` from sillage-core.
+   postmeta only. The **wholesale** WordPress (`earth_wpf`) uses the same plugin with
+   `SILLAGE_STOREFRONT_PROFILE=wholesale` and `SILLAGE_DB=sillage_wpf`. WPF on the retail
+   install is parked via `product_visibility` from sillage-core. See [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md).
 10. **SEO** — Bun writes static sitemaps (`src/sync/sitemaps.ts`, Caddy serves
     `/wp-sitemap*.xml` + `/robots.txt`). PHP (`Sillage_Seo`) only **disables** core
     WP sitemaps and sends `noindex` on hidden product HTML. Do not query the
@@ -274,9 +281,10 @@ Rules, all evaluated by the database so no clock skew is possible:
 
 - The fast cadence measures from the last run of **either** mode. A full sync refreshes every price,
   so a fast sync two minutes later would be wasted work.
+- Overlap is handled by the `GET_LOCK` advisory lock in `runSync` (`sillage:sync` on retail,
+  `sillage-wholesale:sync` on wholesale), not by the scheduler.
 - The full sync is attempted **once per day**, counting attempts rather than successes. A failure is
   surfaced on the dashboard for a deliberate retry instead of retrying every tick for 20 hours.
-- Overlap is handled by the `GET_LOCK` advisory lock in `runSync`, not by the scheduler.
 
 Manual escape hatches on `bun run sync`: `--redrive` re-marks products a previous run errored on,
 and `--rewrite-all` clears the applied hashes so every product is rewritten. Offer hashes cover
@@ -301,18 +309,19 @@ A **vendor** is a supplier we buy from. It has a row in `sil_vendors`, a `Vendor
 prefix, stock and prices, and an order path that spends real money. **There are exactly three in
 code, and adding a fourth is a deliberate decision, not a side effect of finding a new feed.**
 
-**This storefront (LPS retail / cosmetic shop) sells BeautyFort + BTS only.** The third vendor,
-wholesale-perfumes (B2B), is **decoupled** to
-[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (`b2b-wholesale/` here is
-only a pointer). A parked connector copy may remain in sillage-core for history/tests, forced
-`active = 0`, listed in `PARKED_B2B_VENDOR_SLUGS` (excluded from `--vendor=all`), products
-exclude-from-catalog on this WordPress install.
+**Retail (`prinscosmetic.eu`) sells BeautyFort + BTS only.** Wholesale-perfumes is **parked** on
+that WordPress (`PARKED_B2B_VENDOR_SLUGS`, excluded from retail `--vendor=all`).
 
-| Vendor | Slug | SKU prefix | Storefront label | On this shop |
-|---|---|---|---|---|
-| BTS Wholesaler | `bts` | `BTS` | LPS01 | **Yes** — REST + JWT |
-| BeautyFort | `beautyfort` | `BF` | LPS02 | **Yes** — SOAP v4 |
-| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | LPS03 | **No** — parked; [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |
+**Wholesale (`wholesale.mirainikki.xyz`) sells wholesale-perfumes only** — same repo, compose
+profile `wholesale`, `SILLAGE_PROFILE=wholesale`. BeautyFort + BTS are parked there. Dispatch is
+sandbox-locked. The old [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) tree is
+**not** the live shop (`b2b-wholesale/` here is only a pointer). See [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md).
+
+| Vendor | Slug | SKU prefix | Storefront label | Retail shop | Wholesale shop |
+|---|---|---|---|---|---|
+| BTS Wholesaler | `bts` | `BTS` | LPS01 | **Yes** — REST + JWT | Parked |
+| BeautyFort | `beautyfort` | `BF` | LPS02 | **Yes** — SOAP v4 | Parked |
+| wholesale-perfumes.eu (SoleLuna spol. s.r.o.) | `wholesale-perfumes` | `WPF` | Wholesale | Parked | **Yes** — €300 MOQ, sandbox dispatch |
 
 An **image source** only ever produces `EAN → image URL` pairs. It has no vendor row, no connector,
 no stock, no prices and no order path. Images are matched to products by EAN alone, so any source

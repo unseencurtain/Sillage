@@ -33,8 +33,10 @@ import {
   queueCatalogueRebuild,
 } from "../../sync/pendingRewrite.ts";
 import type { OrderAddress } from "../../orders/types.ts";
-import { getRetailLiveCooldown } from "../../vendors/liveGate.ts";
+import { getStorefrontLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
+import { isParkedVendor, parkedVendorSlugsFor, storefrontVendorSlugs } from "../../vendors/registry.ts";
+import { isWholesaleProfile } from "../../storefront/profile.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
@@ -148,6 +150,7 @@ api.get("/overview", async (c) => {
         out_of_stock: number;
         hidden_no_image: number;
         hidden_stock: number;
+        hidden_operator: number;
       }
     >(
       `SELECT
@@ -156,14 +159,26 @@ api.get("/overview", async (c) => {
          SUM(CASE WHEN cat.object_id IS NOT NULL THEN 1 ELSE 0 END) AS hidden_from_catalog,
          SUM(CASE WHEN oos.object_id IS NOT NULL THEN 1 ELSE 0 END) AS out_of_stock,
          SUM(CASE
-               WHEN cat.object_id IS NOT NULL AND oos.object_id IS NULL THEN 1
+               WHEN cat.object_id IS NOT NULL
+                AND IFNULL(sp.operator_hidden, 0) = 1 THEN 1
+               ELSE 0
+             END) AS hidden_operator,
+         SUM(CASE
+               WHEN cat.object_id IS NOT NULL
+                AND IFNULL(sp.operator_hidden, 0) = 0
+                AND (so.image_url IS NULL OR so.image_url = '') THEN 1
                ELSE 0
              END) AS hidden_no_image,
          SUM(CASE
-               WHEN cat.object_id IS NOT NULL AND oos.object_id IS NOT NULL THEN 1
+               WHEN cat.object_id IS NOT NULL
+                AND IFNULL(sp.operator_hidden, 0) = 0
+                AND so.image_url IS NOT NULL AND so.image_url != ''
+                AND oos.object_id IS NOT NULL THEN 1
                ELSE 0
              END) AS hidden_stock
        FROM ${wp("posts")} p
+       LEFT JOIN ${sil("sil_products")} sp ON sp.wp_post_id = p.ID
+       LEFT JOIN ${sil("sil_offers")} so ON so.id = sp.primary_offer_id
        LEFT JOIN (
          SELECT tr.object_id
            FROM ${wp("term_relationships")} tr
@@ -213,10 +228,12 @@ api.get("/overview", async (c) => {
     catalogVisible,
     hiddenFromCatalog,
     outOfStock: Number(cat?.out_of_stock ?? 0),
-    /** Catalog-hidden without outofstock term — typically hide_products_without_image. */
+    /** Exclusive hide reason (writer order): no/weak image, including those also OOS. */
     hiddenNoImage: Number(cat?.hidden_no_image ?? 0),
-    /** Catalog-hidden with outofstock — stock threshold (and often OOS). */
+    /** Exclusive hide reason: usable image, out of stock / below threshold. */
     hiddenStock: Number(cat?.hidden_stock ?? 0),
+    /** Exclusive hide reason: operator Keep hidden. */
+    hiddenOperator: Number(cat?.hidden_operator ?? 0),
     lastSync: lastSync[0] ? decorateSyncRun(lastSync[0]) : null,
     ordersByStatus,
     syncsLast7Days: syncs.map((s) => ({ day: String(s.day), n: Number(s.n) })),
@@ -272,11 +289,12 @@ api.post("/sync/run", async (c) => {
     body.source === "local" || body.source === "live" || body.source === "cache"
       ? body.source
       : settings.syncSource;
-  // Dashboard "Run sync now" may pin BeautyFort + BTS; never accept parked WPF here.
+  const allowed = new Set(storefrontVendorSlugs());
   const vendors = Array.isArray(body.vendors)
-    ? body.vendors.filter((v): v is string => v === "beautyfort" || v === "bts")
+    ? body.vendors.filter((v): v is string => allowed.has(v))
     : undefined;
-  const vendorList = vendors?.length ? vendors : ["beautyfort", "bts"];
+  const vendorList = vendors?.length ? vendors : storefrontVendorSlugs();
+  const vendorNames = isWholesaleProfile() ? "wholesale-perfumes" : "BeautyFort + BTS";
 
   await clearSyncAbort();
 
@@ -330,14 +348,14 @@ api.post("/sync/run", async (c) => {
       vendors: vendorList,
       detail: pendingRebuild
         ? `Catalogue rebuild is already queued. The next scheduled sync (every ${settings.fastSyncMinutes} min) will rebuild instead of prices-only.`
-        : `Catalogue rebuild queued. The next scheduled sync (every ${settings.fastSyncMinutes} min) will rebuild BeautyFort + BTS instead of a prices-only call.`,
+        : `Catalogue rebuild queued. The next scheduled sync (every ${settings.fastSyncMinutes} min) will rebuild ${vendorNames} instead of a prices-only call.`,
     });
   }
 
   // Live catalogue syncs must wait out the vendor cooldown — never start a run that would
   // silently reuse a stale on-disk feed.
   if (source === "live") {
-    const cooldown = await getRetailLiveCooldown();
+    const cooldown = await getStorefrontLiveCooldown();
     if (!cooldown.anyAllow) {
       return c.json({
         ok: true,
@@ -358,7 +376,7 @@ api.post("/sync/run", async (c) => {
   void runSync({
     mode,
     source,
-    vendors: vendors?.length ? vendors : undefined,
+    vendors: vendorList,
   }).catch((err) => log.error(`manual ${mode} sync failed`, String(err)));
   return c.json({
     ok: true,
@@ -379,7 +397,9 @@ api.get("/secrets", (c) => {
   return c.json({
     path,
     hotReload: true,
-    note: "Changes apply immediately to this process and at the start of each sync. No container restart required for BF/BTS credentials.",
+    note: isWholesaleProfile()
+      ? "Changes apply immediately. This wholesale instance only uses wholesale-perfumes credentials. Dispatch is sandbox-locked (dry-run)."
+      : "Changes apply immediately to this process and at the start of each sync. No container restart required for BF/BTS credentials.",
     secrets,
   });
 });
@@ -421,12 +441,15 @@ api.post("/sync/stop", async (c) => {
 
 api.get("/sync/live-status", async (c) => {
   const [cooldown, settings, pendingRebuild, catalogueReady] = await Promise.all([
-    getRetailLiveCooldown(),
+    getStorefrontLiveCooldown(),
     loadSettings(),
     isCatalogueRebuildPending(),
     hasSuccessfulCatalogue(),
   ]);
+  const wpf = cooldown.wholesalePerfumes;
   return c.json({
+    profile: env.sillageProfile,
+    vendors: storefrontVendorSlugs(),
     cooldownMinutes: cooldown.cooldownMinutes,
     /** @deprecated use cooldownMinutes — same value as live_feed_min_minutes */
     liveFeedMinMinutes: cooldown.cooldownMinutes,
@@ -456,6 +479,16 @@ api.get("/sync/live-status", async (c) => {
       usedToday: cooldown.bts.usedToday,
       dailyRemaining: null,
     },
+    wholesalePerfumes: wpf
+      ? {
+          allow: wpf.allow,
+          reason: wpf.reason,
+          retryInMinutes: wpf.retryInMinutes,
+          maxPerDay: wpf.maxPerDay,
+          usedToday: wpf.usedToday,
+          dailyRemaining: null,
+        }
+      : null,
   });
 });
 
@@ -595,17 +628,27 @@ api.get("/vendors", async (c) => {
   const settings = await loadSettings();
   const lastFetchRows = await query<RowDataPacket & { setting_key: string; setting_value: string }>(
     `SELECT setting_key, setting_value FROM ${sil("sil_settings")}
-      WHERE setting_key IN ('last_live_fetch_beautyfort', 'last_live_fetch_bts')`,
+      WHERE setting_key IN (
+        'last_live_fetch_beautyfort',
+        'last_live_fetch_bts',
+        'last_live_fetch_wholesale-perfumes'
+      )`,
   );
   const lastLiveFetch: Record<string, string | null> = {
     beautyfort: null,
     bts: null,
+    "wholesale-perfumes": null,
   };
   for (const row of lastFetchRows) {
     if (row.setting_key === "last_live_fetch_beautyfort") lastLiveFetch.beautyfort = row.setting_value;
     if (row.setting_key === "last_live_fetch_bts") lastLiveFetch.bts = row.setting_value;
+    if (row.setting_key === "last_live_fetch_wholesale-perfumes") {
+      lastLiveFetch["wholesale-perfumes"] = row.setting_value;
+    }
   }
   return c.json({
+    profile: env.sillageProfile,
+    parkedVendors: [...parkedVendorSlugsFor()],
     globalPriceMultiplier: settings.priceMultiplier,
     globalStockThreshold: settings.stockThreshold,
     callIntervalMinutes: settings.liveFeedMinMinutes,
@@ -637,6 +680,7 @@ api.get("/vendors", async (c) => {
         storeLiveMaxPerDay: v.storeLiveMaxPerDay,
         storeLiveMinMinutes: v.storeLiveMinMinutes,
         orderConfig: v.orderConfig,
+        parked: isParkedVendor(v.slug),
       };
     }),
   });
@@ -666,6 +710,13 @@ api.put("/vendors/:slug", async (c) => {
   }
 
   const patch = parsed.patch;
+  if (isParkedVendor(slug) && patch.active === true) {
+    await recordEvent("warn", "vendors", `reject activate for parked vendor ${slug}`);
+    return c.json(
+      { error: `${slug} is parked on this storefront and cannot be activated` },
+      400,
+    );
+  }
   const orderConfig = { ...existing.orderConfig };
   if (patch.minOrderValueEur !== undefined) {
     if (patch.minOrderValueEur === null) {
@@ -996,6 +1047,9 @@ api.get("/settings", async (c) => {
     loadCompanyBilling("bts"),
   ]);
   return c.json({
+    sillage_profile: env.sillageProfile,
+    parked_vendors: [...parkedVendorSlugsFor()].join(","),
+    orders_sandbox_locked: isWholesaleProfile() ? "1" : "0",
     sync_enabled: s.syncEnabled ? "1" : "0",
     fast_sync_minutes: String(s.fastSyncMinutes),
     full_sync_enabled: s.fullSyncEnabled ? "1" : "0",
@@ -1113,6 +1167,13 @@ api.put("/settings", async (c) => {
     }
     const changed = prior.get(key) !== persist;
     if (!changed) continue;
+    if (
+      isWholesaleProfile() &&
+      ((key === "orders_dry_run" && persist !== "1" && persist !== "true") ||
+        (key === "orders_auto_dispatch" && persist !== "0" && persist !== "false"))
+    ) {
+      continue;
+    }
     await setSetting(key, persist);
     n++;
     // One operator "minutes between syncs" keeps schedule cadence and vendor gate in lockstep.

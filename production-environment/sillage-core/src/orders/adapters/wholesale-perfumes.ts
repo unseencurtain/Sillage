@@ -11,7 +11,7 @@
  *
  * API shape: docs/vendors/wholesale-perfumes-api.md
  */
-import { env } from "../../config/env.ts";
+import { env, lockName } from "../../config/env.ts";
 import { query, type RowDataPacket } from "../../db/pool.ts";
 import { loadVendor } from "../../db/settings.ts";
 import {
@@ -33,7 +33,6 @@ import type {
   VendorPollStatus,
 } from "../adapter.ts";
 
-const CART_LOCK = "sillage:wholesale-perfumes-cart";
 const CART_LOCK_TIMEOUT_SEC = 120;
 
 /**
@@ -59,13 +58,13 @@ function client(): WholesalePerfumesClient {
 async function acquireCartLock(): Promise<boolean> {
   const rows = await query<RowDataPacket & { locked: number | null }>(
     `SELECT GET_LOCK(?, ?) AS locked`,
-    [CART_LOCK, CART_LOCK_TIMEOUT_SEC],
+    [lockName("wholesale-perfumes-cart"), CART_LOCK_TIMEOUT_SEC],
   );
   return rows[0]?.locked === 1;
 }
 
 async function releaseCartLock(): Promise<void> {
-  await query(`SELECT RELEASE_LOCK(?)`, [CART_LOCK]);
+  await query(`SELECT RELEASE_LOCK(?)`, [lockName("wholesale-perfumes-cart")]);
 }
 
 /** Map GET /order status fields onto our poll enum. Numeric codes are undocumented → unknown. */

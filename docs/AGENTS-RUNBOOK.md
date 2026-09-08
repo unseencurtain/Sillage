@@ -7,6 +7,7 @@ only the one deep doc you need. Do not wander the tree.
 |---|---|
 | **Client / human how-to** | [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md) — update with UI/shopper changes |
 | Resume / live host / current health | [`HANDOFF.md`](HANDOFF.md) |
+| **Wholesale shop** (`wholesale.mirainikki.xyz`) | [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md) |
 | Schema, containers, what PHP may write | [`CONTEXT.md`](CONTEXT.md) |
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
@@ -24,6 +25,12 @@ only the one deep doc you need. Do not wander the tree.
 GitHub: [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`).
 Live SSH: `ovhe` (`ubuntu@139.99.61.71`). App `~/sillage/`, data `~/ecom_sites/data/`.
 
+**Hub images:** build and push **on ovhe** (`docker login` as `unseencurtain` lives there).
+Copy `sillage-core` to `~/sillage/sillage-core` (do not overwrite `data/` or `logs/`), then
+`~/sillage/scripts/build-push-images.sh --core-only`. Do not install Docker in an agent VM
+and do not copy Hub credentials off the VPS. Canonical wording: [`HANDOFF.md`](HANDOFF.md)
+Memory.
+
 ---
 
 ## What this system is
@@ -34,7 +41,8 @@ ops dashboard `https://sillage.prinscosmetic.eu`, image CDN `https://images.prin
 Bun (`sillage-core`) writes products into MariaDB. The WordPress plugin is a thin bridge
 (REST, cart rules, tracking notes). **PHP must not grow product-write paths.**
 
-wholesale-perfumes is parked (B2B, other repo). Ocean = `oceanfragrances.csv` images only.
+wholesale-perfumes is the **wholesale** shop only (`wholesale.mirainikki.xyz`). On retail it stays
+parked. Ocean = `oceanfragrances.csv` images only.
 Brasty = optional Playwright tool in git (`tools/images/brasty/`). The VPS dump
 `~/brasty/` was deleted 2026-09-03; needed hits live in `~/ecom_sites/data/media/`.
 Not a vendor.

@@ -14,12 +14,15 @@ describe("retail live cooldown — no silent cache", () => {
     expect(liveGate).toContain('mode: "live" | "blocked" | "local"');
     expect(liveGate).toContain('return { mode: "blocked", gate }');
     expect(liveGate).toContain("export async function getRetailLiveCooldown");
+    expect(liveGate).toContain("export async function getStorefrontLiveCooldown");
   });
 
   test("POST /sync/run rejects live starts during cooldown", () => {
-    expect(apiSrc).toContain("getRetailLiveCooldown");
+    expect(apiSrc).toContain("getStorefrontLiveCooldown");
+    expect(apiSrc).toContain("storefrontVendorSlugs");
     expect(apiSrc).toContain("cooldown: true");
     expect(apiSrc).toContain("retryInMinutes: cooldown.retryInMinutes");
+    expect(apiSrc).not.toContain('v === "beautyfort" || v === "bts"');
   });
 
   test("live-status exposes countdown without cache age", () => {
@@ -40,9 +43,9 @@ describe("retail live cooldown — no silent cache", () => {
     expect(btsSrc).not.toContain("live gated — cached");
   });
 
-  test("scheduler skips live ticks only when both vendors are cooling", () => {
-    expect(scheduleSrc).toContain("getRetailLiveCooldown");
-    expect(scheduleSrc).toContain("both vendors cooling");
+  test("scheduler skips live ticks only when the storefront is cooling", () => {
+    expect(scheduleSrc).toContain("getStorefrontLiveCooldown");
+    expect(scheduleSrc).toContain("storefront cooling");
     expect(scheduleSrc).toContain("anyAllow");
   });
 
@@ -54,6 +57,14 @@ describe("retail live cooldown — no silent cache", () => {
     expect(vendorsSrc).toContain("About once a day on the shop");
     expect(vendorsSrc).toContain("re-downloads their full stock file");
     expect(vendorsSrc).toContain("Daily full catalogue rebuild");
+  });
+
+  test("dashboard Sync/Overview do not pin BeautyFort+BTS vendors", () => {
+    const overview = readFileSync(join(import.meta.dir, "../web/src/pages/Overview.tsx"), "utf8");
+    const sync = readFileSync(join(import.meta.dir, "../web/src/pages/Sync.tsx"), "utf8");
+    expect(overview).not.toContain('vendors: ["beautyfort", "bts"]');
+    expect(sync).not.toContain('vendors: ["beautyfort", "bts"]');
+    expect(overview).toContain('api.runSync("fast", { source: "live" })');
   });
 
   test("settings Save keeps cooldown and fast cadence in lockstep", () => {

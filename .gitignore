@@ -75,6 +75,7 @@ production-environment/sillage-core/data/image_overrides.json.bak-*
 
 # Dashboard Secrets overlay (vendor API credentials) — never commit
 production-environment/sillage-core/data/secrets.overlay.env
+production-environment/sillage-core/data/secrets.overlay.wpf.env
 
 # Scratch DB left behind by the standalone BTS reference client
 /data/

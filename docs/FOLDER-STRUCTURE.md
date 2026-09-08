@@ -24,11 +24,12 @@ Sillage/
 │   ├── EAN-IMAGE-SCRAPE.md            Missing photos: fill by EAN only
 │   └── …
 ├── production-environment/
-│   ├── compose.yaml                   The only compose file that matters
+│   ├── compose.yaml                   The only compose file (retail + optional wholesale profile)
 │   ├── .env.example                   All env keys (copy to .env, never commit)
 │   ├── scripts/
 │   │   ├── deploy-vps.sh
 │   │   ├── vps-bootstrap.sh           DB grants + wp-config SILLAGE_* defines
+│   │   ├── bootstrap-wholesale.sh     Second WP + sillage_wpf on the same VPS
 │   │   └── bootstrap-host.sh
 │   ├── sillage-core/                  Bun API, sync, React dashboard
 │   │   ├── data/image_overrides.json  EAN → photo URL (in git)
@@ -69,10 +70,13 @@ After cleanup, home should look like this:
 │   │   └── logs/
 │   └── ecom_sites/config/             php.ini, mariadb.vps.cnf, lps-media nginx
 ├── ecom_sites/data/                   Bind-mounted data (do not delete)
-│   ├── wp/                            WordPress
-│   ├── wp-db/                         MariaDB files
+│   ├── wp/                            Retail WordPress
+│   ├── wp-wholesale/                  Wholesale WordPress (wholesale.mirainikki.xyz)
+│   ├── wp-db/                         Retail MariaDB only (earth + sillage)
+│   ├── wholesale-db/                  Wholesale MariaDB (earth_wpf + sillage_wpf)
 │   ├── media/                         **Shop CDN photos** (images.prinscosmetic.eu)
-│   └── sitemaps/                      Static robots + wp-sitemap*.xml (Caddy)
+│   ├── sitemaps/                      Retail robots + wp-sitemap*.xml (Caddy)
+│   └── sitemaps-wholesale/            Wholesale sitemaps
 └── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile
 ```
 
@@ -84,12 +88,16 @@ Docker reads:
 | Container | Host path |
 |---|---|
 | `ecom` | `~/ecom_sites/data/wp` + `~/sillage/ecom_sites/config/php.ini` |
-| `ecom-db` | `~/ecom_sites/data/wp-db` + `~/sillage/ecom_sites/config/mariadb.vps.cnf` |
+| `ecom-db` | `~/ecom_sites/data/wp-db` (retail only) |
+| `wholesale-db` | `~/ecom_sites/data/wholesale-db` |
 | `lps-media` | `~/ecom_sites/data/media` |
 | `sillage-core` / `sillage-cron` | overrides + secrets + logs + `~/sillage/.feedscratch` |
+| `wholesale-ecom` | `~/ecom_sites/data/wp-wholesale` |
+| `wholesale-core` / `wholesale-cron` | `secrets.overlay.wholesale.env` + `image_overrides.wholesale.json` + `logs-wholesale` |
 
 Host Caddy (`/etc/caddy/Caddyfile`) is **not** inside `~/sillage`. It terminates TLS and
-proxies `:104` (shop), `:4000` (dashboard), `:105` (images). The shop site must 403
+proxies `:104` (retail shop), `:4000` (retail dashboard), `:105` (images),
+`:106` (wholesale shop), `:4001` (wholesale dashboard). The shop sites must 403
 AI training crawlers — snippet
 [`ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet),
 story [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md). The images site strips `Server` / `Via`

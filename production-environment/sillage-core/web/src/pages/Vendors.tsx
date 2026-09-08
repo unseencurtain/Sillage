@@ -7,8 +7,7 @@ import { Toggle } from "@/components/Toggle";
 import { useToast } from "@/components/Toast";
 import { watchSyncUntilIdle } from "@/lib/watchSync";
 
-/** Parked B2B supplier — not editable on this retail shop. */
-const PARKED_B2B_SLUG = "wholesale-perfumes";
+/** Parked supplier — not editable on this storefront. */
 
 interface VendorForm {
   storefrontLabel: string;
@@ -107,17 +106,17 @@ function confirmDescription(original: Vendor, patch: VendorPatch): string {
 export function Vendors() {
   const { data, isLoading } = useQuery({ queryKey: ["vendors"], queryFn: api.vendors });
   const vendors = data?.vendors ?? [];
-  const retail = vendors.filter((v) => v.slug !== PARKED_B2B_SLUG);
-  const parked = vendors.filter((v) => v.slug === PARKED_B2B_SLUG);
+  const wholesale = data?.profile === "wholesale";
+  const active = vendors.filter((v) => !v.parked);
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted">
-          BeautyFort + BTS only. How often prices/stock move is on each card below — they are not
-          the same. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored
-          offers (no live vendor download). Credentials:{" "}
+          {wholesale
+            ? "wholesale-perfumes only on this shop. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers (no live vendor download). Credentials: "
+            : "BeautyFort + BTS only. How often prices/stock move is on each card below — they are not the same. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers (no live vendor download). Credentials: "}
           <Link to="/secrets" className="font-medium text-accent hover:underline">
             Secrets
           </Link>
@@ -128,7 +127,7 @@ export function Vendors() {
       {isLoading ? <p className="text-muted">Loading…</p> : null}
 
       <div className="grid gap-4 xl:grid-cols-1">
-        {retail.map((v) => (
+        {active.map((v) => (
           <VendorEditor
             key={v.id}
             vendor={v}
@@ -138,42 +137,8 @@ export function Vendors() {
             lastLiveFetch={data?.lastLiveFetch?.[v.slug] ?? null}
           />
         ))}
-        {parked.map((v) => (
-          <ParkedVendorCard key={v.id} vendor={v} />
-        ))}
       </div>
     </div>
-  );
-}
-
-function ParkedVendorCard({ vendor }: { vendor: Vendor }) {
-  return (
-    <article className="rounded-xl border border-dashed border-line bg-canvas/40 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-muted">{vendor.storefrontLabel || vendor.name}</h2>
-          <div className="font-mono text-xs text-muted">
-            {vendor.slug} · SKU {vendor.skuPrefix}-*
-          </div>
-        </div>
-        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
-          parked
-        </span>
-      </div>
-      <p className="mt-3 text-sm text-muted">
-        Parked for the separate{" "}
-        <a
-          className="font-medium text-ink underline decoration-line underline-offset-2"
-          href="https://github.com/unseencurtain/sillage-b2b"
-          target="_blank"
-          rel="noreferrer"
-        >
-          unseencurtain/sillage-b2b
-        </a>{" "}
-        repo. Forced inactive, excluded from <code className="font-mono text-xs">--vendor=all</code>,
-        and not editable on this retail shop.
-      </p>
-    </article>
   );
 }
 
@@ -441,6 +406,7 @@ function CatalogueSyncPanel({
     : "never";
   const isBf = slug === "beautyfort";
   const isBts = slug === "bts";
+  const isWpf = slug === "wholesale-perfumes";
 
   return (
     <div className="mt-4 rounded-lg border border-line bg-canvas/50 p-4">
@@ -493,7 +459,27 @@ function CatalogueSyncPanel({
           </div>
         </dl>
       ) : null}
-      {!isBf && !isBts ? (
+      {isWpf ? (
+        <dl className="mt-3 space-y-2 text-sm">
+          <div>
+            <dt className="font-medium text-ink">Prices and stock</dt>
+            <dd className="text-muted">
+              Every {callIntervalMinutes} minutes from the hourly store XML. Many rows share one
+              product id — Sillage collapses to unique SKUs. Fetched on Sync is those catalogue SKUs,
+              not the raw line count.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-ink">Full catalogue rebuild</dt>
+            <dd className="text-muted">
+              Routine: Settings → Daily full catalogue rebuild (once per 24 hours after the chosen
+              hour) — new products and WordPress categories from the daily catalog XML. Manual: Sync
+              → Rebuild catalogue.
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+      {!isBf && !isBts && !isWpf ? (
         <p className="mt-2 text-sm text-ink">No live feed for this supplier.</p>
       ) : null}
       <p className="mt-2 text-xs text-muted">Last live fetch: {last}</p>

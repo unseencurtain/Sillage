@@ -77,11 +77,24 @@ export function mapWholesalePerfumesGender(raw: string | null | undefined): stri
   return GENDER_MAP[raw.trim().toLowerCase()];
 }
 
+/** Last row per product id — the hourly store XML has many lines per SKU. */
+export function collapseStoreProducts(
+  store: WholesalePerfumesStoreProduct[],
+): WholesalePerfumesStoreProduct[] {
+  const byId = new Map<string, WholesalePerfumesStoreProduct>();
+  for (const s of store) {
+    const id = String(s.id ?? "").trim();
+    if (!id) continue;
+    byId.set(id, { id, priceNoVat: s.priceNoVat, quantity: s.quantity });
+  }
+  return [...byId.values()];
+}
+
 export function joinCatalogAndStore(
   catalog: WholesalePerfumesCatalogProduct[],
   store: WholesalePerfumesStoreProduct[],
 ): WholesalePerfumesJoinedRaw[] {
-  const byId = new Map(store.map((s) => [s.id, s]));
+  const byId = new Map(collapseStoreProducts(store).map((s) => [s.id, s]));
   const out: WholesalePerfumesJoinedRaw[] = [];
   for (const c of catalog) {
     const s = byId.get(c.id);
@@ -237,8 +250,9 @@ export class WholesalePerfumesConnector extends VendorConnector {
       const cached = await readFeedCache("wholesale-perfumes");
       const store = cached ? feedCacheStore(cached) : null;
       if (Array.isArray(store) && store.length > 0) {
-        progress?.(`using cached store feed (${store.length} rows)`);
-        return (store as WholesalePerfumesStoreProduct[]).map((s) => ({
+        const collapsed = collapseStoreProducts(store as WholesalePerfumesStoreProduct[]);
+        progress?.(`using cached store feed (${store.length} rows, ${collapsed.length} SKUs)`);
+        return collapsed.map((s) => ({
           vendorProductId: s.id,
           price: s.priceNoVat,
           recommendedPrice: null,
@@ -257,9 +271,10 @@ export class WholesalePerfumesConnector extends VendorConnector {
       store,
     });
     await recordWholesalePerfumesStoreFetch();
-    log.info(`wholesale-perfumes store delta: ${store.length} rows`);
+    const collapsed = collapseStoreProducts(store);
+    log.info(`wholesale-perfumes store delta: ${store.length} rows, ${collapsed.length} SKUs`);
 
-    return store.map((s) => ({
+    return collapsed.map((s) => ({
       vendorProductId: s.id,
       price: s.priceNoVat,
       recommendedPrice: null,
