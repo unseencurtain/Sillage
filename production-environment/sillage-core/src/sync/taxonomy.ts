@@ -547,10 +547,9 @@ export async function loadFlatTermMapFromDb(taxonomy: string): Promise<Map<strin
 }
 
 /**
- * Park wholesale-perfumes on this (LPS retail) storefront: force vendor inactive, unpublish
- * `/b2b-wholesale/`, and exclude WPF products from catalog + search via product_visibility.
- *
- * B2B lives on a future separate site — see repo `b2b-wholesale/`. Idempotent; safe every sync.
+ * Park leftover vendor products that this retail shop does not sell (historical
+ * `wholesale-perfumes` rows if a database was copied from before the split).
+ * Idempotent; safe every sync. The wholesale shop lives in unseencurtain/sillage-b2b.
  */
 export async function parkWholesalePerfumesFromMainStorefront(): Promise<{
   vendorDeactivated: boolean;

@@ -13,15 +13,13 @@ One Docker Compose project: `production-environment/compose.yaml` + one `.env`.
 |---|---|---|---|
 | `shop-gateway` | `caddy:2-alpine` | Local edge only (`--profile local`). VPS uses host Caddy. | `80:80` (local) |
 | `ecom` | `unseencurtain/sillage-wordpress:<tag>` | Retail storefront | `127.0.0.1:104→80` |
-| `wholesale-ecom` | same WordPress image | Wholesale storefront (`--profile wholesale`) | `127.0.0.1:106→80` |
 | `lps-media` | `nginx:alpine` | Static product images only | `127.0.0.1:105→80` |
-| `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | **Retail** MariaDB only (`earth`, `sillage`) | `127.0.0.1:3307:3306` |
-| `wholesale-db` | same MariaDB image | **Wholesale** MariaDB (`earth_wpf`, `sillage_wpf`) | `127.0.0.1:3308:3306` |
-| `valkey` | `valkey/valkey:8-alpine` | Object cache. Shared on ovhe only (retail db 0, wholesale prefix `wholesale:` / db 1) | internal only |
+| `ecom-db` | `mariadb:latest` (**MariaDB 12.3.2**) | Retail MariaDB (`earth`, `sillage`) | `127.0.0.1:3307:3306` |
+| `valkey` | `valkey/valkey:8-alpine` | Object cache (retail db 0) | internal only |
 | `sillage-core` | `unseencurtain/sillage-core:<tag>` | Retail API + dashboard | `127.0.0.1:4000→4000` |
 | `sillage-cron` | same image as sillage-core | Retail sync scheduler | internal only |
-| `wholesale-core` | same image as sillage-core | Wholesale API + dashboard (`SILLAGE_PROFILE=wholesale`) | `127.0.0.1:4001→4000` |
-| `wholesale-cron` | same image | Wholesale sync scheduler | internal only |
+
+Wholesale-perfumes is **not** this compose. It lives in [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 
 Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
@@ -71,7 +69,7 @@ Two things about supercronic that cost time to rediscover:
 
 ### Tooling gaps — plan around these
 
-- The `ecom` / `wholesale-ecom` containers have **no WP-CLI** and **no mysql/mariadb client binary**. They have `php` and `curl`. Anything that needs WordPress bootstrapped goes through the plugin's REST endpoints.
+- The `ecom` container has **no WP-CLI** and **no mysql/mariadb client binary**. It has `php` and `curl`. Anything that needs WordPress bootstrapped goes through the plugin's REST endpoints.
 - Apache inside those containers runs as **www-data (uid 33)** against a host bind-mount. `wp-content` must be owned by uid 33 or wp-admin Updates fail with `Could not create directory.: /var/www/html/wp-content/upgrade`. Fix: `scripts/fix-wp-content-perms.sh`. Do not leave `wp-content` as `ubuntu:ubuntu`.
 - `ecom-db` has no `docker compose` healthcheck dependency from `sillage-core`; the app retries.
 
@@ -79,14 +77,14 @@ Two things about supercronic that cost time to rediscover:
 
 ## 2. Databases
 
-Two MariaDB **servers**. Retail and wholesale do **not** share a database process.
+One MariaDB server for this retail shop.
 
 | Database | Server | Owner | Purpose |
 |---|---|---|---|
-| `earth` | `ecom-db` | WordPress (`lime`) | Retail WordPress + WooCommerce. Prefix `wp_` |
-| `sillage` | `ecom-db` | sillage-core (`sillage`) | Retail engine. Prefix `sil_` |
-| `earth_wpf` | `wholesale-db` | WordPress (`lime`) | Wholesale WordPress + WooCommerce |
-| `sillage_wpf` | `wholesale-db` | sillage-core (`sillage`) | Wholesale engine. Lock prefix `sillage-wholesale:` |
+| `earth` | `ecom-db` | WordPress (`lime`) | WordPress + WooCommerce. Prefix `wp_` |
+| `sillage` | `ecom-db` | sillage-core (`sillage`) | Engine. Prefix `sil_` |
+
+Wholesale databases (`earth_wpf` / `sillage_wpf`) are not in this repo.
 
 Credentials are **not** in this file. They live in:
 - `production-environment/.env` — **single** file for MariaDB, WordPress, sillage-core, vendors, Hub image tags, domains (gitignored; template `.env.example`)

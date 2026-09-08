@@ -34,7 +34,7 @@ function metaPath(vendor: CacheVendor): string {
 /** Optional envelope so BTS can persist categories. */
 export type FeedCachePayload =
   | unknown[]
-  | { products: unknown[]; categories?: unknown[]; store?: unknown[] };
+  | { products: unknown[]; categories?: unknown[] };
 
 export async function writeFeedCache(vendor: CacheVendor, payload: FeedCachePayload): Promise<void> {
   await mkdir(cacheDir(vendor), { recursive: true });
@@ -74,12 +74,6 @@ export function feedCacheProducts(payload: FeedCachePayload): unknown[] {
 export function feedCacheCategories(payload: FeedCachePayload): unknown[] | null {
   if (Array.isArray(payload)) return null;
   return Array.isArray(payload.categories) ? payload.categories : null;
-}
-
-/** wholesale-perfumes hourly price/stock rows persisted beside the catalog. */
-export function feedCacheStore(payload: FeedCachePayload): unknown[] | null {
-  if (Array.isArray(payload)) return null;
-  return Array.isArray(payload.store) ? payload.store : null;
 }
 
 export async function readFeedCacheMeta(vendor: CacheVendor): Promise<CacheMeta | null> {

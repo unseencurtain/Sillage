@@ -5,8 +5,8 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
 **Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first — including the Memory section.** Hub images are
-built on ovhe (`docker login` lives there). Wholesale is a second shop with its own MariaDB and
-`wholesale-*` names; Valkey is shared on this VPS only.
+built on ovhe (`docker login` lives there). This repo is the **retail** shop only. Wholesale-perfumes
+is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
 **Read [`docs/AGENTS-RUNBOOK.md`](docs/AGENTS-RUNBOOK.md)** for the whole-project loop (sync, photos,
 new VPS, orders). **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet:

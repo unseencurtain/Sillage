@@ -39,7 +39,7 @@ export interface Vendor {
   skuPrefix: string;
   currency: string;
   fxRate: number;
-  /** Fraction uplift before markup. 0 for BF/BTS; wholesale-perfumes may need a confirmed rate. */
+  /** Fraction uplift before markup. 0 for BeautyFort / BTS. */
   vatRate: number;
   priceMultiplier: number | null;
   minVisibleStock: number | null;
@@ -48,9 +48,9 @@ export interface Vendor {
   active: boolean;
   /** Max live catalogue downloads per day; null = legacy setting / default. */
   liveMaxPerDay: number | null;
-  /** Secondary feed (wholesale-perfumes store XML) daily cap. */
+  /** Unused on this retail shop (column kept from shared schema). */
   storeLiveMaxPerDay: number | null;
-  /** Secondary feed min interval minutes. */
+  /** Unused on this retail shop (column kept from shared schema). */
   storeLiveMinMinutes: number | null;
 }
 
