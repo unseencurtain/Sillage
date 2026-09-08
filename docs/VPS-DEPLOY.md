@@ -37,17 +37,15 @@ Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencu
 |---|---|---|
 | Fill `.env` | Laptop `.env` seeds vendor keys; script writes remote `~/sillage/.env` with generated DB/dashboard secrets | Copy `.env.example` → `.env`; set `MYSQL_*`, `SILLAGE_*`, `DASHBOARD_*`, `SILLAGE_SHARED_SECRET` (and vendor keys or use Secrets UI later) |
 | Compose up | Pull + up on VPS; creates Docker networks if missing | **Pre-create** `ecom_network` + `redis_network`; **touch** `sillage-core/data/secrets.overlay.env` (bind mount must be a file) |
-| WordPress | **Automated on fresh install:** `wp_install`, EUR, Blocksy theme, WooCommerce + redis-cache downloaded and activated | Official image writes `wp-config.php`; **browser install wizard** unless you script it; **no** WooCommerce/Blocksy/redis-cache auto-install |
+| WordPress | **Automated on empty VPS:** `wp_install`, EUR, Blocksy, WooCommerce + redis-cache + sillage-bridge, **HPOS on**, Coming soon **off**, permalinks `/%postname%/` | Official image writes `wp-config.php`; **browser install wizard** unless you run `scripts/wp-fresh-install.php`; **no** WooCommerce/Blocksy/redis-cache auto-install |
 | Sillage plugin | Rsynced into `wp-content/plugins/`; activated by deploy script; `vps-bootstrap.sh` patches `wp-config.php` (`SILLAGE_SHARED_SECRET`, `SILLAGE_DASHBOARD_URL`, `SILLAGE_CORE_URL`) | Plugin **files** are in the bind mount but **not activated**; wp-config constants **not** set from `.env` — run `scripts/vps-bootstrap.sh` (VPS) or legacy `ecom_sites/bootstrap-sillage.sh` (split-env local only) |
 | Open dashboard | Plugin “Open dashboard” uses `SILLAGE_DASHBOARD_URL` in wp-config (set by deploy), not `DASH_DOMAIN` in `.env` directly | Local: `http://127.0.0.1:4000`. VPS without Caddy: same loopback port; public HTTPS needs host Caddy (`DASH_DOMAIN`) |
 | Log in + Sync | Creds in `.deploy/vps-dashboard-<host>.txt`; vendor keys in `.env` or **Secrets** UI; press **Run sync now** | **`docker exec sillage-core bun run migrate`** first (not run on container start); DB user + grants before health is green; set BF/BTS in Secrets or `.env`; default `sync_source=live` — needs live keys or change to `local` + `.feedscratch` fixtures |
 | Products appear | Yes, after sync + finalize REST (bridge must be active, secrets must match) | Same, once bootstrap + migrate + WooCommerce + active bridge are done |
 
-**Already matches (when using the VPS deploy script):** Hub images, single compose + `.env`, unattended fresh WP + WooCommerce + plugin activation, migrate + MariaDB grants, Caddy TLS, dashboard login file, Sync → catalogue (finalize bumps WC/Blocksy caches).
+**Already matches (when using the VPS deploy script):** Hub images (core **and** WordPress), single compose + `.env`, unattended fresh WP + WooCommerce + **HPOS** + plugin activation, migrate + MariaDB grants, Caddy TLS, dashboard login file, Sync → catalogue (finalize bumps WC/Blocksy caches).
 
-**Still manual / missing for “compose only”:** external networks, secrets overlay file, migrate, sillage DB user + cross-DB grants, wp-config bridge constants, WooCommerce install, plugin activation, HPOS enable (fresh deploy leaves HPOS **off** — catalogue sync works; order dispatch expects HPOS per `CONTEXT.md`), host bootstrap + DNS + Caddy on VPS.
-
-**To make the five-step story true on bare compose:** entrypoint or `depends_on` health hook that runs migrate + grants; one-shot `bootstrap-sillage.sh` updated for unified `.env`; optional compose `init` service for WP+WC+plugin+HPOS; wire `DASH_DOMAIN` → wp-config on first boot; document local `--profile local` gateway. Until then, use **`deploy-vps.sh`** on a VPS or the local checklist in [Local development](#local-development-same-compose) below.
+**Still manual / missing for “compose only”:** external networks, secrets overlay file, migrate, sillage DB user + cross-DB grants, wp-config bridge constants, WooCommerce install, plugin activation, host bootstrap + DNS + Caddy on VPS. Bare compose does **not** run `wp-fresh-install.php` — use **`deploy-vps.sh`** on a VPS.
 
 ---
 
@@ -62,11 +60,11 @@ Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencu
 
 2. SSH key that can log in as **root** on the new VPS (bootstrap), then as **ubuntu** (deploy).
 
-3. **On ovhe** (`docker login` as `unseencurtain` is already there): copy `sillage-core` source
-   to `~/sillage/sillage-core` (keep existing `data/` and `logs/`), then
-   `~/sillage/scripts/build-push-images.sh --core-only`. Do not build Hub images on a laptop
-   or cloud agent. The live box is how every existing `unseencurtain/sillage-core:<sha>` tag
-   was pushed.
+3. **On a VPS that is `docker login` as `unseencurtain` (ovhe today):** copy `sillage-core`
+   **and** `wordpress-image` to `~/sillage/`, then `~/sillage/scripts/build-push-images.sh`
+   (core + WordPress). Pass `--core-only` only for a day-2 engine bump. Do not build Hub
+   images on a laptop or cloud agent. The live box is how every existing
+   `unseencurtain/sillage-core:<sha>` tag was pushed.
 
 4. Two or three DNS names (A records) pointing at the VPS IP — or Porkbun API via `.deploy/porkbun.env` and `--dns`.
 
@@ -121,14 +119,17 @@ Host my-sillage
 
 ### What the script does
 
-1. Builds and pushes `sillage-core` (+ `sillage-wordpress` only if you omit `--core-only`)
+1. Builds and pushes **`sillage-core` and `sillage-wordpress`** (omit WordPress only with `--core-only`)
    **on the target VPS** (`docker login` lives there — on ovhe that is `unseencurtain`).
    The laptop/agent that invoked this script does **not** run `docker build`.
-2. Rsyncs `compose.yaml`, `ecom_sites/config/`, `sillage-bridge` plugin, `image_overrides.json`
+2. Rsyncs `compose.yaml`, `ecom_sites/config/`, `sillage-bridge` plugin, `image_overrides.json`,
+   `wp-fresh-install.php`
 3. Writes `~/sillage/.env` once (preserves secrets on later runs)
-4. Writes host Caddyfile, `caddy validate` / `reload`
+4. Writes host Caddyfile on an **empty** VPS (`caddy validate` / `reload`). If Caddy already
+   serves other hostnames, the file is left alone unless you pass `--replace-caddy`.
 5. `docker compose pull && up -d` for the whole stack
-6. Fresh WordPress install only when `wp-config.php` is missing (or `--fresh`)
+6. Fresh WordPress install when `wp-config.php` is missing (or `--fresh`): WooCommerce, HPOS,
+   permalinks, Coming soon off
 7. Grants + `bun run migrate`
 8. Saves dashboard login to **`.deploy/vps-dashboard-<host>.txt`**
 
@@ -246,7 +247,7 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 | `scripts/build-push-images.sh` | Build/push Hub images |
 | `scripts/deploy-vps.sh` | App deploy / update |
 | `scripts/porkbun-dns.sh` | A-record upsert (`--dns`) |
-| `scripts/vps-bootstrap.sh` | Remote DB user + wp-config Sillage constants |
+| `scripts/wp-fresh-install.php` | Empty-VPS WordPress: WooCommerce, HPOS, permalinks |
 | `wordpress-image/Dockerfile` | WordPress + Redis PHP extension |
 
 Canonical product facts: [`CONTEXT.md`](CONTEXT.md).
@@ -263,7 +264,8 @@ To deploy to a different VPS (adjust host alias, domains, IP):
 cp -n production-environment/.env.example production-environment/.env
 
 # 2) On the VPS that is docker login (ovhe): rsync sillage-core source, then
-#    ~/sillage/scripts/build-push-images.sh --core-only
+#    ~/sillage/scripts/build-push-images.sh          # empty VPS / first image: core + WordPress
+#    ~/sillage/scripts/build-push-images.sh --core-only  # day-2 engine only
 #    Do not docker build on the laptop or a cloud agent.
 
 # 3) Deploy compose/plugin (images already on Hub)
@@ -280,5 +282,5 @@ ssh ovh 'cd ~/sillage && docker compose --env-file .env ps && curl -sS http://12
 ```
 
 Single env on prod must be `~/sillage/.env`. Keep Settings → Orders dry-run **on**
-until intentional live dispatch. `wholesale-perfumes` stays inactive until toggled
-in the dashboard (migration seeds `active=0`).
+until intentional live dispatch. Wholesale-perfumes is a separate repo
+([sillage-b2b](https://github.com/unseencurtain/sillage-b2b)); do not toggle it here.

@@ -5,7 +5,7 @@
 #
 # Run on ovhe:
 #   bash ~/sillage/scripts/fix-wp-content-perms.sh
-#   bash ~/sillage/scripts/fix-wp-content-perms.sh --dir ~/ecom_sites/data/wp-wholesale
+#   bash ~/sillage/scripts/fix-wp-content-perms.sh --dir ~/ecom_sites/data/wp
 set -euo pipefail
 
 DATA_DIR="${DATA_DIR:-$HOME/ecom_sites/data}"
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  TARGETS=("$DATA_DIR/wp" "$DATA_DIR/wp-wholesale")
+  TARGETS=("$DATA_DIR/wp")
 fi
 
 # Container www-data is always uid/gid 33 on the official WordPress image.

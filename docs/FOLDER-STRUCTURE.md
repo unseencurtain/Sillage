@@ -24,13 +24,14 @@ Sillage/
 │   ├── EAN-IMAGE-SCRAPE.md            Missing photos: fill by EAN only
 │   └── …
 ├── production-environment/
-│   ├── compose.yaml                   The only compose file (retail + optional wholesale profile)
+│   ├── compose.yaml                   The only compose file (retail stack)
 │   ├── .env.example                   All env keys (copy to .env, never commit)
 │   ├── scripts/
-│   │   ├── deploy-vps.sh
+│   │   ├── deploy-vps.sh              Empty VPS: core + WordPress + HPOS
+│   │   ├── wp-fresh-install.php       First-boot WooCommerce / HPOS / permalinks
 │   │   ├── vps-bootstrap.sh           DB grants + wp-config SILLAGE_* defines
-│   │   ├── bootstrap-wholesale.sh     Second WP + sillage_wpf on the same VPS
-│   │   └── bootstrap-host.sh
+│   │   ├── build-push-images.sh       Hub build on the VPS (default core+WP)
+│   │   └── bootstrap-host.sh          Docker + Caddy + unzip on a blank Ubuntu
 │   ├── sillage-core/                  Bun API, sync, React dashboard
 │   │   ├── data/image_overrides.json  EAN → photo URL (in git)
 │   │   └── data/found-images-manifest.json
@@ -40,8 +41,7 @@ Sillage/
 │   ├── python-analysis/               Photo matcher / restore / EAN scrape
 │   │   └── ean-image-scrape/          Export missing + EAN-only download
 │   └── wordpress-image/
-├── tools/images/brasty/               Optional Playwright scrape
-└── b2b-wholesale/                     Pointer only (parked)
+└── tools/images/brasty/               Optional Playwright scrape
 ```
 
 **Not in git:** `.env`, dashboard password, `secrets.overlay.env`, WordPress/MariaDB files,
@@ -49,56 +49,49 @@ Sillage/
 
 ---
 
-## Live VPS (`ubuntu@139.99.61.71`, tidy layout)
+## Live VPS (`ubuntu@139.99.61.71`) — still combined until wholesale cutover
 
-After cleanup, home should look like this:
+Retail from this repo lives in `~/sillage/`. Wholesale currently still runs on the **same box**
+from the old combined compose until it is cut to [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+A **new retail VPS** must not copy that combined layout: `deploy-vps.sh` brings up ecom / ecom-db /
+valkey / lps-media / sillage-core only.
 
 ```
 /home/ubuntu/
-├── START-HERE.txt                     One-page live reminder
-├── photo-inventory/                   Live CAN/CANNOT CSVs (2026-09-03)
-├── sillage/                           App (compose + env + thin binds)
-│   ├── .env                           Secrets + image tags + the three domains
+├── sillage/                           Retail app (compose + env + thin binds)
+│   ├── .env
 │   ├── compose.yaml
-│   ├── .feedscratch/                  Vendor feed cache (writable)
-│   ├── ean-image-scrape/              Unreviewed EAN scrape (scraped/ is NOT the shop CDN)
-│   ├── python-analysis/               Inventory + sitemap helpers copied for ovhe
-│   ├── scripts/                       vps-bootstrap.sh, write-sitemaps.py
+│   ├── .feedscratch/
+│   ├── scripts/                       vps-bootstrap.sh, wp-fresh-install.php, build-push-images.sh
+│   ├── wordpress-image/               Pinned WP 7.1 Dockerfile (copied for Hub builds)
 │   ├── sillage-core/
 │   │   ├── data/image_overrides.json
 │   │   ├── data/secrets.overlay.env
 │   │   └── logs/
-│   └── ecom_sites/config/             php.ini, mariadb.vps.cnf, lps-media nginx
-├── ecom_sites/data/                   Bind-mounted data (do not delete)
+│   └── ecom_sites/config/
+├── ecom_sites/data/
 │   ├── wp/                            Retail WordPress
-│   ├── wp-wholesale/                  Wholesale WordPress (wholesale.mirainikki.xyz)
-│   ├── wp-db/                         Retail MariaDB only (earth + sillage)
-│   ├── wholesale-db/                  Wholesale MariaDB (earth_wpf + sillage_wpf)
-│   ├── media/                         **Shop CDN photos** (images.prinscosmetic.eu)
-│   ├── sitemaps/                      Retail robots + wp-sitemap*.xml (Caddy)
-│   └── sitemaps-wholesale/            Wholesale sitemaps
+│   ├── wp-db/                         Retail MariaDB (earth + sillage)
+│   ├── media/                         Shop CDN photos
+│   └── sitemaps/                      robots + wp-sitemap*.xml (Caddy)
 └── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile
 ```
 
-**Removed on purpose (2026-09-03):** `~/brasty/` (dump; needed hits copied to media),
-`~/ovhe-backup/`, `~/sillage/backups/`, duplicate download zips.
+Until cutover, ovhe **also** has `wp-wholesale/`, `wholesale-db/`, `sitemaps-wholesale/`, and
+wholesale containers from the old combined compose. Do not treat that as the empty-VPS recipe.
 
-Docker reads:
+Docker reads (retail):
 
 | Container | Host path |
 |---|---|
 | `ecom` | `~/ecom_sites/data/wp` + `~/sillage/ecom_sites/config/php.ini` |
 | `ecom-db` | `~/ecom_sites/data/wp-db` (retail only) |
-| `wholesale-db` | `~/ecom_sites/data/wholesale-db` |
 | `lps-media` | `~/ecom_sites/data/media` |
 | `sillage-core` / `sillage-cron` | overrides + secrets + logs + `~/sillage/.feedscratch` |
-| `wholesale-ecom` | `~/ecom_sites/data/wp-wholesale` |
-| `wholesale-core` / `wholesale-cron` | `secrets.overlay.wholesale.env` + `image_overrides.wholesale.json` + `logs-wholesale` |
 
-Host Caddy (`/etc/caddy/Caddyfile`) is **not** inside `~/sillage`. It terminates TLS and
-proxies `:104` (retail shop), `:4000` (retail dashboard), `:105` (images),
-`:106` (wholesale shop), `:4001` (wholesale dashboard). The shop sites must 403
-AI training crawlers — snippet
+Host Caddy (`/etc/caddy/Caddyfile`) is **not** inside `~/sillage`. On an empty retail VPS it
+proxies `:104` (shop), `:4000` (dashboard), `:105` (images). On ovhe until wholesale cutover it
+also proxies `:106` / `:4001`. Shop sites must 403 AI training crawlers — snippet
 [`ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet),
 story [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md). The images site strips `Server` / `Via`
 and `lps-media` 404s are plain text (no nginx version).
@@ -113,7 +106,7 @@ These were **not** used by the running stack after the single-compose move:
 |---|---|
 | `~/sillage-core/` | Old split-tree copy (live binds are under `~/sillage/sillage-core/`) |
 | `~/redis/` | Legacy compose; Valkey is in `~/sillage/compose.yaml` |
-| `~/wordpress-image/` | Empty leftover Dockerfile |
+| `~/wordpress-image/` (orphan) | Old leftover; the real Dockerfile is `~/sillage/wordpress-image/` copied for Hub builds |
 | `~/Sillage/` | Only existed for `.feedscratch`; cache now lives in `~/sillage/.feedscratch` |
 | `~/vps-bootstrap.sh` | Duplicate; real script is `~/sillage/scripts/vps-bootstrap.sh` |
 | `~/ecom_sites/compose.yaml*` + `.env.legacy-unused` | Old split compose (do not `compose up` from here) |

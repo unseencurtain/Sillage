@@ -53,8 +53,8 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
    matching the live UI and shop rules in the same change.
 7. **Hub images are built and pushed on ovhe.** That host is `docker login` as `unseencurtain`.
    Do not build Hub images in a cloud-agent VM or copy Docker Hub credentials off the VPS.
-   See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**. Wholesale containers are `wholesale-*`,
-   never `wpf-*`; wholesale has its own MariaDB.
+   See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**. Empty VPS: `bootstrap-host.sh` then
+   `deploy-vps.sh` (core + WordPress). Wholesale is [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 
 ## Commands
 

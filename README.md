@@ -8,8 +8,8 @@ Bun/TypeScript sync engine, thin WordPress plugin, React ops dashboard. Designed
 
 | Surface | Purpose |
 |---|---|
-| WooCommerce storefront | Customer shop (HPOS orders, EUR, vendor categories, tracking page). Optional second WP: wholesale.mirainikki.xyz |
-| Sillage dashboard | Sync controls, orders, settings, dry-run / live dispatch (wholesale dashboard is sandbox-locked) |
+| WooCommerce storefront | Customer shop (HPOS orders, EUR, vendor categories, tracking page) |
+| Sillage dashboard | Sync controls, orders, settings, dry-run / live dispatch |
 | sillage-core | Catalogue sync, pricing, images, order ingest + vendor dispatch |
 | sillage-bridge | Thin WP plugin (REST + shortcodes only — **no product SQL writes**) |
 
@@ -29,7 +29,7 @@ Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIEN
 
 | Path | What it is |
 |---|---|
-| `production-environment/compose.yaml` | Single stack: ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron; optional `wholesale-*` (own MariaDB) via profile `wholesale` |
+| `production-environment/compose.yaml` | Single stack: ecom, ecom-db, valkey, lps-media, sillage-core, sillage-cron |
 | `production-environment/.env.example` | All required env keys (copy to `.env`) |
 | `production-environment/sillage-core/` | Sync engine, HTTP API, React dashboard |
 | `production-environment/ecom_sites/` | Host data mounts + WP/nginx/MariaDB config |
@@ -76,7 +76,7 @@ Host my-sillage
 
 ```bash
 cp production-environment/.env.example production-environment/.env
-# Fill BeautyFort + BTS (+ optional WHOLESALE_PERFUMES_*) credentials.
+# Fill BeautyFort + BTS credentials.
 # Dashboard password is generated on deploy if missing remotely.
 ```
 
@@ -106,11 +106,11 @@ cp production-environment/.env.example production-environment/.env   # vendor ke
 
 What that does:
 
-1. Builds/pushes **`unseencurtain/sillage-core`** and **`unseencurtain/sillage-wordpress`** to Docker Hub
+1. Builds/pushes **`unseencurtain/sillage-core`** and **`unseencurtain/sillage-wordpress`** (pinned WP 7.1) to Docker Hub
 2. Rsyncs compose + config + plugin (not a full source tree)
 3. Starts the whole stack from `~/sillage/compose.yaml` + `~/sillage/.env`
-4. Configures host Caddy with Let’s Encrypt
-5. Fresh WordPress install only when needed; grants + migrate
+4. Configures host Caddy with Let’s Encrypt (skips rewrite if other sites already live there)
+5. Fresh WordPress: WooCommerce, HPOS, permalinks, Coming soon off; grants + migrate
 6. Writes dashboard passwords to **`.deploy/vps-dashboard-<host>.txt`** (gitignored)
 
 Re-run to update images/plugin. It will not wipe MariaDB / WordPress data unless you clear `~/ecom_sites/data`.
