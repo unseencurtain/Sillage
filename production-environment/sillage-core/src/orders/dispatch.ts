@@ -349,7 +349,7 @@ export async function dispatchVendorOrder(
     const result: VendorOrderResult = await adapter.submit(draft, dryRun);
     return await applySubmitResult(id, adapter, result, dryRun, settings);
   } catch (err) {
-    // Unexpected throw. For BTS/wholesale-perfumes an ambiguous outcome must not be auto-retried (no idempotency key).
+    // Unexpected throw. For BTS an ambiguous outcome must not be auto-retried (no idempotency key).
     const message = String(err);
     const to: VendorOrderStatus =
       vendor.slug === "bts" ? "needs_attention" : "failed";

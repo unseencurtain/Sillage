@@ -81,7 +81,6 @@ export function Sync() {
   const pendingRebuild = live.data?.pendingRebuild === true;
   const catalogueReady = live.data?.catalogueReady !== false;
   const intervalMin = live.data?.cooldownMinutes ?? 30;
-  const wholesale = false;
   const vendorPair = "BeautyFort + BTS";
 
   const run = useMutation({
@@ -217,13 +216,7 @@ export function Sync() {
             </p>
             {live.data ? (
               <p className="font-mono text-xs text-muted">
-                {wholesale
-                  ? `WPF ${
-                      live.data.wholesalePerfumes?.allow ?? live.data.allow
-                        ? "ready"
-                        : `wait ${live.data.wholesalePerfumes?.retryInMinutes ?? live.data.retryInMinutes}m`
-                    }`
-                  : `BF ${live.data.beautyfort.allow ? "ready" : `wait ${live.data.beautyfort.retryInMinutes}m`} · BTS ${live.data.bts.allow ? "ready" : `wait ${live.data.bts.retryInMinutes}m`}`}
+                {`BF ${live.data.beautyfort.allow ? "ready" : `wait ${live.data.beautyfort.retryInMinutes}m`} · BTS ${live.data.bts.allow ? "ready" : `wait ${live.data.bts.retryInMinutes}m`}`}
                 {pendingRebuild ? " · rebuild queued" : ""}
                 {scheduleOn ? " · schedule on" : " · schedule off"}
               </p>

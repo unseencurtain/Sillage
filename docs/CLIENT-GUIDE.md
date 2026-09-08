@@ -7,20 +7,16 @@ dashboard — not for developers. Button names and page titles match what you se
 
 | What | Address |
 |---|---|
-| Customer shop (retail) | https://prinscosmetic.eu |
-| Operations dashboard (retail) | https://sillage.prinscosmetic.eu |
-| Track an order (retail customers) | https://prinscosmetic.eu/track-order/ |
-| Wholesale shop | https://wholesale.mirainikki.xyz (separate repo: [sillage-b2b](https://github.com/unseencurtain/sillage-b2b)) |
-| Wholesale operations dashboard | https://sillage-wholesale.mirainikki.xyz |
+| Customer shop | https://prinscosmetic.eu |
+| Operations dashboard | https://sillage.prinscosmetic.eu |
+| Track an order | https://prinscosmetic.eu/track-order/ |
 
-The wholesale shop is a **different website**: different catalogue (wholesale-perfumes only),
-**€300 minimum order**, and vendor dispatch is **sandbox-only** (dry-run — it does not place a
-real order at the supplier). Do not mix it up with the retail BeautyFort + BTS shop.
+A separate wholesale-perfumes shop (different repo, different catalogue, €300 minimum) lives at
+https://wholesale.mirainikki.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+This Sillage dashboard is **BeautyFort + BTS only**.
 
 Ask the operator who deployed the shop for the dashboard password. It is **not** in this repository.
-Retail and wholesale dashboards use the **same** operator user (`admin` in `DASHBOARD_USER`); the
-password lives only in `~/sillage/.env` on the VPS. Wholesale wp-admin is a separate WordPress
-user (`admin` @ wholesale.mirainikki.xyz); that password is `WHOLESALE_WP_ADMIN_PASS` in the same file.
+The operator user is `admin` in `DASHBOARD_USER`; the password lives only in `~/sillage/.env` on the VPS.
 
 ---
 
@@ -55,10 +51,6 @@ Sillage does three jobs:
 
 Shoppers never see “BeautyFort” or “BTS” as shop categories. They see brands, product types, and
 normal WooCommerce pages. The dashboard is for **you**.
-
-A third wholesaler (wholesale-perfumes) is **not** in this Sillage repo. It is sold on the
-separate wholesale site (https://wholesale.mirainikki.xyz) from
-[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) with a **€300** minimum order.
 
 ---
 
@@ -178,7 +170,7 @@ This is the catalogue control room.
 
 The **runs table**:
 
-- **Fetched** — retail: `BF n · BTS m` (a **Δ** on BTS means the “what changed” API). Wholesale: `WPF n` catalogue SKUs compared, **not** the raw hourly store XML line count (that file has many rows per product).
+- **Fetched** — `BF n · BTS m` (a **Δ** on BTS means the “what changed” API).
 - **Shop writes** — `New n · Updated n · Prices n` (new WooCommerce products, listing/content
   rewrites including photos, price/stock writes). Not `+ ~ $`. A prices & stock run right after a rebuild often writes **0** — the shop already has those prices.
 
@@ -229,8 +221,6 @@ Save a multiplier / FX / VAT / min stock → the same automatic **price rewrite*
 **How often this vendor updates** on the card explains BeautyFort vs BTS (see §5). Last live fetch
 is shown there.
 
-wholesale-perfumes appears as a **read-only parked** card. Do not try to activate it on this shop.
-
 API keys are **not** on this page. Use **Secrets**.
 
 ### Orders
@@ -273,7 +263,7 @@ order dry-run is off.
 |---|---|
 | **Shop URLs** | Public shop and image CDN addresses. Saving the image CDN does **not** by itself rewrite every product photo URL |
 | **Pricing & catalogue** | **Price multiplier**, optional **price tiers** (cost bands), **stock threshold**, **Hide products without image** (leave **on**) |
-| **Cart minimum (storefront fee)** | Optional small-order fee on the **retail** shop (off by default). Independent of per-vendor minimum order value. The **wholesale** shop instead **blocks checkout** under €300 |
+| **Cart minimum (storefront fee)** | Optional small-order fee (off by default). Independent of per-vendor minimum order value |
 | **Schedule** | **Sync enabled**, timezone, **Minutes between syncs** (a *check interval*, not “minutes a day”), **Daily full catalogue rebuild** + hour |
 | **Order safety** | Dry-run, auto-dispatch, max order value, daily spend cap, tracking poll minutes, customer email on tracking |
 | **Advanced** | Volume filter (ranges vs exact ml), description mode, **company billing** (fill BeautyFort **before** the first live BeautyFort order; BTS invoices from their portal) |
@@ -292,9 +282,7 @@ whoever maintains the server. You do not need it for daily markup changes.
 
 These rules are on purpose. They match how dropship dispatch works.
 
-**Basket / checkout.** Retail has no supplier minimum. The wholesale shop
-(https://wholesale.mirainikki.xyz) **will not let you check out under €300** — the cart shows how
-much more to add. That is a real supplier rule, not a small-order fee.
+**Basket / checkout.** This retail shop has no supplier minimum. A cart cannot mix BeautyFort and BTS.
 
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
 image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. Extra files sitting in the
@@ -303,7 +291,7 @@ Google is allowed to crawl the shop. Only products that are **visible in the sho
 + enough stock, not **Keep hidden**) are listed in the sitemap. Catalogue-hidden products are
 told not to be indexed. The sitemap is a static file Caddy serves (PHP does not build it). It
 refreshes when the catalogue is fully rebuilt, not on every **Minutes between syncs** tick —
-that setting is only how often wholesale **price and stock** are checked.
+that setting is only how often **price and stock** are checked.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those
@@ -362,7 +350,7 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 - It will not mix two wholesalers in one shipment.
 - It will not use BTS “recommended retail” as a strike-through price.
 - It will not show products with only a camera icon or a tiny BeautyFort thumb while hide-without-image is on.
-- It will not import wholesale-perfumes onto this retail shop.
+- It will not import a third supplier onto this retail shop.
 - It will not give you a wholesaler sandbox. Live is live.
 - WordPress is not the place to “fix” 50,000 prices by hand. Use Settings.
 
@@ -376,9 +364,6 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 | Sync button says **Scheduled (30m)** and will not click | That is correct while Sync enabled is on |
 | BTS fetched 0 and the run is still success | Normal on most interval checks (BTS daily batch) |
 | Overview **Visible in shop** is much smaller than **Published in WP** | Hidden no-image + stock hide. Expected. Check the identity line: visible + hidden = published |
-| Wholesale `https://…/shop/` is Apache **Not Found** | Pretty permalinks need `wp-wholesale/.htaccess`. Bootstrap writes `ecom_sites/config/wordpress.htaccess`. Live fix: copy that file into the WordPress web root. |
-| Wholesale `/shop/` loads but says “Great things are on the horizon” | WooCommerce **Coming soon** mode. Bootstrap now sets `woocommerce_coming_soon=no`. |
-| Sync **Fetched** is ~140k after a prices & stock run | Old count of raw store XML lines. After this fix, Fetched is unique catalogue SKUs (~19k). A run with 0 shop writes right after a rebuild is normal |
 | Red **Orders dry-run is OFF** banner | Turn dry-run back on unless you are deliberately live |
 | Dashboard will not load | Tell whoever runs the server; this guide cannot fix hosting |
 

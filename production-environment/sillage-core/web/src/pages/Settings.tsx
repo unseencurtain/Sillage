@@ -185,8 +185,6 @@ export function Settings() {
 
   const dryRunOff = !isTruthy(form.orders_dry_run);
   const autoOn = isTruthy(form.orders_auto_dispatch);
-  const wholesale = false;
-  const sandboxLocked = false;
 
   return (
     <div className="space-y-6">
@@ -194,9 +192,8 @@ export function Settings() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
           <p className="text-sm text-muted">
-            {wholesale
-              ? "Wholesale shop (wholesale-perfumes) — pricing, schedule, €300 minimum order, sandbox dispatch. Vendor API keys live on "
-              : "BeautyFort + BTS retail shop — pricing, schedule, cart fee, order safety. Vendor API keys live on "}
+            BeautyFort + BTS retail shop — pricing, schedule, cart fee, order safety. Vendor API keys
+            live on{" "}
             <Link to="/secrets" className="font-medium text-accent hover:underline">
               Secrets
             </Link>
@@ -218,7 +215,7 @@ export function Settings() {
         <Link to="/secrets" className="font-medium text-accent hover:underline">
           Secrets
         </Link>{" "}
-        → fill {wholesale ? "wholesale-perfumes keys" : "BeautyFort + BTS"} →{" "}
+        → fill BeautyFort + BTS →{" "}
         <Link to="/sync" className="font-medium text-accent hover:underline">
           Sync → Rebuild catalogue
         </Link>{" "}
@@ -444,11 +441,7 @@ export function Settings() {
 
       <Section
         title="Schedule"
-        help={
-          wholesale
-            ? "Minutes between syncs is the incremental store XML (price/stock). Daily full rebuild re-downloads the wholesale-perfumes catalogue."
-            : "The schedule clock is shared. Minutes between syncs is the incremental check (BeautyFort stock file / BTS daily change batch). Daily full rebuild is the routine catalogue refresh (new products, categories in WordPress). The 25%/7-day BTS pull is emergency recovery only."
-        }
+        help="The schedule clock is shared. Minutes between syncs is the incremental check (BeautyFort stock file / BTS daily change batch). Daily full rebuild is the routine catalogue refresh (new products, categories in WordPress). The 25%/7-day BTS pull is emergency recovery only."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
@@ -484,11 +477,7 @@ export function Settings() {
           </Field>
           <Field
             label="Minutes between syncs"
-            help={
-              wholesale
-                ? "Not “30 minutes a day” — this is the incremental store (price/stock) check. Daily full rebuild is a separate control below."
-                : "Not “30 minutes a day” — this is the incremental check (every 30 / 35 / 120 minutes). Same clock for BeautyFort and BTS; they cool down independently. Daily full rebuild is a separate control below."
-            }
+            help="Not “30 minutes a day” — this is the incremental check (every 30 / 35 / 120 minutes). Same clock for BeautyFort and BTS; they cool down independently. Daily full rebuild is a separate control below."
           >
             <input
               type="number"
@@ -510,11 +499,7 @@ export function Settings() {
           <div className="rounded-lg border border-line/70 bg-panel px-4 py-3">
             <Toggle
               label="Daily full catalogue rebuild"
-              hint={
-                wholesale
-                  ? "Routine refresh once per day after the hour below: full wholesale-perfumes catalogue, new products, and WordPress categories. Incremental store checks stay on. Manual Rebuild on Sync still works."
-                  : "Routine refresh once per day after the hour below: full BeautyFort + BTS catalogues, new products, and WordPress categories. Incremental 30-minute checks stay on. BTS 25%/7-day recovery stays as emergency backup. Manual Rebuild on Sync still works."
-              }
+              hint="Routine refresh once per day after the hour below: full BeautyFort + BTS catalogues, new products, and WordPress categories. Incremental 30-minute checks stay on. BTS 25%/7-day recovery stays as emergency backup. Manual Rebuild on Sync still works."
               checked={isTruthy(form.full_sync_enabled)}
               disabled={busy}
               onChange={(v) => setBool("full_sync_enabled", v)}
@@ -543,11 +528,7 @@ export function Settings() {
 
       <Section
         title="Order safety"
-        help={
-          sandboxLocked
-            ? "This wholesale instance is sandbox-locked: dry-run stays on and auto-dispatch stays off. Live vendor spend is disabled in code, not only in this toggle."
-            : "Fail-closed defaults: dry-run on, auto-dispatch off. Dashboard Dry-run / Live buttons ignore this dry-run flag — they always set their own mode."
-        }
+        help="Fail-closed defaults: dry-run on, auto-dispatch off. Dashboard Dry-run / Live buttons ignore this dry-run flag — they always set their own mode."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div
@@ -558,26 +539,18 @@ export function Settings() {
           >
             <Toggle
               label="Orders dry-run"
-              hint={
-                sandboxLocked
-                  ? "Locked on for this wholesale instance. Dispatch records the payload and never calls the vendor cart/submit APIs."
-                  : "When on, auto-dispatch and CLI never spend money. Turn off only when you intend live spend."
-              }
+              hint="When on, auto-dispatch and CLI never spend money. Turn off only when you intend live spend."
               checked={isTruthy(form.orders_dry_run)}
-              disabled={busy || sandboxLocked}
+              disabled={busy}
               onChange={(v) => setBool("orders_dry_run", v)}
             />
           </div>
           <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
             <Toggle
               label="Auto-dispatch"
-              hint={
-                sandboxLocked
-                  ? "Locked off for this wholesale instance until live dispatch is deliberately enabled in code."
-                  : "Off = human Approve / Dry-run / Live. On = cron submits due rows using the dry-run flag above."
-              }
+              hint="Off = human Approve / Dry-run / Live. On = cron submits due rows using the dry-run flag above."
               checked={isTruthy(form.orders_auto_dispatch)}
-              disabled={busy || sandboxLocked}
+              disabled={busy}
               onChange={(v) => setBool("orders_auto_dispatch", v)}
             />
           </div>
@@ -666,24 +639,22 @@ export function Settings() {
             </Field>
           </div>
 
-          {wholesale ? null : (
-            <div>
-              <h3 className="text-sm font-semibold">Company billing profiles</h3>
-              <p className="mt-1 text-xs text-muted">
-                BeautyFort InvoiceAddress. BTS has no billing API — kept for ops reference and dry-run
-                payloads.
-              </p>
-              <div className="mt-3 grid gap-6 lg:grid-cols-2">
-                <BillingEditor
-                  title="BeautyFort"
-                  value={bfBilling}
-                  disabled={busy}
-                  onChange={setBfBilling}
-                />
-                <BillingEditor title="BTS" value={btsBilling} disabled={busy} onChange={setBtsBilling} />
-              </div>
+          <div>
+            <h3 className="text-sm font-semibold">Company billing profiles</h3>
+            <p className="mt-1 text-xs text-muted">
+              BeautyFort InvoiceAddress. BTS has no billing API — kept for ops reference and dry-run
+              payloads.
+            </p>
+            <div className="mt-3 grid gap-6 lg:grid-cols-2">
+              <BillingEditor
+                title="BeautyFort"
+                value={bfBilling}
+                disabled={busy}
+                onChange={setBfBilling}
+              />
+              <BillingEditor title="BTS" value={btsBilling} disabled={busy} onChange={setBtsBilling} />
             </div>
-          )}
+          </div>
         </div>
       </details>
     </div>

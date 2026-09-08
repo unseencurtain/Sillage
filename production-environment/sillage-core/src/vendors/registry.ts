@@ -14,8 +14,8 @@ export function isParkedVendor(slug: string): boolean {
 }
 
 /**
- * `--vendor=all` is BeautyFort + BTS. Unknown slugs (including leftover wholesale-perfumes
- * rows in an old database) are never selected.
+ * `--vendor=all` is BeautyFort + BTS. Unknown leftover vendor slugs in an old
+ * database are never selected.
  */
 export function vendorSelectableForSync(slug: string, _explicit: boolean): boolean {
   return STOREFRONT_VENDOR_SLUGS.includes(slug as (typeof STOREFRONT_VENDOR_SLUGS)[number]);

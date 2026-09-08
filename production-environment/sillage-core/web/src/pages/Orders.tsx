@@ -187,7 +187,6 @@ export function Orders() {
     settingsQ.data?.orders_dry_run === undefined
       ? true
       : settingsQ.data.orders_dry_run === "1" || settingsQ.data.orders_dry_run === "true";
-  const sandboxLocked = false;
 
   const detailData = detail.data;
   const order = detailData?.order;
@@ -200,21 +199,12 @@ export function Orders() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
         <p className="text-sm text-muted">
-          Per-vendor dispatch rows · Dry-run never spends.
-          {sandboxLocked
-            ? " This wholesale instance is sandbox-locked — Live dispatch is disabled."
-            : " Live always asks for confirmation."}
+          Per-vendor dispatch rows · Dry-run never spends. Live always asks for confirmation.
           {data ? ` · ${data.total.toLocaleString()} total` : ""}
         </p>
       </header>
 
-      {sandboxLocked ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
-          Wholesale sandbox: every dispatch is dry-run. The vendor cart is never cleared or
-          submitted. Turn this into live spend only by changing <span className="font-mono text-xs">SILLAGE_PROFILE</span>{" "}
-          code — not from this screen.
-        </div>
-      ) : !settingsDryRun ? (
+      {!settingsDryRun ? (
         <div className="rounded-xl border-2 border-danger bg-red-50 px-4 py-4 text-sm text-danger">
           <div className="text-base font-semibold">LIVE order mode (Settings dry-run is OFF)</div>
           <p className="mt-1">
@@ -310,14 +300,12 @@ export function Orders() {
                               }
                               onClick={() => dispatch.mutate({ id: o.id, live: false })}
                             />
-                            {!sandboxLocked ? (
-                              <ActionBtn
-                                label="Live"
-                                danger
-                                disabled={rowBusy}
-                                onClick={() => startLiveConfirm(o.id)}
-                              />
-                            ) : null}
+                            <ActionBtn
+                              label="Live"
+                              danger
+                              disabled={rowBusy}
+                              onClick={() => startLiveConfirm(o.id)}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -392,14 +380,12 @@ export function Orders() {
                       }
                       onClick={() => dispatch.mutate({ id: order.id as number, live: false })}
                     />
-                    {!sandboxLocked ? (
-                      <ActionBtn
-                        label="Live"
-                        danger
-                        disabled={pendingAction === order.id}
-                        onClick={() => setConfirmLiveId(order.id as number)}
-                      />
-                    ) : null}
+                    <ActionBtn
+                      label="Live"
+                      danger
+                      disabled={pendingAction === order.id}
+                      onClick={() => setConfirmLiveId(order.id as number)}
+                    />
                   </div>
                 </div>
 

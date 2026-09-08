@@ -304,11 +304,6 @@ BEAUTYFORT_TEST_MODE=false
 BTS_JWT_TOKEN=${BTS_JWT_TOKEN:-}
 BTS_BASE_URL=${BTS_BASE_URL:-https://api.btswholesaler.com/v1/api}
 BTS_LANGUAGE=en-US
-WHOLESALE_PERFUMES_USER=${WHOLESALE_PERFUMES_USER:-}
-WHOLESALE_PERFUMES_TOKEN=${WHOLESALE_PERFUMES_TOKEN:-}
-WHOLESALE_PERFUMES_CATALOG_URL=${WHOLESALE_PERFUMES_CATALOG_URL:-https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en}
-WHOLESALE_PERFUMES_STOCK_URL=${WHOLESALE_PERFUMES_STOCK_URL:-https://www.wholesale-perfumes.eu/xml/store/LovelyXml/EUR}
-WHOLESALE_PERFUMES_API_BASE_URL=${WHOLESALE_PERFUMES_API_BASE_URL:-https://www.wholesale-perfumes.eu/api/v1}
 BRASTY_PRODUCT_FEED_URL=${BRASTY_PRODUCT_FEED_URL:-}
 BRASTY_AVAILABILITY_FEED_URL=${BRASTY_AVAILABILITY_FEED_URL:-}
 
@@ -336,7 +331,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_WPF_USER='${WHOLESALE_PERFUMES_USER:-}' LOCAL_WPF_TOKEN='${WHOLESALE_PERFUMES_TOKEN:-}' LOCAL_WPF_CATALOG='${WHOLESALE_PERFUMES_CATALOG_URL:-}' LOCAL_WPF_STOCK='${WHOLESALE_PERFUMES_STOCK_URL:-}' LOCAL_WPF_API='${WHOLESALE_PERFUMES_API_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 p = pathlib.Path.home() / "sillage" / ".env"
 text = p.read_text()
@@ -365,11 +360,6 @@ for k, v in [
     ("BEAUTYFORT_ENDPOINT", os.environ.get("LOCAL_BF_ENDPOINT") or None),
     ("BTS_JWT_TOKEN", os.environ.get("LOCAL_BTS_JWT") or None),
     ("BTS_BASE_URL", os.environ.get("LOCAL_BTS_BASE") or None),
-    ("WHOLESALE_PERFUMES_USER", os.environ.get("LOCAL_WPF_USER") or None),
-    ("WHOLESALE_PERFUMES_TOKEN", os.environ.get("LOCAL_WPF_TOKEN") or None),
-    ("WHOLESALE_PERFUMES_CATALOG_URL", os.environ.get("LOCAL_WPF_CATALOG") or None),
-    ("WHOLESALE_PERFUMES_STOCK_URL", os.environ.get("LOCAL_WPF_STOCK") or None),
-    ("WHOLESALE_PERFUMES_API_BASE_URL", os.environ.get("LOCAL_WPF_API") or None),
     ("BRASTY_PRODUCT_FEED_URL", os.environ.get("LOCAL_BRASTY_PRODUCT") or None),
     ("BRASTY_AVAILABILITY_FEED_URL", os.environ.get("LOCAL_BRASTY_AVAIL") or None),
 ]:
@@ -416,60 +406,6 @@ if [[ -n "${IMAGES_DOMAIN:-}" ]]; then
 }"
 fi
 
-WPF_SITE_BLOCK=""
-if [[ -n "${WHOLESALE_SHOP_DOMAIN:-${WPF_SHOP_DOMAIN:-}}" ]]; then
-  WHOLESALE_SHOP_DOMAIN="${WHOLESALE_SHOP_DOMAIN:-${WPF_SHOP_DOMAIN}}"
-  WHOLESALE_ECOM_PORT="${WHOLESALE_ECOM_PORT:-${WPF_ECOM_PORT:-106}}"
-  WHOLESALE_SILLAGE_PORT="${WHOLESALE_SILLAGE_PORT:-${WPF_SILLAGE_PORT:-4001}}"
-  WHOLESALE_DASH_DOMAIN="${WHOLESALE_DASH_DOMAIN:-${WPF_DASH_DOMAIN:-sillage-wholesale.mirainikki.xyz}}"
-  WPF_SITE_BLOCK="${WHOLESALE_SHOP_DOMAIN} {
-	@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
-	handle @heavybot {
-		respond \"Forbidden\" 403
-	}
-	handle_path /lps-media/* {
-		header {
-			-Server
-			-Via
-		}
-		reverse_proxy localhost:${MEDIA_PORT} {
-			header_down -Server
-			header_down -Via
-		}
-	}
-	handle /robots.txt {
-		root * /home/ubuntu/ecom_sites/data/sitemaps-wholesale
-		file_server
-		header Cache-Control \"public, max-age=3600\"
-		header -Server
-	}
-	handle /wp-sitemap* {
-		root * /home/ubuntu/ecom_sites/data/sitemaps-wholesale
-		file_server
-		header Cache-Control \"public, max-age=86400\"
-		header -Server
-	}
-	header {
-		-Server
-		-Via
-		-X-Powered-By
-	}
-	reverse_proxy localhost:${WHOLESALE_ECOM_PORT} {
-		header_down -Server
-		header_down -Via
-		header_down -X-Powered-By
-	}
-}
-${WHOLESALE_DASH_DOMAIN} {
-	header {
-		-Server
-		-Via
-	}
-	reverse_proxy localhost:${WHOLESALE_SILLAGE_PORT} {
-		header_down -Server
-		header_down -Via
-	}
-}"
 fi
 
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
@@ -527,7 +463,6 @@ ${DASH_DOMAIN} {
 	}
 }
 ${IMAGES_SITE_BLOCK}
-${WPF_SITE_BLOCK}
 EOF
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile

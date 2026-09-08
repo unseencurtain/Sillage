@@ -10,8 +10,6 @@ const HELP: Record<string, string> = {
   BEAUTYFORT_USER: "BeautyFort SOAP username for catalogue + order APIs.",
   BEAUTYFORT_SECRET: "BeautyFort SOAP password/secret. Never shown after save.",
   BTS_JWT_TOKEN: "BTS Wholesaler JWT from their portal. Powers catalogue + dispatch.",
-  WHOLESALE_PERFUMES_USER: "unused on this retail shop",
-  WHOLESALE_PERFUMES_TOKEN: "unused on this retail shop",
 };
 
 function sourceLabel(source: SecretStatus["source"]) {

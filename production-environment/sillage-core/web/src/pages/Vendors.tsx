@@ -106,17 +106,16 @@ function confirmDescription(original: Vendor, patch: VendorPatch): string {
 export function Vendors() {
   const { data, isLoading } = useQuery({ queryKey: ["vendors"], queryFn: api.vendors });
   const vendors = data?.vendors ?? [];
-  const wholesale = false;
   const active = vendors.filter((v) => !v.parked);
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
-        <p className="text-sm text-muted">
-          {wholesale
-            ? "wholesale-perfumes only on this shop. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers (no live vendor download). Credentials: "
-            : "BeautyFort + BTS only. How often prices/stock move is on each card below — they are not the same. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored offers (no live vendor download). Credentials: "}
+          <p className="text-sm text-muted">
+            BeautyFort + BTS only. How often prices/stock move is on each card below — they are not
+            the same. Saving multiplier / FX / VAT / min stock recalculates shop prices from stored
+            offers (no live vendor download). Credentials:{" "}
           <Link to="/secrets" className="font-medium text-accent hover:underline">
             Secrets
           </Link>
@@ -406,7 +405,6 @@ function CatalogueSyncPanel({
     : "never";
   const isBf = slug === "beautyfort";
   const isBts = slug === "bts";
-  const isWpf = slug === "wholesale-perfumes";
 
   return (
     <div className="mt-4 rounded-lg border border-line bg-canvas/50 p-4">
@@ -459,27 +457,7 @@ function CatalogueSyncPanel({
           </div>
         </dl>
       ) : null}
-      {isWpf ? (
-        <dl className="mt-3 space-y-2 text-sm">
-          <div>
-            <dt className="font-medium text-ink">Prices and stock</dt>
-            <dd className="text-muted">
-              Every {callIntervalMinutes} minutes from the hourly store XML. Many rows share one
-              product id — Sillage collapses to unique SKUs. Fetched on Sync is those catalogue SKUs,
-              not the raw line count.
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium text-ink">Full catalogue rebuild</dt>
-            <dd className="text-muted">
-              Routine: Settings → Daily full catalogue rebuild (once per 24 hours after the chosen
-              hour) — new products and WordPress categories from the daily catalog XML. Manual: Sync
-              → Rebuild catalogue.
-            </dd>
-          </div>
-        </dl>
-      ) : null}
-      {!isBf && !isBts && !isWpf ? (
+      {!isBf && !isBts ? (
         <p className="mt-2 text-sm text-ink">No live feed for this supplier.</p>
       ) : null}
       <p className="mt-2 text-xs text-muted">Last live fetch: {last}</p>
