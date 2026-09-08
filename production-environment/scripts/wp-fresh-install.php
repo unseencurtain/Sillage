@@ -50,23 +50,42 @@ update_option('permalink_structure', '/%postname%/');
 update_option('woocommerce_coming_soon', 'no');
 update_option('woocommerce_onboarding_profile', array('skipped' => true));
 
+// Blocksy's companion ships as either the free or the pro directory depending on the
+// image; activate whichever one is present rather than guessing one name.
 foreach (array(
-    'woocommerce/woocommerce.php',
-    'redis-cache/redis-cache.php',
-    'sillage-bridge/sillage-bridge.php',
-    'blocksy-companion/blocksy-companion.php',
-) as $p) {
-    if (!file_exists(WP_PLUGIN_DIR . '/' . $p)) {
-        echo "$p missing\n";
+    array('woocommerce/woocommerce.php'),
+    array('redis-cache/redis-cache.php'),
+    array('sillage-bridge/sillage-bridge.php'),
+    array('blocksy-companion-pro/blocksy-companion.php', 'blocksy-companion/blocksy-companion.php'),
+) as $candidates) {
+    $found = null;
+    foreach ($candidates as $p) {
+        if (file_exists(WP_PLUGIN_DIR . '/' . $p)) {
+            $found = $p;
+            break;
+        }
+    }
+    if ($found === null) {
+        echo implode(' | ', $candidates) . " missing\n";
         continue;
     }
-    $res = activate_plugin($p);
-    echo $p . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' ok') . PHP_EOL;
+    $res = activate_plugin($found);
+    echo $found . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' ok') . PHP_EOL;
 }
 
 if (function_exists('wp_get_theme') && wp_get_theme('blocksy')->exists()) {
     switch_theme('blocksy');
     echo "theme=blocksy\n";
+}
+
+// Leave the front page on "latest posts" and WordPress guesses a permalink for "/",
+// which on a synced shop lands the homepage on whichever product owns that post ID.
+$shopPage = (int) get_option('woocommerce_shop_page_id');
+if ($shopPage > 0) {
+    update_option('show_on_front', 'page');
+    update_option('page_on_front', $shopPage);
+    update_option('page_for_posts', 0);
+    echo 'front_page=' . $shopPage . PHP_EOL;
 }
 
 update_option('woocommerce_custom_orders_table_enabled', 'yes');
@@ -94,12 +113,15 @@ if ($secret !== '' && defined('ABSPATH')) {
     if (is_readable($wp)) {
         $text = file_get_contents($wp);
         if ($text !== false && strpos($text, "SILLAGE_SHARED_SECRET") === false) {
+            // WP-CLI loads wp-config.php twice, so bare define() calls warn on every run.
             $block = "\n/* Sillage bridge */\n"
-                . "define( 'SILLAGE_SHARED_SECRET', '" . addcslashes($secret, "'\\") . "' );\n"
-                . "define( 'SILLAGE_CORE_URL', '" . addcslashes($core, "'\\") . "' );\n"
-                . "define( 'SILLAGE_DASHBOARD_URL', '" . addcslashes($dash, "'\\") . "' );\n"
-                . "define( 'SILLAGE_DB', '" . addcslashes($sillageDb, "'\\") . "' );\n"
-                . "define( 'DISABLE_WP_CRON', true );\n";
+                . "if ( ! defined( 'SILLAGE_SHARED_SECRET' ) ) {\n"
+                . "\tdefine( 'SILLAGE_SHARED_SECRET', '" . addcslashes($secret, "'\\") . "' );\n"
+                . "\tdefine( 'SILLAGE_CORE_URL', '" . addcslashes($core, "'\\") . "' );\n"
+                . "\tdefine( 'SILLAGE_DASHBOARD_URL', '" . addcslashes($dash, "'\\") . "' );\n"
+                . "\tdefine( 'SILLAGE_DB', '" . addcslashes($sillageDb, "'\\") . "' );\n"
+                . "\tdefine( 'DISABLE_WP_CRON', true );\n"
+                . "}\n";
             $marker = "/* That's all, stop editing!";
             $text = strpos($text, $marker) !== false ? str_replace($marker, $block . $marker, $text) : ($text . $block);
             file_put_contents($wp, $text);
