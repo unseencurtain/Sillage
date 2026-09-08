@@ -53,9 +53,14 @@ And the rules behind them:
 
 ## 2. The rebuild, in stages
 
-Two hand-offs are deliberate. Everything a script can do is scripted; the theme and the first
-import are the owner's, because the paid Blocksy companion is uploaded by hand and the shop
-should look right before 51,000 products land in it.
+Everything a script can do is scripted. Three things are deliberately the owner's, in this
+order: **activation**, **customisation**, **the first import**. The paid Blocksy companion is
+uploaded by hand, and the shop should look right before 51,000 products land in it.
+
+So the deploy installs plugin and theme *files* and leaves every one of them **inactive**
+(`wp-fresh-install.php` only activates when `WP_ACTIVATE_PLUGINS=1`, which the deploy does not
+set). The owner activates what they want, customises, and then `--finish` re-checks the settings
+the engine and orders depend on before anything is imported.
 
 ### Stage 0 — host (automated)
 
@@ -83,16 +88,32 @@ The deploy refuses to start until all of them resolve to the box, so this cannot
   --media-from ovhe
 ```
 
-Ends with: WordPress installed (WooCommerce, HPOS, permalinks, EUR, coming-soon off, Blocksy
-theme, shop page as front page), the ~4,200 product photos in place and served over
-`images.…`, the bridge plugin active, the sitemap cron installed, **and an empty catalogue**.
+Ends with: WordPress installed and reachable, the shop options written (HPOS, permalinks, EUR,
+coming-soon off), WooCommerce / redis-cache / sillage-bridge / Blocksy **present but inactive**,
+the ~4,200 product photos in place and served over `images.…`, the sitemap cron installed,
+**and an empty catalogue**.
 
-### Stage 3 — theme and WordPress setup (owner) — work stops here
+### Stage 3 — activation and WordPress setup (owner) — work stops here
 
 Hand over `~/creds-retail.txt` and wait. The owner uploads `blocksy-companion-pro.zip` in
-Plugins → Add New → Upload, activates it, and sets up the theme, homepage, menus and shipping.
-`FS_METHOD` is pinned to `direct` so the upload never asks for FTP credentials, and the
-installer activates whichever companion directory it finds, so nothing here needs a redeploy.
+Plugins → Add New → Upload, activates the plugins and the theme, and sets up the homepage, menus
+and shipping. `FS_METHOD` is pinned to `direct` so the upload never asks for FTP credentials.
+
+Activating WooCommerce is what creates its tables and pages, so it has to happen before any
+import — that is what stage 3.5 confirms.
+
+### Stage 3.5 — readiness check (automated, after the owner is done)
+
+```bash
+./production-environment/scripts/deploy-vps.sh \
+  --host ovh --shop codeinmoon.xyz --dash sillage.codeinmoon.xyz --finish
+```
+
+Prints one line per check and repairs the *options* the architecture depends on — HPOS,
+permalinks, EUR, coming-soon off, and a real page on `/`. Plugin and theme activation is
+reported and never changed, so a half-customised shop is never overridden. Exit code is
+non-zero while anything required is still wrong, so the import is not started on a shop that
+cannot hold it.
 
 ### Stage 4 — wholesale stack (automated)
 
@@ -105,9 +126,20 @@ cd ../sillage-b2b
   --wp-user orange --dash-user wildwest
 ```
 
-No photos: wholesale images are remote vendor URLs. Same end state, empty catalogue.
+No photos: wholesale images are remote vendor URLs. Same end state, plugins inactive, empty
+catalogue.
 
-### Stage 5 — wholesale theme setup (owner) — work stops here
+### Stage 5 — wholesale activation and setup (owner) — work stops here
+
+Then the same readiness check from the b2b repo:
+
+```bash
+./production-environment/scripts/deploy-vps.sh \
+  --host ovh --shop wholesale.codeinmoon.xyz --dash sillage-wholesale.codeinmoon.xyz --finish
+```
+
+It must report `sillage db  sillage_wpf`. Reading `sillage` there means the bridge is pointed at
+the retail database — see §5.
 
 ### Stage 6 — first import (owner presses the button, verified here)
 
@@ -131,6 +163,8 @@ for h in codeinmoon.xyz images.codeinmoon.xyz sillage.codeinmoon.xyz \
 done
 ```
 
+- `--finish` reports `ready` for both shops, retail on database `sillage` and wholesale on
+  `sillage_wpf`.
 - Four sites return 200; the media host returns 200 for a known file (`/` is 404, there is no
   index).
 - Both dashboards accept their operator login.
@@ -220,14 +254,20 @@ explicitly and runs it once; `write-sitemaps.py` now detects the layout instead 
 `wp-fresh-install.php` never set a front page. With `show_on_front` left on posts, WordPress
 guessed a permalink for `/` and 301'd the homepage to whichever product owned that post ID.
 
-*Guard:* the installer sets the WooCommerce shop page as the front page.
+*Guard:* the installer points `/` at the WooCommerce shop archive as a placeholder, and
+`wp-readiness.php` requires `/` to resolve to a *published page*. The particular page is the
+owner's: the live shop uses a hand-built "Home" page, not the shop archive, so the check accepts
+any page and only fails on "latest posts" or a front page that points at a product.
 
 ### Blocksy's companion was never activated
 
-The installer activated `blocksy-companion/…` while the image ships
-`blocksy-companion-pro/…`, so it silently did nothing.
+The installer activated `blocksy-companion/…` while the image ships `blocksy-companion-pro/…`,
+so it silently did nothing — and the failure was invisible because a `WP_Error` was printed
+among a hundred other lines.
 
-*Guard:* the installer activates whichever directory exists.
+*Guard:* activation is now the owner's step, and `wp-readiness.php` reports the active theme and
+each plugin's state as its own line, so "inactive" cannot hide. When `WP_ACTIVATE_PLUGINS=1` is
+used for an unattended install, the installer activates whichever companion directory exists.
 
 ### Chased DNS symptoms instead of checking DNS
 

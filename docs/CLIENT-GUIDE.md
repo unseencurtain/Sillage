@@ -337,6 +337,16 @@ stock. **Hidden · stock** means the threshold hid it. **Hidden · pinned** mean
 Products → search SKU → **Open photo** to inspect → Shop dropdown → **Keep hidden**. Do not delete
 the product in WooCommerce.
 
+**A brand-new shop was just handed to me**  
+It arrives deliberately bare: WordPress is installed and the plugins and theme are uploaded but
+**switched off**, and there are **no products**. Do it in this order. In WordPress → Plugins,
+activate WooCommerce, Sillage Bridge and Redis Object Cache; upload and activate the Blocksy
+companion; in Appearance, activate the theme. Then set your homepage, menus and shipping — the
+shop is far easier to style while it is empty. Tell your engineer when you are done, so they can
+run the readiness check. Only then, on the dashboard, press **Rebuild catalogue**. Products
+appear in roughly two to three minutes. Activating WooCommerce **before** that first rebuild is
+not optional: it is what creates the tables the products go into.
+
 **I want to pause catalogue updates**  
 Settings → turn **Sync enabled** off, or **Stop** while a run is active. Turn **Sync enabled**
 back on when you want the scheduled checks again (interval = **Minutes between syncs**).
