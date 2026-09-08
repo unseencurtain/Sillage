@@ -192,10 +192,21 @@ if [[ "$FINISH" -eq 1 ]]; then
   "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/scripts"
   "${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
   "${RSYNC[@]}" "$PE/scripts/apply-grants.sh" "$HOST:~/${REMOTE_DIR}/scripts/apply-grants.sh"
+  "${RSYNC[@]}" "$PE/scripts/wp-finalize.sh" "$HOST:~/${REMOTE_DIR}/scripts/wp-finalize.sh"
+  # Readiness first, grants second. Readiness is what asks WooCommerce to build the HPOS order
+  # tables, and a table-level grant cannot be applied to a table that does not exist yet — run
+  # them the other way round and --strict fails on the four order tables that readiness was
+  # about to create.
+  "${SSH[@]}" "$HOST" "docker cp ~/${REMOTE_DIR}/scripts/wp-readiness.php ecom:/tmp/wp-readiness.php >/dev/null && docker exec -e SHOP_DOMAIN='${SHOP_DOMAIN}' -e WP_READINESS_FIX=1 ecom php /tmp/wp-readiness.php"
+  READY_RC=$?
+  echo
   "${SSH[@]}" "$HOST" "cd ~/${REMOTE_DIR} && bash scripts/apply-grants.sh --strict" || exit $?
   echo
-  "${SSH[@]}" "$HOST" "docker cp ~/${REMOTE_DIR}/scripts/wp-readiness.php ecom:/tmp/wp-readiness.php >/dev/null && docker exec -e SHOP_DOMAIN='${SHOP_DOMAIN}' -e WP_READINESS_FIX=1 ecom php /tmp/wp-readiness.php"
-  exit $?
+  # An import that ran while the bridge was inactive is already committed but invisible: object
+  # caching holds WordPress's post counts with no expiry. This is the stage right after the
+  # operator activates plugins, so it is exactly where that gets cleared.
+  "${SSH[@]}" "$HOST" "cd ~/${REMOTE_DIR} && bash scripts/wp-finalize.sh" || exit $?
+  exit "$READY_RC"
 fi
 
 log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS}"
@@ -375,6 +386,10 @@ fi
 "${RSYNC[@]}" "$PE/scripts/wp-config-patch.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-config-patch.php"
 "${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
 "${RSYNC[@]}" "$PE/scripts/apply-grants.sh" "$HOST:~/${REMOTE_DIR}/scripts/apply-grants.sh"
+"${RSYNC[@]}" "$PE/scripts/wp-finalize.sh" "$HOST:~/${REMOTE_DIR}/scripts/wp-finalize.sh"
+# The deploy installs a cron that runs this and then runs it once itself, but never copied it, so
+# the log was three lines of "No such file or directory" and the sitemap directory stayed empty.
+"${RSYNC[@]}" "$PE/scripts/write-sitemaps.py" "$HOST:~/${REMOTE_DIR}/scripts/write-sitemaps.py"
 if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"
@@ -904,7 +919,9 @@ swapon --show
 # is silent — Caddy serves an empty directory, or robots.txt advertises another shop's sitemap.
 SITEMAP_ENV="SITEMAP_HOST_DIR=${SITEMAP_HOST_DIR:-${DATA_DIR}/sitemaps} WP_BASE_URL=https://${SHOP_DOMAIN}"
 SITEMAP_CRON="0 19 * * * ${SITEMAP_ENV} python3 ${APP_DIR}/scripts/write-sitemaps.py >> ${APP_DIR}/sillage-core/logs/sitemap-cron.log 2>&1"
-if ! crontab -l 2>/dev/null | grep -qF "write-sitemaps.py"; then
+# Match this stack's own script path, not the bare filename: retail and wholesale share a box,
+# and a bare-filename guard means whichever deploys first is the only one with a sitemap cron.
+if ! crontab -l 2>/dev/null | grep -qF "${APP_DIR}/scripts/write-sitemaps.py"; then
   # A box that has never had a crontab makes `crontab -l` exit non-zero, which under `set -e`
   # killed the subshell before the echo and left an empty crontab behind — silently, because the
   # error was sent to /dev/null. The live box had a crontab already, so this only ever showed up

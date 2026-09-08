@@ -28,19 +28,29 @@ def _default_dest() -> Path:
 
 
 DEST = Path(os.environ["SITEMAP_HOST_DIR"]) if os.environ.get("SITEMAP_HOST_DIR") else _default_dest()
-BASE = os.environ.get("WP_BASE_URL", "https://prinscosmetic.eu").rstrip("/")
 
-SQL = r"""
+# No default. The old one was another shop's domain, and getting this wrong is silent in the worst
+# way: robots.txt and every <loc> advertise that shop, so Google is handed a sitemap of URLs which
+# do not belong to the site serving it. The deploy and the cron both pass it explicitly.
+BASE = os.environ.get("WP_BASE_URL", "").rstrip("/")
+
+# Retail's stack. Wholesale runs a different database in a different container, so nothing here is
+# safe to hardcode on a box that hosts both.
+STACK = os.environ.get("STACK_DIR", "sillage")
+WPDB = os.environ.get("WORDPRESS_DB", "earth")
+DB_CONTAINER = os.environ.get("DB_CONTAINER", "ecom-db")
+
+SQL = rf"""
 SELECT p.post_name, p.post_modified_gmt
-  FROM earth.wp_posts p
+  FROM {WPDB}.wp_posts p
  WHERE p.post_type = 'product'
    AND p.post_status = 'publish'
    AND p.post_name <> ''
    AND p.ID NOT IN (
      SELECT tr.object_id
-       FROM earth.wp_term_relationships tr
-       JOIN earth.wp_term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-       JOIN earth.wp_terms t ON t.term_id = tt.term_id
+       FROM {WPDB}.wp_term_relationships tr
+       JOIN {WPDB}.wp_term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+       JOIN {WPDB}.wp_terms t ON t.term_id = tt.term_id
       WHERE tt.taxonomy = 'product_visibility'
         AND t.slug IN ('exclude-from-catalog', 'exclude-from-search')
    )
@@ -50,7 +60,7 @@ SELECT p.post_name, p.post_modified_gmt
 
 def mysql_tsv(sql: str) -> str:
     pw = subprocess.check_output(
-        ["bash", "-lc", "grep ^MYSQL_ROOT_PWD= ~/sillage/.env | cut -d= -f2-"],
+        ["bash", "-lc", f"grep ^MYSQL_ROOT_PWD= ~/{STACK}/.env | cut -d= -f2-"],
         text=True,
     ).rstrip("\n")
     return subprocess.check_output(
@@ -59,7 +69,7 @@ def mysql_tsv(sql: str) -> str:
             "exec",
             "-e",
             f"MYSQL_PWD={pw}",
-            "ecom-db",
+            DB_CONTAINER,
             "mariadb",
             "-uroot",
             "-N",
@@ -76,6 +86,9 @@ def lastmod(raw: str) -> str:
 
 
 def main() -> int:
+    if not BASE:
+        print("WP_BASE_URL is required (e.g. https://codeinmoon.xyz)", file=sys.stderr)
+        return 2
     rows: list[tuple[str, str]] = []
     for line in mysql_tsv(SQL).splitlines():
         parts = line.split("\t")

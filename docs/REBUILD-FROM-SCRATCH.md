@@ -112,19 +112,26 @@ import — that is what stage 3.5 confirms.
   --host ovh --shop codeinmoon.xyz --dash sillage.codeinmoon.xyz --finish
 ```
 
-Two things happen, in this order:
+Three things happen, and **the order matters**:
 
-1. `apply-grants.sh --strict` re-applies the engine's database grants and verifies every one
+1. `wp-readiness.php` prints one line per prerequisite and repairs the *options* — HPOS,
+   permalinks, EUR, coming-soon off, and a real page on `/`. It also verifies the four HPOS order
+   tables **exist**, rather than trusting the option that claims they do, and asks
+   `WC_Install::create_tables()` for them when they do not. Plugin and theme activation is
+   reported and never changed, so a half-customised shop is not overridden.
+2. `apply-grants.sh --strict` re-applies the engine's database grants and verifies every one
    against `mysql.tables_priv` / `mysql.db`. This is not belt-and-braces: MariaDB **refuses a
    table-level `GRANT` on a table that does not exist** (ERROR 1146) and stops reading the file
    there, so a deploy that ships WooCommerce inactive can only grant the WordPress core tables.
-   The nine `wp_wc_*` / `wp_woocommerce_*` grants can only be applied after activation.
-2. `wp-readiness.php` prints one line per prerequisite and repairs the *options* — HPOS,
-   permalinks, EUR, coming-soon off, and a real page on `/`. Plugin and theme activation is
-   reported and never changed, so a half-customised shop is not overridden.
+   The nine `wp_wc_*` / `wp_woocommerce_*` grants can only be applied after activation — which is
+   why readiness runs first: it is what creates the four order tables these grants need.
+3. `wp-finalize.sh` invalidates WooCommerce's caches. If the catalogue was imported while Sillage
+   Bridge was inactive, the products are committed but invisible — object caching holds
+   WordPress's post counts with no expiry — and this is the stage right after activation, so it
+   is where that gets cleared. Costs ~15s and needs no re-import.
 
-Both exit non-zero while anything required is still wrong, so the import is never started on a
-shop that cannot hold it.
+Readiness and grants exit non-zero while anything required is still wrong, so the import is never
+started on a shop that cannot hold it.
 
 ### Stage 4 — wholesale stack (automated)
 
@@ -180,7 +187,12 @@ done
   index).
 - Both dashboards accept their operator login.
 - `swapon --show` lists `/swapfile`.
-- `crontab -l` lists `write-sitemaps.py`.
+- `crontab -l` lists **two** `write-sitemaps.py` lines, one per stack, each pointing at its own
+  `scripts/` directory — and that file is actually present in both. A single line means the
+  bare-filename guard bug is back; a missing file means the rsync was dropped again.
+- `/wp-sitemap.xml` and `/robots.txt` return 200 on both shops, and each `robots.txt` advertises
+  **its own** hostname. Check after the first import: the pages only exist once there are
+  products.
 - Both WordPress containers report the version pinned in `wordpress-image/Dockerfile`.
 - Both catalogues are empty and both cron ticks log *no sync has ever succeeded*.
 
@@ -446,3 +458,74 @@ After correcting `page_on_front`, the shop kept redirecting: the Redis object ca
 the old option. Flushing Valkey is part of changing any WordPress option by SQL.
 
 *Guard:* flush `valkey` / `wholesale-valkey` after direct option writes.
+
+### A successful import of 51,201 products that showed an empty shop
+
+The owner rebuilt the retail catalogue before activating Sillage Bridge. The run reported
+`51201 created`, the database held all 51,201 products published with `wp_wc_product_meta_lookup`
+fully populated — and both the storefront and the WooCommerce Products screen showed nothing.
+
+Raw SQL writes are invisible to WooCommerce's caches, so the engine calls the bridge's
+`/finalize` at the end of a run to invalidate them. With the plugin off, the route does not
+exist, and the call 404'd. `finalize` treated that as a warning on the stated grounds that
+"the caches expire on their own" — true of transients, false of the object cache. With Valkey in
+front of WordPress, `wp_count_posts` is cached with **no expiry**, so the shop reports zero
+products for as long as it stays up. One WARN, mid-log, between two lines that looked like
+success. The cure was a 15-second cache flush, not the 40-minute re-import it looked like.
+
+This is a trap the staged design creates: we ship plugins inactive *on purpose* so the shop can
+be styled while empty, which makes "imported before the bridge was on" a state we invite.
+
+*Guards:* `finalize` logs at error level and spells out the fix, with 404 called out separately
+because it has exactly one cause. `scripts/wp-finalize.sh` performs the flush, and
+`deploy --finish` runs it — that stage is by definition right after activation.
+
+### HPOS was enabled everywhere and existed nowhere
+
+Both shops reported `woocommerce_custom_orders_table_enabled = yes` with **no order tables at
+all**. The deploy writes that option before WooCommerce has ever been activated, and writing it
+creates nothing: WooCommerce builds those tables from its own installer. Hard rule 4 puts orders
+in `wp_wc_orders`, and neither box had one. Nothing would have surfaced this until the first
+real order had nowhere to land — on wholesale, with a €300 minimum behind it.
+
+On retail it did surface, indirectly and confusingly: `apply-grants.sh --strict` failed on four
+`wp_wc_order*` tables. That was the symptom, and the ordering inside `--finish` made it a wall —
+grants ran *before* readiness, but readiness is what creates those tables.
+
+*Guards:* readiness checks the four tables physically rather than trusting the option, and calls
+`WC_Install::create_tables()` under `WP_READINESS_FIX=1`. `--finish` runs readiness first.
+
+### Two independent bugs, each hiding the other, and zero sitemaps
+
+`/wp-sitemap.xml` served 403 on both shops. There are two routes to a sitemap and both were
+broken, so neither could act as the other's fallback:
+
+1. **The engine.** It staged files in `<dir>.tmp-<pid>`, a *sibling* of the sitemap directory.
+   That directory is a bind mount, so the sibling lands on the container's overlay filesystem
+   and every rename out of it crossed a device boundary: `EXDEV`. The per-file rename was itself
+   a fix for an earlier `EBUSY` on unlinking the mount point — the staging location was never
+   revisited. Staging in a dotted *child* puts both ends on one filesystem.
+2. **The host cron.** The deploy installed a cron calling `scripts/write-sitemaps.py` and ran it
+   once itself, but never rsynced the file. The log was three lines of `No such file or
+   directory`.
+
+Two more faults surfaced while fixing it, both specific to one box hosting both shops. The cron
+guard grepped the bare filename, so whichever stack deployed first was the only one to get a
+cron. And wholesale's `write-sitemaps.py` was an unmodified retail copy — `earth`, `ecom-db`,
+`~/sillage/.env` — which would have published retail's catalogue as wholesale's sitemap.
+
+*Guards:* staging inside the mount, with a sweep for `.tmp-*` left by a killed run; the script is
+rsynced before anything schedules it; the cron guard matches this stack's own script path;
+database, container and stack directory come from the environment; and `WP_BASE_URL` lost its
+default rather than gaining a better one — it was another shop's domain, and wrong is worse than
+absent when the value ends up in `robots.txt`.
+
+### Wholesale wrote outside its own stack
+
+`DATA_DIR` and `SITEMAP_HOST_DIR` were hardcoded to `/home/ubuntu/ecom_sites/data`, from when
+wholesale shared the retail box's directory. With retail in `~/sillage` and wholesale in
+`~/sillage-wholesale`, that is a third directory belonging to neither — and the deploy created
+it, mounted it, and pointed Caddy at it.
+
+*Guard:* both keys derive from the stack directory, and are corrected on update so an existing
+box moves with a deploy instead of needing a hand.

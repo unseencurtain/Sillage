@@ -347,6 +347,14 @@ run the readiness check. Only then, on the dashboard, press **Rebuild catalogue*
 appear in roughly two to three minutes. Activating WooCommerce **before** that first rebuild is
 not optional: it is what creates the tables the products go into.
 
+**I rebuilt the catalogue and the shop is still empty**  
+If the dashboard says the catalogue was built but WooCommerce shows **no products at all**, the
+usual cause is that **Sillage Bridge was switched off** during the rebuild. Nothing is lost and
+you do **not** need to rebuild again. The products are already in the shop; the bridge is what
+tells WooCommerce to stop showing its old, empty count, and it cannot do that while it is off.
+Activate **Sillage Bridge** in WordPress → Plugins, then ask your engineer to run the readiness
+check. It clears the stale count in about fifteen seconds and the full catalogue appears.
+
 **I want to pause catalogue updates**  
 Settings → turn **Sync enabled** off, or **Stop** while a run is active. Turn **Sync enabled**
 back on when you want the scheduled checks again (interval = **Minutes between syncs**).
