@@ -9,6 +9,7 @@
 #       --host ovhe \
 #       [--shop …] [--dash …] [--images …] \
 #       [--dash-user europa] [--wp-user cherry] \
+#       [--media-from ovhe] [--skip-dns-check] \
 #       [--dns] [--ip 139.99.61.71] \
 #       [--skip-build] [--fresh] [--core-only] [--keep-caddy] [--replace-caddy]
 #
@@ -27,6 +28,9 @@
 # Operator names: --dash-user / --wp-user pick the dashboard and WordPress logins.
 # Omit them and a random non-admin pair is generated. "admin" is refused either way.
 #
+# Preflight: every hostname must already resolve to this VPS, or the deploy stops before
+# building anything. --media-from copies the scraped product photos off an existing box.
+#
 # Secrets live in remote ~/sillage/.env (created once; preserved on update).
 set -euo pipefail
 
@@ -44,9 +48,11 @@ KEEP_CADDY=""
 DASH_USER=""
 WP_USER=""
 WP_ADMIN_USER=""
+SKIP_DNS_CHECK=0
+MEDIA_FROM=""
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -72,6 +78,8 @@ while [[ $# -gt 0 ]]; do
     --dash-user) DASH_USER="${2:?}"; check_operator --dash-user "$DASH_USER"; shift 2 ;;
     --wp-user) WP_USER="${2:?}"; check_operator --wp-user "$WP_USER"; shift 2 ;;
     --dns) DO_DNS=1; shift ;;
+    --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
+    --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --fresh) FRESH=1; shift ;;
@@ -186,6 +194,51 @@ if [[ "$DO_DNS" -eq 1 ]]; then
   log_step "DNS A records updated"
 fi
 
+# Check the names before spending twenty minutes on a stack that cannot get a certificate.
+# Every DNS panel's host field appends the zone, so a pasted FQDN silently becomes
+# shop.example.com.example.com: the doubled name resolves, the real one NXDOMAINs, and the
+# only symptom is a browser connection failure once Let's Encrypt refuses to issue.
+dns_of() {
+  local name="$1"
+  if command -v dig >/dev/null 2>&1; then
+    dig +short +time=3 +tries=2 "$name" A 2>/dev/null | grep -E '^[0-9.]+$' | head -1
+  else
+    getent ahostsv4 "$name" 2>/dev/null | awk '{print $1; exit}'
+  fi
+}
+
+if [[ "$SKIP_DNS_CHECK" -eq 0 ]]; then
+  dns_bad=()
+  for name in "$SHOP_DOMAIN" "$DASH_DOMAIN" ${IMAGES_DOMAIN:+"$IMAGES_DOMAIN"}; do
+    got="$(dns_of "$name")"
+    if [[ "$got" != "$IP" ]]; then
+      dns_bad+=("$name|${got:-NXDOMAIN}")
+    fi
+  done
+  if [[ "${#dns_bad[@]}" -gt 0 ]]; then
+    echo >&2
+    echo "DNS is not ready for ${HOST} (${IP}):" >&2
+    for entry in "${dns_bad[@]}"; do
+      printf '  %-40s resolves to %s\n' "${entry%%|*}" "${entry##*|}" >&2
+    done
+    echo >&2
+    echo "Add an A record per name. Enter the LABEL only — the panel appends the zone," >&2
+    echo "so pasting the full name creates sub.domain.tld.domain.tld:" >&2
+    zone="${SHOP_DOMAIN#*.}"
+    [[ "$SHOP_DOMAIN" != *.*.* ]] && zone="$SHOP_DOMAIN"
+    for entry in "${dns_bad[@]}"; do
+      name="${entry%%|*}"
+      label="${name%".$zone"}"
+      [[ "$label" == "$name" ]] && label="@"
+      printf '  HOST %-22s TYPE A   VALUE %s\n' "$label" "$IP" >&2
+    done
+    echo >&2
+    echo "Then re-run. Pass --skip-dns-check to deploy anyway (HTTPS will not work)." >&2
+    exit 1
+  fi
+  log_step "DNS verified for shop/dash/images → ${IP}"
+fi
+
 TAG="$(git -C "$ROOT" rev-parse --short HEAD)"
 NAMESPACE="${DOCKERHUB_NAMESPACE:-}"
 if [[ -z "$NAMESPACE" ]]; then
@@ -273,6 +326,29 @@ fi
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
 "${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ${REMOTE_DATA}/media ${REMOTE_DATA}/sitemaps; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
 log_step "Minimal rsync done"
+
+# Product photos are scraped, not vendor-supplied, so a rebuilt VPS has to inherit them from
+# a box that already holds them. Streamed host-to-host through this machine because the two
+# VPSes have no SSH trust between them.
+if [[ -n "$MEDIA_FROM" ]]; then
+  echo "==> copy product photos ${MEDIA_FROM} → ${HOST}"
+  SRC_MEDIA=$("${SSH[@]}" "$MEDIA_FROM" 'for d in ~/ecom_sites/data/media ~/sillage/data/media ~/ecom_sites/data/lps-media; do [ -d "$d" ] && { printf %s "$d"; break; }; done')
+  if [[ -z "$SRC_MEDIA" ]]; then
+    echo "No media directory found on ${MEDIA_FROM}" >&2
+    exit 1
+  fi
+  SRC_COUNT=$("${SSH[@]}" "$MEDIA_FROM" "sudo find '$SRC_MEDIA' -type f -name '*.jpg' | wc -l")
+  echo "    ${SRC_MEDIA} on ${MEDIA_FROM} holds ${SRC_COUNT} JPEGs"
+  "${SSH[@]}" "$MEDIA_FROM" "sudo tar -C '$SRC_MEDIA' -cf - ." \
+    | "${SSH[@]}" "$HOST" "sudo tar -C '${REMOTE_DATA}/media' -xf - && sudo chown -R \$(id -u):\$(id -g) '${REMOTE_DATA}/media'"
+  DST_COUNT=$("${SSH[@]}" "$HOST" "sudo find '${REMOTE_DATA}/media' -type f -name '*.jpg' | wc -l")
+  echo "    ${HOST} now holds ${DST_COUNT} JPEGs"
+  if [[ "$DST_COUNT" -lt "$SRC_COUNT" ]]; then
+    echo "Photo copy came up short: ${DST_COUNT} of ${SRC_COUNT}" >&2
+    exit 1
+  fi
+  log_step "Photos copied from ${MEDIA_FROM} (${DST_COUNT} JPEGs)"
+fi
 
 if [[ -n "$CLONE_FROM" ]]; then
   echo "==> clone WordPress+DB from ${CLONE_FROM} → ${HOST}"
@@ -721,6 +797,31 @@ docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
   -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;" || true
 docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
+
+# The live box was hand-tuned with swap and a sitemap cron that no script created, so a
+# rebuilt VPS came up subtly different: OOM kills during the first import, and Caddy serving
+# robots.txt / wp-sitemap*.xml out of a directory nothing ever wrote. Both belong here.
+if ! swapon --show | grep -q '^/swapfile'; then
+  echo "==> 4G swapfile (a full sync peaks near 2 GB)"
+  sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile >/dev/null
+  sudo swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+  sudo mkdir -p /etc/sysctl.d
+  echo "vm.swappiness=10" | sudo tee /etc/sysctl.d/99-sillage-swap.conf >/dev/null
+  sudo sysctl -p /etc/sysctl.d/99-sillage-swap.conf >/dev/null
+fi
+swapon --show
+
+SITEMAP_CRON="0 19 * * * python3 ${APP_DIR}/scripts/write-sitemaps.py >> ${APP_DIR}/sillage-core/logs/sitemap-cron.log 2>&1"
+if ! crontab -l 2>/dev/null | grep -qF "write-sitemaps.py"; then
+  ( crontab -l 2>/dev/null; echo "$SITEMAP_CRON" ) | crontab -
+  echo "==> installed sitemap cron"
+fi
+mkdir -p "$DATA_DIR/sitemaps"
+python3 "$APP_DIR/scripts/write-sitemaps.py" >>"$APP_DIR/sillage-core/logs/sitemap-cron.log" 2>&1 \
+  && echo "==> sitemaps written" || echo "NOTE: first sitemap run failed; catalogue is probably still empty"
 
 curl -sS "http://127.0.0.1:${SILLAGE_PORT:-4000}/health" || true
 echo

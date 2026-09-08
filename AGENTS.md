@@ -4,6 +4,11 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 (**BeautyFort + BTS** retail). Wholesale-perfumes is a **separate product** in
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
+**Wiping a VPS and standing both shops up again? Read
+[`docs/REBUILD-FROM-SCRATCH.md`](docs/REBUILD-FROM-SCRATCH.md) first.** It carries the settled
+hostnames and operator usernames, the exact command order, and the traps that turned the first
+rebuild into an all-day job. Do not re-derive any of it and do not ask for those details again.
+
 **Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first — including the Memory section.** Hub images are
 built on ovhe (`docker login` lives there). This repo is the **retail** shop only. Wholesale-perfumes
 is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
