@@ -61,8 +61,9 @@ Credentials come from `~/sillage/.env` on the VPS. Media files under `~/ecom_sit
 
 ## B2B code
 
-Canonical B2B repo: [https://github.com/unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)  
-Retail tree keeps a thin pointer under `b2b-wholesale/`. The pre-scratch tag still contains the older in-tree scaffold plus the parked connector under `sillage-core`.
+Live wholesale is in this repo (`SILLAGE_PROFILE=wholesale`, [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md)).
+[sillage-b2b](https://github.com/unseencurtain/sillage-b2b) is the August 2026 extract archive — do not deploy it.
+`b2b-wholesale/` is a pointer. The pre-scratch tag still contains the older in-tree scaffold.
 
 ## What this does *not* restore
 

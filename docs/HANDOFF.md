@@ -48,7 +48,7 @@ Read this checklist and execute it in order. Do not skip an item because a later
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |
 | **Hub images** | `unseencurtain/sillage-core:<tag>`, `unseencurtain/sillage-wordpress:<tag>` |
-| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — canonical public tree. Cursor cloud copies can have **parallel SHAs** for the same messages; do not merge remotes. Replay wholesale onto GitHub with a checkout of GitHub `main` + this tree’s files, then `git push github main`. |
+| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — canonical public tree. Cursor cloud copies can have **parallel SHAs**; do not merge remotes. Replay with `production-environment/scripts/replay-to-github.sh`. [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) is an archive pointer, not a second engine. |
 | **Git (pricing lock fix)** | `8628eee` on `main` — dedicated `GET_LOCK` connection + Save-only-on-change. Redeploy if VPS image tag lags. |
 | **Tag baseline** | `pre-scratch-20260808` — restore marker before catalogue wipe + B2B split ([`SCRATCH-RESET.md`](SCRATCH-RESET.md)) |
 | **B2B (this VPS)** | [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md) — second WP + `sillage_wpf`, compose profile `wholesale`. Old pointer: [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |

@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /** Write static product sitemaps. Does not call vendors. Does not touch PHP. */
-import { loadSecretsOverlay } from "../src/config/secrets.ts";
-import { applyRuntimeUrls } from "../src/config/env.ts";
-import { closePool } from "../src/db/pool.ts";
-import { loadSettings } from "../src/db/settings.ts";
-import { writeProductSitemaps } from "../src/sync/sitemaps.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
+import { applyRuntimeUrls } from "../config/env.ts";
+import { closePool } from "../db/pool.ts";
+import { loadSettings } from "../db/settings.ts";
+import { writeProductSitemaps } from "../sync/sitemaps.ts";
 
 loadSecretsOverlay();
 const settings = await loadSettings();
