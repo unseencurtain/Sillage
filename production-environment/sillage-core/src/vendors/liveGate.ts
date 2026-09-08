@@ -4,7 +4,7 @@
  * Each vendor is gated independently by `live_feed_min_minutes` since its last live fetch.
  * Daily download counters are recorded for diagnostics but never block a call.
  */
-import { sil } from "../config/env.ts";
+import { isWholesaleProfile, sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendor, setSetting } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
@@ -166,6 +166,48 @@ export async function getRetailLiveCooldown(): Promise<{
     nextAllowedAt,
     beautyfort: { ...bfGate, maxPerDay: bfMax, usedToday: bfUsed },
     bts: { ...btsGate, maxPerDay: btsMax, usedToday: btsUsed },
+  };
+}
+
+export type StorefrontLiveCooldown = Awaited<ReturnType<typeof getRetailLiveCooldown>> & {
+  wholesalePerfumes?: LiveGateResult & { maxPerDay: number; usedToday: number };
+};
+
+/**
+ * Call-interval for this process’s storefront.
+ * Retail: BeautyFort + BTS. Wholesale: wholesale-perfumes hourly store feed (price/stock).
+ */
+export async function getStorefrontLiveCooldown(): Promise<StorefrontLiveCooldown> {
+  if (!isWholesaleProfile()) return getRetailLiveCooldown();
+
+  const settings = await loadSettings();
+  const cooldownMinutes = settings.liveFeedMinMinutes;
+  const [storeGate, catalogMax, catalogUsed] = await Promise.all([
+    checkWholesalePerfumesStoreGate(),
+    catalogueMaxPerDay("wholesale-perfumes"),
+    liveFetchesUsedToday("wholesale-perfumes"),
+  ]);
+  const nextAllowedAt =
+    storeGate.allow || storeGate.retryInMinutes <= 0
+      ? null
+      : new Date(Date.now() + storeGate.retryInMinutes * 60_000).toISOString();
+  const idle = {
+    allow: true,
+    reason: "parked on this storefront",
+    retryInMinutes: 0,
+    maxPerDay: 0,
+    usedToday: 0,
+  };
+  return {
+    allow: storeGate.allow,
+    anyAllow: storeGate.allow,
+    retryInMinutes: storeGate.allow ? 0 : storeGate.retryInMinutes,
+    reason: storeGate.reason,
+    cooldownMinutes,
+    nextAllowedAt,
+    beautyfort: idle,
+    bts: idle,
+    wholesalePerfumes: { ...storeGate, maxPerDay: catalogMax, usedToday: catalogUsed },
   };
 }
 

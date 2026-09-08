@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { applyStorefrontProfile } from "../storefront/profile.ts";
 import { applyRuntimeUrls, env } from "../config/env.ts";
 import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, query, waitForDatabase } from "../db/pool.ts";
@@ -30,7 +31,12 @@ export const app = new Hono();
 app.get("/health", async (c) => {
   try {
     await query("SELECT 1 AS ok");
-    return c.json({ ok: true, service: "sillage-core", database: "up" });
+    return c.json({
+      ok: true,
+      service: "sillage-core",
+      database: "up",
+      profile: env.sillageProfile,
+    });
   } catch (err) {
     return c.json({ ok: false, service: "sillage-core", database: "down", error: String(err) }, 503);
   }
@@ -67,6 +73,11 @@ app.onError((err, c) => {
 
 if (import.meta.main) {
   await waitForDatabase();
+  try {
+    await applyStorefrontProfile();
+  } catch (err) {
+    log.warn(`storefront profile apply skipped: ${String(err)}`);
+  }
   try {
     const settings = await loadSettings();
     applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });

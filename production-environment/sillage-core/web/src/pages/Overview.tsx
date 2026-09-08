@@ -3,6 +3,7 @@ import { Loader2, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
+import { fetchedLabel } from "@/lib/syncRunLabels";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -36,8 +37,7 @@ export function Overview() {
   const cooldownMin = live.data?.retryInMinutes ?? 0;
   const intervalMin = live.data?.cooldownMinutes ?? 30;
   const run = useMutation({
-    mutationFn: () =>
-      api.runSync("fast", { vendors: ["beautyfort", "bts"], source: "live" }),
+    mutationFn: () => api.runSync("fast", { source: "live" }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["overview"] });
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
@@ -69,6 +69,7 @@ export function Overview() {
   const hiddenFromCatalog = data.hiddenFromCatalog ?? Math.max(0, data.published - catalogVisible);
   const hiddenNoImage = data.hiddenNoImage ?? 0;
   const hiddenStock = data.hiddenStock ?? 0;
+  const hiddenOperator = data.hiddenOperator ?? 0;
   const outOfStock = data.outOfStock ?? 0;
   const busy = run.isPending || syncRunning;
   const secretsReady = data.secrets?.ready !== false;
@@ -96,7 +97,7 @@ export function Overview() {
               ? `Scheduled every ${intervalMin} min — turn Sync enabled off for a one-off`
               : onCooldown
                 ? `Available in ${cooldownMin} min`
-                : "One-off Update prices & stock for BeautyFort + BTS. Not orders."
+                : "One-off Update prices & stock for this shop’s vendors. Not orders."
           }
           className={cn(
             "inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink disabled:cursor-not-allowed disabled:opacity-50",
@@ -120,7 +121,7 @@ export function Overview() {
 
       {!secretsReady ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>Set vendor secrets first.</strong> Missing {missingSecrets.join(", ") || "BF/BTS keys"}.{" "}
+          <strong>Set vendor secrets first.</strong> Missing {missingSecrets.join(", ") || "vendor keys"}.{" "}
           <Link to="/secrets" className="font-medium underline underline-offset-2">
             Open Secrets
           </Link>{" "}
@@ -151,7 +152,7 @@ export function Overview() {
         <KpiCard
           label="Visible in shop"
           value={catalogVisible.toLocaleString()}
-          hint="catalog loop (not excluded)"
+          hint="customers can browse these — hide-without-image and out-of-stock stay published but off the loop"
           accent
         />
         <KpiCard
@@ -189,10 +190,11 @@ export function Overview() {
               hiddenFromCatalog > 0
                 ? [
                     hiddenNoImage > 0 ? `${hiddenNoImage.toLocaleString()} no/weak image` : null,
-                    hiddenStock > 0 ? `${hiddenStock.toLocaleString()} stock threshold` : null,
+                    hiddenStock > 0 ? `${hiddenStock.toLocaleString()} out of stock` : null,
+                    hiddenOperator > 0 ? `${hiddenOperator.toLocaleString()} pinned` : null,
                   ]
                     .filter(Boolean)
-                    .join(" · ") || "exclude-from-catalog"
+                    .join(" · ")
                 : undefined
             }
           />
@@ -201,11 +203,15 @@ export function Overview() {
             value={outOfStock}
             hint={
               data.settings.hideProductsWithoutImage
-                ? `hide without image on · threshold ${data.settings.stockThreshold ?? 0}`
-                : `threshold ${data.settings.stockThreshold ?? 0}`
+                ? `Woo outofstock term · hide without image on · threshold ${data.settings.stockThreshold ?? 0}`
+                : `Woo outofstock term · threshold ${data.settings.stockThreshold ?? 0}`
             }
           />
         </div>
+        <p className="mt-3 font-mono text-xs tabular-nums text-muted">
+          {catalogVisible.toLocaleString()} visible + {hiddenFromCatalog.toLocaleString()} hidden ={" "}
+          {data.published.toLocaleString()} published
+        </p>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -221,11 +227,7 @@ export function Overview() {
               </div>
               <div className="text-muted">{fmtDate(data.lastSync.started_at)}</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs tabular-nums sm:grid-cols-3">
-                <span>
-                  {data.lastSync.fetched_by_vendor
-                    ? `BF ${data.lastSync.fetched_by_vendor.beautyfort ?? "—"} · BTS ${data.lastSync.fetched_by_vendor.bts ?? "—"}${data.lastSync.bts_delta ? " Δ" : ""}`
-                    : `fetched ${data.lastSync.products_fetched}`}
-                </span>
+                <span>{fetchedLabel(data.lastSync)}</span>
                 <span>created {data.lastSync.posts_created}</span>
                 <span>updated {data.lastSync.posts_updated}</span>
                 <span>repriced {data.lastSync.prices_updated}</span>

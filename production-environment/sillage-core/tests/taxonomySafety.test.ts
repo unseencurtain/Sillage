@@ -28,7 +28,7 @@ describe("rewrite-only taxonomy safety", () => {
     expect(runSrc).toContain("loadFlatTermMapFromDb");
     expect(runSrc).toContain("purgeVendorProductCatLanes");
     expect(runSrc).toContain("purgeVendorProductAttributes");
-    expect(runSrc).toContain("parkWholesalePerfumesFromMainStorefront");
+    expect(runSrc).toContain("parkForeignVendorsFromStorefront");
     expect(runSrc).not.toContain("ensureB2bShopPage");
   });
 

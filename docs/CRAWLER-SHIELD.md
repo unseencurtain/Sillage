@@ -25,7 +25,7 @@ Live file: `/etc/caddy/Caddyfile` (host Caddy, **not** inside `~/sillage`).
 Canonical snippet in git:
 [`production-environment/ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet)
 
-Shop site only:
+Shop site only (retail **and** wholesale shop hosts — not the dashboard, not the image CDN):
 
 ```caddy
 @heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)

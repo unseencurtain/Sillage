@@ -72,6 +72,8 @@ export const api = {
     }),
   liveStatus: () =>
     request<{
+      profile?: "retail" | "wholesale";
+      vendors?: string[];
       cooldownMinutes: number;
       liveFeedMinMinutes: number;
       allow: boolean;
@@ -100,6 +102,14 @@ export const api = {
         usedToday: number;
         dailyRemaining: number | null;
       };
+      wholesalePerfumes?: {
+        allow: boolean;
+        reason: string;
+        retryInMinutes: number;
+        maxPerDay: number;
+        usedToday: number;
+        dailyRemaining: number | null;
+      } | null;
     }>("/api/sync/live-status"),
   products: (q: string, page: number) =>
     request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
@@ -111,6 +121,8 @@ export const api = {
   vendors: () =>
     request<{
       vendors: Vendor[];
+      profile?: "retail" | "wholesale";
+      parkedVendors?: string[];
       globalPriceMultiplier: number;
       globalStockThreshold: number;
       callIntervalMinutes?: number;
@@ -194,10 +206,11 @@ export interface Overview {
   catalogVisible: number;
   hiddenFromCatalog: number;
   outOfStock: number;
-  /** Hidden from catalog without outofstock term (usually no/placeholder image). */
+  /** Exclusive hide reason: no/weak image (may also be OOS). */
   hiddenNoImage: number;
-  /** Hidden from catalog with outofstock (stock threshold). */
+  /** Exclusive hide reason: usable image, at/below stock threshold. */
   hiddenStock: number;
+  hiddenOperator?: number;
   lastSync: SyncRun | null;
   ordersByStatus: Record<string, number>;
   syncsLast7Days: Array<{ day: string; n: number }>;
@@ -301,6 +314,7 @@ export interface Vendor {
   storeLiveMaxPerDay: number | null;
   storeLiveMinMinutes: number | null;
   orderConfig: Record<string, unknown>;
+  parked?: boolean;
 }
 
 export interface VendorPatch {

@@ -62,7 +62,11 @@ Images are pulled from Docker Hub (`unseencurtain/sillage-core:<sha>`, `unseencu
 
 2. SSH key that can log in as **root** on the new VPS (bootstrap), then as **ubuntu** (deploy).
 
-3. Docker Hub login on the laptop (`docker login`) so `build-push-images.sh` can push.
+3. **On ovhe** (`docker login` as `unseencurtain` is already there): copy `sillage-core` source
+   to `~/sillage/sillage-core` (keep existing `data/` and `logs/`), then
+   `~/sillage/scripts/build-push-images.sh --core-only`. Do not build Hub images on a laptop
+   or cloud agent. The live box is how every existing `unseencurtain/sillage-core:<sha>` tag
+   was pushed.
 
 4. Two or three DNS names (A records) pointing at the VPS IP — or Porkbun API via `.deploy/porkbun.env` and `--dns`.
 
@@ -117,7 +121,9 @@ Host my-sillage
 
 ### What the script does
 
-1. Builds and pushes `sillage-core` + `sillage-wordpress` to Docker Hub (`:<git-sha>` and `:latest`)
+1. Builds and pushes `sillage-core` (+ `sillage-wordpress` only if you omit `--core-only`)
+   **on the target VPS** (`docker login` lives there — on ovhe that is `unseencurtain`).
+   The laptop/agent that invoked this script does **not** run `docker build`.
 2. Rsyncs `compose.yaml`, `ecom_sites/config/`, `sillage-bridge` plugin, `image_overrides.json`
 3. Writes `~/sillage/.env` once (preserves secrets on later runs)
 4. Writes host Caddyfile, `caddy validate` / `reload`
@@ -128,17 +134,20 @@ Host my-sillage
 
 Expect ~5–15 minutes the first time (image builds + pulls).
 
-### Day-2 update (3–5 commands)
+### Day-2 update (Hub on ovhe, then pull)
 
 ```bash
-# from laptop / repo root
-./production-environment/scripts/build-push-images.sh
+# on ovhe (already docker login as unseencurtain)
+# after rsync of sillage-core source — do not overwrite ~/sillage/sillage-core/data
+~/sillage/scripts/build-push-images.sh --core-only
+
+# from laptop / repo, after the VPS push:
 ./production-environment/scripts/deploy-vps.sh \
-  --host my-sillage \
+  --host ovhe \
   --shop shop.example.com \
   --dash ops.example.com \
   --images images.example.com \
-  --skip-build   # if you already pushed
+  --skip-build
 ```
 
 Or on the VPS after images are on Hub and compose/env are current:
@@ -221,7 +230,8 @@ Then manually: complete WP in the browser (`http://localhost` or `:104`), instal
 |---|---|
 | `ERR_NAME_NOT_RESOLVED` | DNS / local cache |
 | Dashboard SQL denied | Re-run deploy (grants) or apply `ecom_sites/config/sillage-grants.sql` |
-| Image pull denied | `docker login` on laptop; confirm `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` in `.env` |
+| Image pull denied | `docker login` **on ovhe** (already `unseencurtain`); confirm `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` in `~/sillage/.env`. Do not copy Hub credentials off the VPS. |
+| `Could not create directory.: /var/www/html/wp-content/upgrade` | Apache is `www-data` (uid 33); `wp-content` was owned by `ubuntu` after bootstrap unzip. On ovhe: `bash ~/sillage/scripts/fix-wp-content-perms.sh`. Then retry the dashboard update. |
 | `ecom` at 150%+ CPU, cron idle | AI crawler walking `/product`. Confirm UA in Apache access log; Caddy `@heavybot` must be first in the shop site. [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) |
 | Let’s Encrypt fail | DNS must point here; 80/443 open |
 | Old split stack still running | Deploy stops `~/redis` + `~/ecom_sites` compose projects before starting `~/sillage` |
@@ -252,12 +262,13 @@ To deploy to a different VPS (adjust host alias, domains, IP):
 # 1) Ensure laptop production-environment/.env has all vendor + Hub keys
 cp -n production-environment/.env.example production-environment/.env
 
-# 2) Build/push tip images
-./production-environment/scripts/build-push-images.sh
+# 2) On the VPS that is docker login (ovhe): rsync sillage-core source, then
+#    ~/sillage/scripts/build-push-images.sh --core-only
+#    Do not docker build on the laptop or a cloud agent.
 
-# 3) Deploy to production host (example alias `ovh`)
+# 3) Deploy compose/plugin (images already on Hub)
 ./production-environment/scripts/deploy-vps.sh \
-  --host ovh \
+  --host ovhe \
   --shop shop.YOUR_DOMAIN \
   --dash ops.YOUR_DOMAIN \
   --images images.YOUR_DOMAIN \

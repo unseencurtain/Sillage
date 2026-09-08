@@ -17,7 +17,12 @@ export const MANAGED_SECRETS = [
   { key: "BEAUTYFORT_USER", label: "BeautyFort user" },
   { key: "BEAUTYFORT_SECRET", label: "BeautyFort secret" },
   { key: "BTS_JWT_TOKEN", label: "BTS JWT token" },
+  { key: "WHOLESALE_PERFUMES_USER", label: "wholesale-perfumes user" },
+  { key: "WHOLESALE_PERFUMES_TOKEN", label: "wholesale-perfumes token" },
 ] as const;
+
+const RETAIL_SECRET_KEYS = new Set(["BEAUTYFORT_USER", "BEAUTYFORT_SECRET", "BTS_JWT_TOKEN"]);
+const WHOLESALE_SECRET_KEYS = new Set(["WHOLESALE_PERFUMES_USER", "WHOLESALE_PERFUMES_TOKEN"]);
 
 export type ManagedSecretKey = (typeof MANAGED_SECRETS)[number]["key"];
 
@@ -112,20 +117,24 @@ export function loadSecretsOverlay(): { path: string; applied: number } {
 
 export function listSecretStatus(): { path: string; secrets: SecretStatus[] } {
   const overlay = readOverlayMap();
-  const secrets: SecretStatus[] = MANAGED_SECRETS.map(({ key, label }) => {
-    const overlayVal = overlay[key];
-    const inOverlay = typeof overlayVal === "string" && overlayVal.length > 0;
-    const envVal = process.env[key] ?? "";
-    const inEnv = envVal.length > 0;
-    const source: SecretSource = inOverlay ? "overlay" : inEnv ? "env" : "unset";
-    return {
-      key,
-      label,
-      set: inEnv || inOverlay,
-      source,
-      masked: inEnv || inOverlay ? "••••••••" : "",
-    };
-  });
+  const allowed =
+    env.sillageProfile === "wholesale" ? WHOLESALE_SECRET_KEYS : RETAIL_SECRET_KEYS;
+  const secrets: SecretStatus[] = MANAGED_SECRETS.filter((s) => allowed.has(s.key)).map(
+    ({ key, label }) => {
+      const overlayVal = overlay[key];
+      const inOverlay = typeof overlayVal === "string" && overlayVal.length > 0;
+      const envVal = process.env[key] ?? "";
+      const inEnv = envVal.length > 0;
+      const source: SecretSource = inOverlay ? "overlay" : inEnv ? "env" : "unset";
+      return {
+        key,
+        label,
+        set: inEnv || inOverlay,
+        source,
+        masked: inEnv || inOverlay ? "••••••••" : "",
+      };
+    },
+  );
   return { path: env.secretsFile, secrets };
 }
 
@@ -140,9 +149,15 @@ export function setSecret(key: string, value: string): SecretStatus {
   process.env[key] = trimmed;
   refreshVendorSecretsFromProcessEnv();
 
-  const status = listSecretStatus().secrets.find((s) => s.key === key);
-  if (!status) throw new Error("internal: missing secret status");
-  return status;
+  return (
+    listSecretStatus().secrets.find((s) => s.key === key) ?? {
+      key,
+      label: MANAGED_SECRETS.find((s) => s.key === key)?.label ?? key,
+      set: true,
+      source: "overlay",
+      masked: "••••••••",
+    }
+  );
 }
 
 export function clearSecret(key: string): SecretStatus {
@@ -154,7 +169,13 @@ export function clearSecret(key: string): SecretStatus {
   delete process.env[key];
   refreshVendorSecretsFromProcessEnv();
 
-  const status = listSecretStatus().secrets.find((s) => s.key === key);
-  if (!status) throw new Error("internal: missing secret status");
-  return status;
+  return (
+    listSecretStatus().secrets.find((s) => s.key === key) ?? {
+      key,
+      label: MANAGED_SECRETS.find((s) => s.key === key)?.label ?? key,
+      set: false,
+      source: "unset",
+      masked: "",
+    }
+  );
 }

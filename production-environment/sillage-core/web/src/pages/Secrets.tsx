@@ -10,6 +10,8 @@ const HELP: Record<string, string> = {
   BEAUTYFORT_USER: "BeautyFort SOAP username for catalogue + order APIs.",
   BEAUTYFORT_SECRET: "BeautyFort SOAP password/secret. Never shown after save.",
   BTS_JWT_TOKEN: "BTS Wholesaler JWT from their portal. Powers catalogue + dispatch.",
+  WHOLESALE_PERFUMES_USER: "wholesale-perfumes.eu (SoleLuna) API username.",
+  WHOLESALE_PERFUMES_TOKEN: "wholesale-perfumes.eu API token. Never shown after save.",
 };
 
 function sourceLabel(source: SecretStatus["source"]) {
@@ -61,7 +63,7 @@ export function Secrets() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
         <p className="text-sm text-muted">
-          Vendor API credentials for BeautyFort + BTS. Values are never shown after save — only set /
+          Vendor API credentials for this storefront. Values are never shown after save — only set /
           empty. Hot-reloaded; no container recreate.
         </p>
       </header>
@@ -80,7 +82,7 @@ export function Secrets() {
         </div>
       ) : (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-ok">
-          All BeautyFort + BTS secrets are set. Next:{" "}
+          All required secrets are set. Next:{" "}
           <Link to="/sync" className="font-medium underline underline-offset-2">
             Run sync now
           </Link>

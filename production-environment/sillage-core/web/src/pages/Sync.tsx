@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play, RefreshCw, Square } from "lucide-react";
 import { api, type SyncRun } from "@/lib/api";
+import { fetchedLabel } from "@/lib/syncRunLabels";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
@@ -17,26 +18,6 @@ function isRunActive(run: SyncRun | undefined) {
 function isRunFinished(run: SyncRun) {
   if (run.finished_at) return true;
   return ["success", "partial", "error"].includes(run.status);
-}
-
-function fetchedLabel(r: SyncRun) {
-  const by = r.fetched_by_vendor;
-  if (by && (by.beautyfort != null || by.bts != null)) {
-    const skipped = new Set(r.skipped_vendors ?? []);
-    const bf =
-      skipped.has("beautyfort")
-        ? "BF skipped"
-        : by.beautyfort != null
-          ? `BF ${Number(by.beautyfort).toLocaleString()}`
-          : "BF —";
-    const bts = skipped.has("bts")
-      ? "BTS skipped"
-      : by.bts != null
-        ? `BTS ${Number(by.bts).toLocaleString()}${r.bts_delta ? " Δ" : ""}`
-        : "BTS —";
-    return `${bf} · ${bts}`;
-  }
-  return r.products_fetched == null ? "—" : Number(r.products_fetched).toLocaleString();
 }
 
 function writesLabel(r: Pick<SyncRun, "posts_created" | "posts_updated" | "prices_updated" | "errors">) {
@@ -100,10 +81,12 @@ export function Sync() {
   const pendingRebuild = live.data?.pendingRebuild === true;
   const catalogueReady = live.data?.catalogueReady !== false;
   const intervalMin = live.data?.cooldownMinutes ?? 30;
+  const wholesale = live.data?.profile === "wholesale";
+  const vendorPair = wholesale ? "wholesale-perfumes" : "BeautyFort + BTS";
 
   const run = useMutation({
     mutationFn: (opts: { mode: "fast" | "full" }) =>
-      api.runSync(opts.mode, { vendors: ["beautyfort", "bts"], source: "live" }),
+      api.runSync(opts.mode, { source: "live" }),
     onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
@@ -127,7 +110,7 @@ export function Sync() {
       }
       toast(
         vars.mode === "full"
-          ? "Rebuild started — creating/updating the full catalogue from BeautyFort + BTS."
+          ? "Rebuild started — creating/updating the full catalogue from this shop’s vendor."
           : "Price & stock sync started — updating changed offers only.",
         "ok",
       );
@@ -202,8 +185,8 @@ export function Sync() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Sync</h1>
         <p className="text-sm text-muted">
-          <strong className="font-medium text-ink">Rebuild catalogue</strong> queues a full BeautyFort
-          + BTS import for the next scheduled call (or runs now if the shop is empty / sync is off).{" "}
+          <strong className="font-medium text-ink">Rebuild catalogue</strong> queues a full {vendorPair}{" "}
+          import for the next scheduled call (or runs now if the shop is empty / sync is off).{" "}
           <strong className="font-medium text-ink">Update prices &amp; stock</strong> is a one-off —
           hide it while the schedule is on.
         </p>
@@ -234,9 +217,13 @@ export function Sync() {
             </p>
             {live.data ? (
               <p className="font-mono text-xs text-muted">
-                BF {live.data.beautyfort.allow ? "ready" : `wait ${live.data.beautyfort.retryInMinutes}m`}
-                {" · "}
-                BTS {live.data.bts.allow ? "ready" : `wait ${live.data.bts.retryInMinutes}m`}
+                {wholesale
+                  ? `WPF ${
+                      live.data.wholesalePerfumes?.allow ?? live.data.allow
+                        ? "ready"
+                        : `wait ${live.data.wholesalePerfumes?.retryInMinutes ?? live.data.retryInMinutes}m`
+                    }`
+                  : `BF ${live.data.beautyfort.allow ? "ready" : `wait ${live.data.beautyfort.retryInMinutes}m`} · BTS ${live.data.bts.allow ? "ready" : `wait ${live.data.bts.retryInMinutes}m`}`}
                 {pendingRebuild ? " · rebuild queued" : ""}
                 {scheduleOn ? " · schedule on" : " · schedule off"}
               </p>
@@ -256,10 +243,10 @@ export function Sync() {
                 disabled={fastDisabled}
                 title={
                   scheduleOn
-                    ? "Schedule is on — it will call BeautyFort + BTS on the interval. Turn Sync enabled off for a one-off."
+                    ? `Schedule is on — it will call ${vendorPair} on the interval. Turn Sync enabled off for a one-off.`
                     : onCooldown
                       ? cooldownHint
-                      : "One-off live price/stock for BeautyFort + BTS"
+                      : `One-off live price/stock for ${vendorPair}`
                 }
                 onClick={() => run.mutate({ mode: "fast" })}
               >
@@ -284,7 +271,7 @@ export function Sync() {
                   pendingRebuild
                     ? "Already queued — the next scheduled call will rebuild the catalogue"
                     : scheduleOn && catalogueReady
-                      ? "Queue a full BeautyFort + BTS rebuild for the next scheduled call"
+                      ? `Queue a full ${vendorPair} rebuild for the next scheduled call`
                       : "Full catalogue rebuild now — taxonomy, new products, vanish"
                 }
                 onClick={() => run.mutate({ mode: "full" })}

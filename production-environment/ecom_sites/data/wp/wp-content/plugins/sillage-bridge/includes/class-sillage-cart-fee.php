@@ -117,6 +117,22 @@ final class Sillage_Cart_Fee {
 				continue;
 			}
 			$label = $labels[ $slug ] ?? $slug;
+			$is_wholesale = defined( 'SILLAGE_STOREFRONT_PROFILE' ) && 'wholesale' === SILLAGE_STOREFRONT_PROFILE;
+			if ( $is_wholesale ) {
+				$min = ( is_array( $config ) && isset( $config['vendor_mins'][ $slug ] ) )
+					? (float) $config['vendor_mins'][ $slug ]
+					: 0.0;
+				wc_add_notice(
+					sprintf(
+						/* translators: 1: formatted minimum order, 2: formatted shortfall */
+						__( 'This is a wholesale shop. Orders must be at least %1$s. Add %2$s more to check out.', 'sillage-bridge' ),
+						wp_strip_all_tags( wc_price( $min ) ),
+						wp_strip_all_tags( wc_price( $shortfall ) )
+					),
+					'error'
+				);
+				continue;
+			}
 			wc_add_notice(
 				sprintf(
 					/* translators: 1: formatted money amount, 2: shop section label such as LPS03 */

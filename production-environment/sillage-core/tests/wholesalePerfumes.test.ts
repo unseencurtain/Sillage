@@ -10,6 +10,7 @@ import {
   composeWholesalePerfumesName,
   formatWholesalePerfumesVolume,
   joinCatalogAndStore,
+  collapseStoreProducts,
   mapWholesalePerfumesGender,
   WholesalePerfumesConnector,
 } from "../src/vendors/wholesale-perfumes/connector.ts";
@@ -43,6 +44,18 @@ describe("wholesale-perfumes XML parse + normalize", () => {
     const leading = connector.normalize(joined.find((p) => p.id === "4")!);
     expect(leading!.eans).toEqual(["0000123456789"]);
     expect(leading!.eans[0]!.startsWith("0000")).toBe(true);
+  });
+
+  test("collapses duplicate store ids to the last price/stock", () => {
+    const collapsed = collapseStoreProducts([
+      { id: "1", priceNoVat: 10, quantity: 1 },
+      { id: "1", priceNoVat: 12, quantity: 4 },
+      { id: "2", priceNoVat: 5, quantity: 0 },
+    ]);
+    expect(collapsed).toEqual([
+      { id: "1", priceNoVat: 12, quantity: 4 },
+      { id: "2", priceNoVat: 5, quantity: 0 },
+    ]);
   });
 
   test("composes name from brand, series, model and name_addon", () => {

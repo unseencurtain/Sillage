@@ -1,10 +1,15 @@
 # Sillage — agent entry point
 
 Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce storefront
-(**BeautyFort + BTS** retail; wholesale-perfumes B2B lives in
-[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)).
+(**BeautyFort + BTS** retail). A second WordPress on the same VPS,
+[`wholesale.mirainikki.xyz`](docs/WHOLESALE-SITE.md) (`docs/WHOLESALE-SITE.md`), sells
+**wholesale-perfumes only** (minimum order €300, sandbox dispatch). Do not implement that
+site on the old [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) tree.
 
-**Read [`docs/HANDOFF.md`](docs/HANDOFF.md)** for live host, roadmap, and resume-after-a-gap context.
+**Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first — including the Memory section.** Hub images are
+built on ovhe (`docker login` lives there). Wholesale is a second shop with its own MariaDB and
+`wholesale-*` names; Valkey is shared on this VPS only.
+
 **Read [`docs/AGENTS-RUNBOOK.md`](docs/AGENTS-RUNBOOK.md)** for the whole-project loop (sync, photos,
 new VPS, orders). **Read `docs/CONTEXT.md` before touching anything.** It is the canonical fact sheet:
 container names, database credentials, WooCommerce schema quirks, and the complete list of tables we
@@ -49,6 +54,10 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
    dry-run flag and the dispatch safety rails.
 6. **Client-facing behaviour has a human doc.** Keep [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md)
    matching the live UI and shop rules in the same change.
+7. **Hub images are built and pushed on ovhe.** That host is `docker login` as `unseencurtain`.
+   Do not build Hub images in a cloud-agent VM or copy Docker Hub credentials off the VPS.
+   See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**. Wholesale containers are `wholesale-*`,
+   never `wpf-*`; wholesale has its own MariaDB.
 
 ## Commands
 

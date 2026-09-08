@@ -5,9 +5,9 @@ This file is the **engineering** map of every control (API routes, setting keys)
 a button or change shopper behaviour, update **both** this file and `CLIENT-GUIDE.md`.
 
 Live UI: `https://sillage.prinscosmetic.eu` (VPS `ovhe`). This retail shop syncs **BeautyFort**
-and **BTS** only. wholesale-perfumes is parked for
-[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — inactive, excluded from
-`--vendor=all`, not editable here.
+and **BTS** only. wholesale-perfumes is parked here and sold on
+[`wholesale.mirainikki.xyz`](WHOLESALE-SITE.md) (`SILLAGE_PROFILE=wholesale`, dashboard
+`https://sillage-wholesale.mirainikki.xyz`).
 
 Source of truth for ops knobs: `sillage.sil_settings` / `sillage.sil_vendors`, edited through this
 dashboard (or SQL). Auth is HTTP session cookies against `DASHBOARD_USER` / `DASHBOARD_PASSWORD`
@@ -82,12 +82,12 @@ Polls `GET /api/overview` every 15s.
 | UI | Meaning |
 |---|---|
 | **Update prices & stock** | Same as Sync: one-off fast live sync. Shows **Scheduled (Nm)** and is disabled while Sync enabled is on |
-| Visible in shop | WP publish ∩ not `exclude-from-catalog` |
+| Visible in shop | WP publish ∩ not `exclude-from-catalog`. Smaller than Published when hide-without-image / OOS |
 | Published in WP | Includes catalog-hidden products |
 | Sillage products | `COUNT(sil_products)` |
 | Sync on/off · orders dry-run/LIVE | Snapshot of rails (edit on Settings) |
-| Catalogue visibility stats | Hidden no-image vs stock threshold |
-| Last sync | Latest `sil_sync_runs` (+ link to Sync) |
+| Catalogue visibility stats | Exclusive hide reasons that **add** to Hidden: no/weak image, out of stock (has image), operator pin. Out of stock card is the Woo `outofstock` term (can include no-image SKUs). Visible + Hidden = Published |
+| Last sync | Latest `sil_sync_runs` (+ link to Sync). Fetched is WPF SKUs on wholesale, not BF/BTS |
 | Vendor orders by status | Counts only |
 | Syncs · last 7 days | Activity chart |
 
@@ -115,16 +115,16 @@ Operator model (two actions only):
 
 | Control | API | Effect |
 |---|---|---|
-| **Update prices & stock** | `POST /api/sync/run` `{mode:"fast", source:"live", vendors:["beautyfort","bts"]}` | One-off only when **Sync enabled is off**. Disabled while a run is active, the schedule is on, or a vendor is inside its call interval |
+| **Update prices & stock** | `POST /api/sync/run` `{mode:"fast", source:"live"}` (API fills this storefront’s vendors: BF+BTS or `wholesale-perfumes`) | One-off only when **Sync enabled is off**. Disabled while a run is active, the schedule is on, or a vendor is inside its call interval |
 | **Rebuild catalogue** | same, `mode:"full"` | Empty shop / sync off → runs now. With Sync enabled and a catalogue already imported → **queues** for the next scheduled call |
 | **Stop** | `POST /api/sync/stop` | Only while a run is active; sets `sync_enabled=0`. A later Update does **not** turn the schedule back on |
 | Call-interval status | `GET /api/sync/live-status` | Per-vendor `retryInMinutes`. Daily remaining is unused (always `null`) |
-| Runs table | `GET /api/sync/runs` | History; Fetched shows `BF n · BTS m` (Δ when BTS used the changes API). **Shop writes** is `New n · Updated n · Prices n` (new WooCommerce products, listing/content rewrites including images, price/stock writes). Not `+ ~ $` |
+| Runs table | `GET /api/sync/runs` | History; Fetched is `BF n · BTS m` on retail (Δ = BTS changes API) or `WPF n` catalogue SKUs on wholesale. **Shop writes** is `New n · Updated n · Prices n`. Wholesale hourly store XML lines are collapsed per product id and only matched SKUs count as Fetched |
 
 **Call interval:** Settings **Minutes between syncs** writes both `live_feed_min_minutes` and
-`fast_sync_minutes`. BeautyFort and BTS are gated independently. There is **no daily download
-cap**. If the gate blocks, the API returns `started:false` / `cooldown:true` — it does **not**
-silently reuse a stale on-disk feed.
+`fast_sync_minutes`. Retail: BeautyFort and BTS are gated independently. Wholesale: the hourly
+store XML has its own gate. There is **no daily download cap**. If the gate blocks, the API
+returns `started:false` / `cooldown:true` — it does **not** silently reuse a stale on-disk feed.
 
 **“Cache” is not an operator mode.** Disk feed files are internal. Pricing Save still uses
 invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignores the interval).
@@ -134,7 +134,7 @@ invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignor
 on for this shop). Incremental checks still run at **Minutes between syncs**. BTS 25%/7-day stale recovery stays
 emergency-only. Order housekeeping runs every tick.
 
-`--vendor=all` never includes parked wholesale-perfumes.
+`--vendor=all` never includes parked slugs for this profile (WPF on retail, BF/BTS on wholesale).
 
 ---
 
@@ -215,10 +215,13 @@ The **Minutes between syncs** field stays on Settings (one number; BeautyFort an
 
 The 48-hour lookback on BTS change checks is an implementation detail (so yesterday’s batch is not missed). It is **not** “BTS updates every 48 hours”. Last live fetch is shown on the card. Do **not** put a daily download cap on Vendors (retired).
 
-### Parked: wholesale-perfumes
+### Parked: wholesale-perfumes (retail dashboard)
 
-Shown as a **read-only** dashed card: parked for the separate [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) site. No store-feed knobs, no
-Active toggle, no Save. Sync forces `active=0` every run. Do not activate on this shop.
+Shown as a **read-only** dashed card: lives on the wholesale shop, not this retail one. No
+Active toggle, no Save. Sync forces `active=0` every run. Do not activate on retail.
+
+On the **wholesale** dashboard the inverse is true: BeautyFort + BTS are parked; WPF is the only
+editable vendor; Orders Live is hidden (sandbox lock).
 
 ---
 
@@ -359,7 +362,7 @@ Read by PHP bridge from `sil_settings` (fail-open). Independent of per-vendor MO
 | `DASHBOARD_USER` / `DASHBOARD_PASSWORD` / `SESSION_SECRET` | Dashboard auth |
 | `SILLAGE_SHARED_SECRET` | HMAC between Bun ↔ bridge |
 | `BEAUTYFORT_*` / `BTS_*` | Vendor API credentials — also editable via **Secrets** overlay |
-| `WHOLESALE_PERFUMES_*` | Parked B2B only — unused while WPF inactive |
+| `WHOLESALE_PERFUMES_*` | Retail: unused while WPF parked. Wholesale dashboard Secrets: required |
 | `WP_BASE_URL` | Bootstrap shop URL; Settings `wp_base_url` overrides at runtime |
 | `WORDPRESS_INTERNAL_URL` | In-Docker WordPress (`http://ecom`) for finalize — not public |
 | `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` / `IMAGE_HOST_BASE_URL` | Image tooling bootstrap; Settings Image CDN can document/override |
