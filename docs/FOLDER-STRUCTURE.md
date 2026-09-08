@@ -77,8 +77,36 @@ valkey / lps-media / sillage-core only.
 └── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile
 ```
 
-Until cutover, ovhe **also** has `wp-wholesale/`, `wholesale-db/`, `sitemaps-wholesale/`, and
-wholesale containers from the old combined compose. Do not treat that as the empty-VPS recipe.
+## Empty / test VPS (`ubuntu@51.79.255.226`, hostname `ovh`)
+
+Two host folders, two GitHub repos, Docker Hub images only. Do not clone live WordPress
+or MariaDB. The only copy from ovhe is the retail JPEG folder.
+
+```
+/home/ubuntu/
+├── sillage/                           Retail (unseencurtain/Sillage)
+│   ├── .env
+│   ├── compose.yaml
+│   ├── ecom_sites/config/
+│   ├── sillage-core/data/             secrets overlay + image_overrides.json
+│   └── data/
+│       ├── media/                     Hosted bottle JPEGs (from ovhe)
+│       ├── wp/
+│       ├── wp-db/
+│       └── sitemaps/
+└── wholesale-sillage/                 Wholesale (unseencurtain/sillage-b2b)
+    ├── .env
+    ├── compose.yaml
+    ├── ecom_sites/config/
+    ├── sillage-core/data/
+    └── data/                          wp + wp-db + sitemaps — no media/
+```
+
+Hub tags on a test box should match the **running** ovhe engines
+(`sillage-core`, `sillage-b2b`) and the **running** WordPress image (`sillage-wordpress:d35613d`
+until a deliberate WP rebuild). Do not point wholesale at `sillage-core:*`.
+
+---
 
 Docker reads (retail):
 

@@ -70,8 +70,14 @@ PY
 check "docs no longer claim fresh deploy leaves HPOS off" \
   grep -qv 'fresh deploy leaves HPOS' "$ROOT/docs/VPS-DEPLOY.md"
 
-check "HANDOFF Memory treats empty-VPS WordPress as first-class" \
-  grep -q 'Empty VPS' "$ROOT/docs/HANDOFF.md"
+check "deploy-vps does not default dashboard user to admin" \
+  grep -qvE '^DASHBOARD_USER=admin$' "$PE/scripts/deploy-vps.sh"
+
+check "wp-fresh-install refuses admin username" \
+  grep -q 'must not be admin' "$PE/scripts/wp-fresh-install.php"
+
+check "Login form does not pre-fill admin" \
+  grep -q 'useState("")' "$PE/sillage-core/web/src/pages/Login.tsx"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "empty-VPS contract failed" >&2

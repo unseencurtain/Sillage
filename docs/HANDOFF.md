@@ -58,7 +58,7 @@ Read this checklist and execute it in order. Do not skip an item because a later
 | Item | Location |
 |---|---|
 | **Live VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. App dir `~/sillage/`; data `~/ecom_sites/data/`. |
-| **Unused VPS** | SSH `ovh` — `51.79.255.226`. Empty; do not deploy here unless deliberately repurposed. |
+| **Test VPS** | SSH `ovh` — `51.79.255.226`, hostname `ovh`. Fresh shops in `~/sillage/` and `~/wholesale-sillage/`. |
 | **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu`. Wholesale (separate repo): `https://wholesale.mirainikki.xyz` / `https://sillage-wholesale.mirainikki.xyz` |
 | **Domain change** | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) · trees: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
