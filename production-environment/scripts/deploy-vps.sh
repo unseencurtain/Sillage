@@ -14,6 +14,14 @@
 #       [--dns] [--ip 139.99.61.71] \
 #       [--skip-build] [--fresh] [--core-only]
 #
+# Development box:
+#   ./production-environment/scripts/deploy-vps.sh --host ovhe --dev
+#   Deploys to ~/sillage-dev with compose.dev.yaml layered on: the engine and dashboard
+#   bind-mount this checkout and hot-reload, the bridge plugin is editable in place, the sync
+#   scheduler is off unless asked for, and SILLAGE_DEV_BOX makes a Live vendor order impossible.
+#   Its own directory, volumes and Caddy site file, so it never touches a production stack.
+#   See docs/DEV-ENVIRONMENT.md.
+#
 # Flow (empty Ubuntu VPS — this is the default path):
 #   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
 #   1) Hub images: rsync source onto the VPS and build+push THERE
@@ -51,9 +59,10 @@ WP_ADMIN_USER=""
 SKIP_DNS_CHECK=0
 MEDIA_FROM=""
 FINISH=0
+DEV=0
 
 usage() {
-  sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -81,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --dns) DO_DNS=1; shift ;;
     --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
     --finish) FINISH=1; shift ;;
+    --dev) DEV=1; shift ;;
     --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -118,7 +128,17 @@ fi
 SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
 SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
 RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
-REMOTE_DIR=sillage
+
+# The dev stack is a second, independent stack: its own directory, its own volumes, its own
+# Caddy site file. Same box could host both, and nothing it does may reach production's data.
+if [[ "$DEV" -eq 1 ]]; then
+  REMOTE_DIR=sillage-dev
+  COMPOSE_FILES=(-f compose.yaml -f compose.dev.yaml)
+else
+  REMOTE_DIR=sillage
+  COMPOSE_FILES=(-f compose.yaml)
+fi
+COMPOSE_ARGS="${COMPOSE_FILES[*]}"
 
 # Fail on the tool, not on a bare "command not found" 200 lines in.
 for _tool in ssh rsync; do
@@ -132,10 +152,22 @@ mkdir -p "$ROOT/.deploy"
 CREDS="$ROOT/.deploy/vps-dashboard-${HOST}.txt"
 START_EPOCH=$(date +%s)
 
-# Staging defaults when CLI + local .env omit domains (ovhe).
-DEFAULT_SHOP_DOMAIN=prinscosmetic.eu
-DEFAULT_DASH_DOMAIN=sillage.prinscosmetic.eu
-DEFAULT_IMAGES_DOMAIN=images.prinscosmetic.eu
+# Defaults exist for the dev box only, and they are the hostnames it already answers on.
+#
+# Production gets no default on purpose. These three names used to be the live shop's, so they sat
+# here as the fallback for every deploy; once the shop moved to its own domain, that fallback
+# quietly pointed a production deploy at the wrong hostname — the kind of default that is correct
+# right up until it silently is not. A production deploy now has to be told, or read it from an
+# .env, or stop.
+if [[ "$DEV" -eq 1 ]]; then
+  DEFAULT_SHOP_DOMAIN=prinscosmetic.eu
+  DEFAULT_DASH_DOMAIN=sillage.prinscosmetic.eu
+  DEFAULT_IMAGES_DOMAIN=images.prinscosmetic.eu
+else
+  DEFAULT_SHOP_DOMAIN=""
+  DEFAULT_DASH_DOMAIN=""
+  DEFAULT_IMAGES_DOMAIN=""
+fi
 
 log_step() {
   local msg="$1" now elapsed
@@ -167,7 +199,9 @@ is_placeholder_domain() {
   esac
 }
 
-REMOTE_DOMAINS=$("${SSH[@]}" "$HOST" 'test -f ~/sillage/.env && set -a && source ~/sillage/.env && set +a && printf "%s\t%s\t%s" "${SHOP_DOMAIN:-}" "${DASH_DOMAIN:-}" "${IMAGES_DOMAIN:-}"' 2>/dev/null || true)
+# This stack's own .env, not whichever stack happens to be called "sillage". Reading a fixed path
+# is how the wholesale stack once inherited retail's data directory.
+REMOTE_DOMAINS=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && set -a && source ~/${REMOTE_DIR}/.env && set +a && printf '%s\t%s\t%s' \"\${SHOP_DOMAIN:-}\" \"\${DASH_DOMAIN:-}\" \"\${IMAGES_DOMAIN:-}\"" 2>/dev/null || true)
 _R_SHOP=""; _R_DASH=""; _R_IMAGES=""
 if [[ -n "$REMOTE_DOMAINS" ]]; then
   IFS=$'\t' read -r _R_SHOP _R_DASH _R_IMAGES <<<"$REMOTE_DOMAINS"
@@ -184,6 +218,12 @@ pick_domain() {
 SHOP_DOMAIN="$(pick_domain "$CLI_SHOP" "$_R_SHOP" "$LOCAL_SHOP" "$DEFAULT_SHOP_DOMAIN")"
 DASH_DOMAIN="$(pick_domain "$CLI_DASH" "$_R_DASH" "$LOCAL_DASH" "$DEFAULT_DASH_DOMAIN")"
 IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
+
+if [[ -z "$SHOP_DOMAIN" || -z "$DASH_DOMAIN" ]]; then
+  echo "No shop/dashboard hostname for this stack. Pass --shop and --dash (and --images)," >&2
+  echo "or set them in ${LOCAL_ENV}. There is deliberately no built-in default." >&2
+  exit 1
+fi
 
 if [[ "$FINISH" -eq 1 ]]; then
   # Stage after the operator activates plugins and customises the shop: verify and repair the
@@ -369,7 +409,7 @@ if [[ "$SKIP_BUILD" -eq 1 ]]; then
 fi
 
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
-REMOTE_DATA=$("${SSH[@]}" "$HOST" 'test -f ~/sillage/.env && set -a && source ~/sillage/.env && set +a && printf %s "${DATA_DIR:-}"' 2>/dev/null || true)
+REMOTE_DATA=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && set -a && source ~/${REMOTE_DIR}/.env && set +a && printf %s \"\${DATA_DIR:-}\"" 2>/dev/null || true)
 if [[ -z "$REMOTE_DATA" ]]; then
   REMOTE_DATA="/home/ubuntu/${REMOTE_DIR}/data"
 fi
@@ -377,6 +417,19 @@ fi
 
 "${RSYNC[@]}" "$PE/compose.yaml" "$HOST:~/${REMOTE_DIR}/compose.yaml"
 "${RSYNC[@]}" "$PE/.env.example" "$HOST:~/${REMOTE_DIR}/.env.example"
+if [[ "$DEV" -eq 1 ]]; then
+  "${RSYNC[@]}" "$PE/compose.dev.yaml" "$HOST:~/${REMOTE_DIR}/compose.dev.yaml"
+  # Production runs the code baked into the image. Dev bind-mounts it, so the source has to
+  # actually be on the box — that is the whole point of the box.
+  "${RSYNC[@]}" --delete \
+    --exclude 'node_modules' --exclude 'logs' --exclude 'web/dist' --exclude '.env' \
+    --exclude 'data/secrets.overlay.env' \
+    "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
+  # The Hub images are built on a docker-login'd host, and this is it. Shipping the WordPress
+  # Dockerfile too means one checkout serves both jobs instead of a second copy drifting.
+  "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
+  "${RSYNC[@]}" "$PE/scripts/dev.sh" "$HOST:~/${REMOTE_DIR}/scripts/dev.sh"
+fi
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/config/" "$HOST:~/${REMOTE_DIR}/ecom_sites/config/"
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
@@ -474,6 +527,18 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
     LPS_URL="https://${IMAGES_DOMAIN}"
   fi
 
+  # Dev-only keys. The volume names matter even though dev has its own box today: a stack that
+  # reuses production's volume name is one `docker compose up` away from adopting its database.
+  DEV_ENV_BLOCK=""
+  if [[ "$DEV" -eq 1 ]]; then
+    DEV_ENV_BLOCK="WEB_BIND=127.0.0.1
+WEB_PORT=5174
+SILLAGE_DEV_BOX=1
+WP_VOLUME=sillage_dev_wp_html
+WP_DB_VOLUME=sillage_dev_wp_db
+"
+  fi
+
   "${SSH[@]}" "$HOST" "cat > ~/${REMOTE_DIR}/.env" <<EOF
 # Generated by deploy-vps.sh — do not commit
 SILLAGE_CORE_IMAGE=${CORE_IMAGE}
@@ -501,7 +566,7 @@ MEDIA_BIND=127.0.0.1
 MEDIA_PORT=105
 SILLAGE_BIND=127.0.0.1
 SILLAGE_PORT=4000
-
+${DEV_ENV_BLOCK}
 SHOP_DOMAIN=${SHOP_DOMAIN}
 DASH_DOMAIN=${DASH_DOMAIN}
 IMAGES_DOMAIN=${IMAGES_DOMAIN}
@@ -564,9 +629,10 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' DEV='$DEV' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
-p = pathlib.Path.home() / "sillage" / ".env"
+# This stack's .env. Hardcoding "sillage" here made every update write production's file.
+p = pathlib.Path.home() / os.environ["STACK"] / ".env"
 text = p.read_text()
 def set_key(text, key, value):
     if value is None:
@@ -597,6 +663,15 @@ pairs = [
 ]
 if os.environ.get("WITH_WORDPRESS") == "1":
     pairs.insert(1, ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]))
+# Repair an existing dev box rather than requiring a from-scratch redeploy to gain these.
+if os.environ.get("DEV") == "1":
+    pairs += [
+        ("WEB_BIND", "127.0.0.1"),
+        ("WEB_PORT", "5174"),
+        ("SILLAGE_DEV_BOX", "1"),
+        ("WP_VOLUME", "sillage_dev_wp_html"),
+        ("WP_DB_VOLUME", "sillage_dev_wp_db"),
+    ]
 for k, v in pairs:
     if v is not None and v != "":
         text = set_key(text, k, v)
@@ -607,8 +682,8 @@ PY
   # rewrites the file, so anything not read here is lost: the WordPress login used to be dropped
   # on any second deploy, leaving no record of the wp-admin password anywhere but the server.
   read -r REMOTE_USER REMOTE_PASS REMOTE_WP_USER REMOTE_WP_PASS <<<"$(
-    "${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf "%s %s %s %s" \
-      "$DASHBOARD_USER" "$DASHBOARD_PASSWORD" "${WP_ADMIN_USER:-}" "${WP_ADMIN_PASS:-}"'
+    "${SSH[@]}" "$HOST" "set -a; source ~/${REMOTE_DIR}/.env; set +a; printf '%s %s %s %s' \
+      \"\$DASHBOARD_USER\" \"\$DASHBOARD_PASSWORD\" \"\${WP_ADMIN_USER:-}\" \"\${WP_ADMIN_PASS:-}\""
   )"
   cat > "$CREDS" <<EOF
 host=${HOST}
@@ -626,7 +701,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' DEV='$DEV' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -679,7 +754,16 @@ if [[ -f /etc/caddy/sites/legacy.caddy ]]; then
   grep -q '[^[:space:]]' /etc/caddy/sites/legacy.caddy || sudo rm -f /etc/caddy/sites/legacy.caddy
 fi
 
-sudo tee /etc/caddy/sites/retail.caddy >/dev/null <<EOF
+# One file per stack, named after the stack directory, so retail / wholesale / dev on one box
+# never overwrite each other's site config.
+CADDY_SITE="/etc/caddy/sites/${STACK:-retail}.caddy"
+# In dev the dashboard is Vite with hot reload, not the API serving a prebuilt bundle. Websockets
+# need no special handling — Caddy upgrades them through reverse_proxy on its own.
+DASH_UPSTREAM_PORT="${SILLAGE_PORT:-4000}"
+if [[ "${DEV:-0}" == "1" ]]; then
+  DASH_UPSTREAM_PORT="${WEB_PORT:-5174}"
+fi
+sudo tee "$CADDY_SITE" >/dev/null <<EOF
 ${SHOP_DOMAIN} {
 	# AI training crawlers walk every /product and /brand page. Prefork PHP
 	# cannot survive that on a ~4 GB box. Images CDN stays open (cheap files).
@@ -728,14 +812,14 @@ ${DASH_DOMAIN} {
 		-Server
 		-Via
 	}
-	reverse_proxy localhost:${SILLAGE_PORT:-4000} {
+	reverse_proxy localhost:${DASH_UPSTREAM_PORT} {
 		header_down -Server
 		header_down -Via
 	}
 }
 ${IMAGES_SITE_BLOCK}
 EOF
-sudo caddy fmt --overwrite /etc/caddy/sites/retail.caddy
+sudo caddy fmt --overwrite "$CADDY_SITE"
 [[ -f /etc/caddy/sites/legacy.caddy ]] && sudo caddy fmt --overwrite /etc/caddy/sites/legacy.caddy
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy
@@ -761,8 +845,8 @@ mkdir -p "$DATA_DIR/media" "$DATA_DIR/sitemaps" \
   || : > "$APP_DIR/sillage-core/data/secrets.overlay.env"
 chmod 600 "$APP_DIR/sillage-core/data/secrets.overlay.env" 2>/dev/null || true
 
-docker compose --env-file .env pull
-docker compose --env-file .env up -d ecom-db valkey
+docker compose $COMPOSE_ARGS --env-file .env pull
+docker compose $COMPOSE_ARGS --env-file .env up -d ecom-db valkey
 echo "Waiting for MariaDB..."
 for i in $(seq 1 60); do
   if docker exec -i ecom-db healthcheck.sh --connect --innodb_initialized </dev/null 2>/dev/null; then
@@ -777,7 +861,7 @@ if [[ -f /tmp/sillage-clone.sql ]]; then
   rm -f /tmp/sillage-clone.sql
 fi
 
-docker compose --env-file .env up -d
+docker compose $COMPOSE_ARGS --env-file .env up -d
 
 # WordPress lives in a Docker volume, so every check and edit goes through the container. The
 # host has no business holding WordPress core: that is how a datadir drifted to a newer version
@@ -887,7 +971,7 @@ if [[ -f ecom_sites/config/sillage-grants.sql ]]; then
   # MariaDB refuses a grant on a missing table. --finish applies the rest and enforces it.
   bash scripts/apply-grants.sh
 fi
-docker compose --env-file .env up -d
+docker compose $COMPOSE_ARGS --env-file .env up -d
 docker exec sillage-core bun run migrate
 # Drop unused Hub tags / dangling layers so day-2 deploys do not pile up 20+ images.
 docker image prune -af

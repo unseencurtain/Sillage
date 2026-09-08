@@ -267,7 +267,7 @@ export async function buildWriteContext(
     visibility: await loadVisibilityTerms(),
     productType: await loadProductTypeTerm("simple"),
     activeAttributeTaxonomies: active,
-    images: await buildImageLookup(),
+    images: await buildImageLookup(process.cwd(), settings.imageCdnBaseUrl),
   };
 }
 

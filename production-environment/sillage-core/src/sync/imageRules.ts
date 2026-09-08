@@ -2,11 +2,16 @@
  * Pure image visibility helpers. No database imports — unit-testable.
  */
 
+/** A stringified Python `None`, a literal `null`, or nothing at all — never a filename. */
+function isJunkToken(lowercased: string): boolean {
+  return !lowercased || lowercased === "none" || lowercased === "null";
+}
+
 export function isPlaceholderImage(url: string | null | undefined): boolean {
   if (!url) return true;
   const trimmed = url.trim();
   const low = trimmed.toLowerCase();
-  if (!low || low === "none" || low === "null") return true;
+  if (isJunkToken(low)) return true;
   // Shop only renders http(s). "None" and other junk must not count as a photo.
   if (!/^https?:\/\//i.test(trimmed)) return true;
   return (
@@ -62,6 +67,33 @@ export function isWeakVendorThumb(url: string | null | undefined): boolean {
 /** Empty, placeholder, or known-weak vendor thumb — not fit for the storefront. */
 export function isUnusableImage(url: string | null | undefined): boolean {
   return isPlaceholderImage(url) || isWeakVendorThumb(url);
+}
+
+/**
+ * Expand a host-relative override onto whichever image CDN this deployment owns.
+ *
+ * `image_overrides.json` is committed and shipped to every box, so a photo we host ourselves is
+ * stored as a bare filename and gains its origin here. Baking the origin into the file instead
+ * silently tied one shop to another shop's CDN: a rebuilt storefront kept serving 3,221 photos off
+ * the old box, and repurposing that box would have broken them.
+ *
+ * A value that already carries a scheme is somebody else's URL (Shopify, a vendor CDN) and is
+ * returned untouched. With no base configured, a relative value stays relative and
+ * `isUnusableImage` rejects it — better an unphotographed product than a broken `<img>`.
+ */
+export function absolutizeImageUrl(
+  value: string | null | undefined,
+  cdnBaseUrl: string | null | undefined,
+): string {
+  const trimmed = (value ?? "").trim();
+  // Junk must not be given an origin. The enricher writes a stringified `None` when it found
+  // nothing, and prefixing that yields `https://cdn/None` — a URL that looks perfectly usable and
+  // renders as a broken image on the product page.
+  if (isJunkToken(trimmed.toLowerCase())) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith("//")) return trimmed;
+  const base = (cdnBaseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!base) return trimmed;
+  return `${base}/${trimmed.replace(/^\/+/, "")}`;
 }
 
 /** Strip junk so EAN maps match across vendors (leading zeros, quoted barcodes). */
