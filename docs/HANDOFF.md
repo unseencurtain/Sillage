@@ -58,7 +58,8 @@ Read this checklist and execute it in order. Do not skip an item because a later
 | Item | Location |
 |---|---|
 | **Live VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. App dir `~/sillage/`; data `~/ecom_sites/data/`. |
-| **Test VPS** | SSH `ovh` — `51.79.255.226`, hostname `ovh`. Fresh shops in `~/sillage/` and `~/wholesale-sillage/`. |
+| **Test VPS** | SSH `ovh` — `51.79.255.226`, hostname `ovh`. Fresh shops in `~/sillage/` and `~/wholesale-sillage/` (the running box was brought up by hand; `deploy-vps.sh` uses `~/sillage-wholesale`). |
+| **Wipe and rebuild** | [`REBUILD-FROM-SCRATCH.md`](REBUILD-FROM-SCRATCH.md) — standing hostnames/usernames, ordered commands, and the traps that cost the first rebuild |
 | **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu`. Wholesale (separate repo): `https://wholesale.mirainikki.xyz` / `https://sillage-wholesale.mirainikki.xyz` |
 | **Domain change** | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) · trees: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |

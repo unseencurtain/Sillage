@@ -94,7 +94,7 @@ or MariaDB. The only copy from ovhe is the retail JPEG folder.
 │       ├── wp/
 │       ├── wp-db/
 │       └── sitemaps/
-└── wholesale-sillage/                 Wholesale (unseencurtain/sillage-b2b)
+└── sillage-wholesale/                 Wholesale (unseencurtain/sillage-b2b)
     ├── .env
     ├── compose.yaml
     ├── ecom_sites/config/
