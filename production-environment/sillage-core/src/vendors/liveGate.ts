@@ -4,7 +4,7 @@
  * Each vendor is gated independently by `live_feed_min_minutes` since its last live fetch.
  * Daily download counters are recorded for diagnostics but never block a call.
  */
-import { isWholesaleProfile, sil } from "../config/env.ts";
+import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendor, setSetting } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
@@ -12,7 +12,6 @@ import type { CacheVendor } from "./feedCache.ts";
 import {
   legacyLiveMaxSettingKey,
   resolveLiveMaxPerDay,
-  resolveWholesalePerfumesStoreLimits,
 } from "./liveLimits.ts";
 
 const log = logger("live-gate");
@@ -169,91 +168,11 @@ export async function getRetailLiveCooldown(): Promise<{
   };
 }
 
-export type StorefrontLiveCooldown = Awaited<ReturnType<typeof getRetailLiveCooldown>> & {
-  wholesalePerfumes?: LiveGateResult & { maxPerDay: number; usedToday: number };
-};
+export type StorefrontLiveCooldown = Awaited<ReturnType<typeof getRetailLiveCooldown>>;
 
-/**
- * Call-interval for this process’s storefront.
- * Retail: BeautyFort + BTS. Wholesale: wholesale-perfumes hourly store feed (price/stock).
- */
+/** Call-interval for BeautyFort + BTS. */
 export async function getStorefrontLiveCooldown(): Promise<StorefrontLiveCooldown> {
-  if (!isWholesaleProfile()) return getRetailLiveCooldown();
-
-  const settings = await loadSettings();
-  const cooldownMinutes = settings.liveFeedMinMinutes;
-  const [storeGate, catalogMax, catalogUsed] = await Promise.all([
-    checkWholesalePerfumesStoreGate(),
-    catalogueMaxPerDay("wholesale-perfumes"),
-    liveFetchesUsedToday("wholesale-perfumes"),
-  ]);
-  const nextAllowedAt =
-    storeGate.allow || storeGate.retryInMinutes <= 0
-      ? null
-      : new Date(Date.now() + storeGate.retryInMinutes * 60_000).toISOString();
-  const idle = {
-    allow: true,
-    reason: "parked on this storefront",
-    retryInMinutes: 0,
-    maxPerDay: 0,
-    usedToday: 0,
-  };
-  return {
-    allow: storeGate.allow,
-    anyAllow: storeGate.allow,
-    retryInMinutes: storeGate.allow ? 0 : storeGate.retryInMinutes,
-    reason: storeGate.reason,
-    cooldownMinutes,
-    nextAllowedAt,
-    beautyfort: idle,
-    bts: idle,
-    wholesalePerfumes: { ...storeGate, maxPerDay: catalogMax, usedToday: catalogUsed },
-  };
-}
-
-/**
- * Separate gate for wholesale-perfumes hourly store (price/stock) feed. Must not share the
- * catalog's once-per-day cap, or fast syncs would stall after the first catalog pull.
- */
-export async function checkWholesalePerfumesStoreGate(): Promise<LiveGateResult> {
-  let vendorRow: Awaited<ReturnType<typeof loadVendor>> | null = null;
-  try {
-    vendorRow = await loadVendor("wholesale-perfumes");
-  } catch {
-    vendorRow = null;
-  }
-  const { minMinutes } = resolveWholesalePerfumesStoreLimits(vendorRow);
-
-  const [lastRow] = await query<RowDataPacket & { setting_value: string }>(
-    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    ["last_live_fetch_wholesale-perfumes_store"],
-  );
-  const lastIso = lastRow?.setting_value ?? null;
-  if (lastIso) {
-    const elapsed = Math.floor((Date.now() - new Date(lastIso).getTime()) / 60_000);
-    if (elapsed < minMinutes) {
-      return {
-        allow: false,
-        reason: `wholesale-perfumes store live fetch blocked: only ${elapsed} min since last download (min ${minMinutes})`,
-        retryInMinutes: minMinutes - elapsed,
-      };
-    }
-  }
-
-  return { allow: true, reason: "live allowed", retryInMinutes: 0 };
-}
-
-export async function recordWholesalePerfumesStoreFetch(): Promise<void> {
-  const now = new Date().toISOString();
-  await setSetting("last_live_fetch_wholesale-perfumes_store", now);
-  const dayKey = `live_fetch_count_wholesale-perfumes_store_${now.slice(0, 10)}`;
-  const [row] = await query<RowDataPacket & { setting_value: string }>(
-    `SELECT setting_value FROM ${sil("sil_settings")} WHERE setting_key = ?`,
-    [dayKey],
-  );
-  const next = String(Number(row?.setting_value ?? 0) + 1);
-  await setSetting(dayKey, next);
-  log.info(`wholesale-perfumes_store: recorded live fetch (#${next} today)`);
+  return getRetailLiveCooldown();
 }
 
 /** Wall-clock half-hour slots (:00–:04 and :30–:34). Cron ticks every 5 min; only these open sync. */

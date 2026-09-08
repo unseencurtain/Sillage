@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { env } from "../src/config/env.ts";
 import { BeautyfortConnector } from "../src/vendors/beautyfort/connector.ts";
 import { BtsConnector } from "../src/vendors/bts/connector.ts";
 import { offerChecksum } from "../src/lib/checksum.ts";
@@ -12,10 +15,19 @@ import {
   resolveTierMultiplier,
 } from "../src/sync/pricing.ts";
 
+// Full-feed tests need .feedscratch dumps (`bun run` fixtures). Skip when the files are absent
+// so a clean clone still has a green `bun test`.
+
+const hasBeautyFortFeed = existsSync(join(env.fixturesDir, "beautyfort_full.json"));
+const hasBtsFeed = existsSync(join(env.fixturesDir, "bts_products_full.json"));
+const describeBf = hasBeautyFortFeed ? describe : describe.skip;
+const describeBts = hasBtsFeed ? describe : describe.skip;
+const describeChecksums = hasBeautyFortFeed ? describe : describe.skip;
+
 // These run against the real downloaded feeds in .feedscratch, so they assert the actual data
 // shape rather than a hand-written fixture that could drift from reality.
 
-describe("BeautyFort connector", () => {
+describeBf("BeautyFort connector", () => {
   const connector = new BeautyfortConnector();
 
   test("normalizes the full live feed without errors", async () => {
@@ -89,7 +101,7 @@ describe("BeautyFort connector", () => {
   });
 });
 
-describe("BTS connector", () => {
+describeBts("BTS connector", () => {
   const connector = new BtsConnector();
 
   test("normalizes the full live feed without errors", async () => {
@@ -142,7 +154,7 @@ describe("BTS connector", () => {
   });
 });
 
-describe("checksums", () => {
+describeChecksums("checksums", () => {
   test("are stable across calls and sensitive to a price change", async () => {
     const connector = new BeautyfortConnector();
     await connector.prepare();

@@ -106,7 +106,7 @@ function confirmDescription(original: Vendor, patch: VendorPatch): string {
 export function Vendors() {
   const { data, isLoading } = useQuery({ queryKey: ["vendors"], queryFn: api.vendors });
   const vendors = data?.vendors ?? [];
-  const wholesale = data?.profile === "wholesale";
+  const wholesale = false;
   const active = vendors.filter((v) => !v.parked);
 
   return (

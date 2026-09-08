@@ -32,8 +32,10 @@ Read this checklist and execute it in order. Do not skip an item because a later
 4. **Valkey is the only shared process** while both shops sit on ovhe (retail db 0, wholesale
    prefix `wholesale:` / db 1). When wholesale moves, it takes its own Valkey. Do not share
    MariaDB “until then.”
-5. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage). Cursor origin
-   copies can have different SHAs; replay onto GitHub `main`, do not merge the remotes.
+5. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
+   (BeautyFort + BTS) and [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
+   for **wholesale** (wholesale-perfumes). Do not mix vendor code between the two. Cursor copies
+   can have different SHAs; replay onto GitHub `main`, do not merge the remotes.
 
 ---
 
@@ -48,7 +50,7 @@ Read this checklist and execute it in order. Do not skip an item because a later
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |
 | **Hub images** | `unseencurtain/sillage-core:<tag>`, `unseencurtain/sillage-wordpress:<tag>` |
-| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — canonical public tree. Cursor cloud copies can have **parallel SHAs**; do not merge remotes. Replay with `production-environment/scripts/replay-to-github.sh`. [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) is an archive pointer, not a second engine. |
+| **GitHub** | [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`) — **retail** tree. Wholesale shop is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b). Do not merge remotes; replay with `production-environment/scripts/replay-to-github.sh`. |
 | **Git (pricing lock fix)** | `8628eee` on `main` — dedicated `GET_LOCK` connection + Save-only-on-change. Redeploy if VPS image tag lags. |
 | **Tag baseline** | `pre-scratch-20260808` — restore marker before catalogue wipe + B2B split ([`SCRATCH-RESET.md`](SCRATCH-RESET.md)) |
 | **B2B (this VPS)** | [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md) — second WP + `sillage_wpf`, compose profile `wholesale`. Old pointer: [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) |

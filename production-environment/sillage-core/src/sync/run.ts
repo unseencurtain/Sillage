@@ -236,9 +236,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
     const settings = await loadSettings();
     applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
     const allVendors = await loadVendors();
-    // Empty vendors = --vendor=all → skip parked slugs for this profile.
-    // Retail still allows an explicit wholesale-perfumes slug (offline tests).
-    // Wholesale never selects BeautyFort / BTS, even when named.
+    // Empty vendors = --vendor=all → BeautyFort + BTS only.
     const named = Boolean(options.vendors?.length);
     const pool = (named
       ? allVendors.filter((v) => options.vendors!.includes(v.slug))
@@ -315,7 +313,7 @@ export async function runSync(options: SyncOptions): Promise<SyncSummary> {
       }
 
       // ── Full path ──────────────────────────────────────────────────────────
-      if (options.source === "live" && vendor.slug !== "wholesale-perfumes") {
+      if (options.source === "live") {
         const gate = await checkLiveGate(vendor.slug as CacheVendor);
         if (!gate.allow) {
           log.warn(`${vendor.slug}: skipping live catalogue rebuild — ${gate.reason}`);
@@ -558,7 +556,7 @@ async function fastSyncVendor(
   runId: number,
   summary: SyncSummary,
 ): Promise<number> {
-  if (options.source === "live" && vendor.slug !== "wholesale-perfumes") {
+  if (options.source === "live") {
     const gate = await checkLiveGate(vendor.slug as CacheVendor);
     if (!gate.allow) {
       // Do not fall back to a stale on-disk feed — operator/schedule must wait out the cooldown.
@@ -582,34 +580,25 @@ async function fastSyncVendor(
   }
 
   if (!forceFullFeed && connector.fetchPriceStock && options.source === "live") {
-    // wholesale-perfumes store feed has its own hourly gate inside fetchPriceStock.
-    const sharedGate = vendor.slug !== "wholesale-perfumes";
     const lastVendorSuccess = await lastSuccessfulRun(vendor.id);
     const since = resolveDeltaSince({ lastSuccessAt: lastVendorSuccess, vendorId: vendor.slug });
     try {
       const updates = await connector.fetchPriceStock(since, (m) => log.progress(`${vendor.slug}: ${m}`));
       log.progressEnd();
       if (updates) {
-        if (sharedGate) await recordLiveFetch(vendor.slug as CacheVendor);
-        const ids = updates.map((u) => u.vendorProductId);
-        const known = await existingVendorProductIds(vendor.id, ids);
-        const matched = vendor.slug === "wholesale-perfumes"
-          ? updates.filter((u) => known.has(u.vendorProductId))
-          : updates;
-        // Fetched = SKUs in our catalogue we compared, not raw vendor XML lines.
-        // wholesale-perfumes store XML has many rows per product id.
-        summary.fetched += matched.length;
+        await recordLiveFetch(vendor.slug as CacheVendor);
+        summary.fetched += updates.length;
         summary.fetchedByVendor = summary.fetchedByVendor ?? {};
-        summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + matched.length;
+        summary.fetchedByVendor[vendor.slug] = (summary.fetchedByVendor[vendor.slug] ?? 0) + updates.length;
         if (vendor.slug === "bts") summary.btsDelta = true;
-        const changed = await applyPriceStockDelta(vendor.id, matched);
+        const changed = await applyPriceStockDelta(vendor.id, updates);
         summary.updated += changed;
 
         try {
           const imported = await importMissingDeltaProducts({
             vendor,
             connector,
-            updates: vendor.slug === "wholesale-perfumes" ? matched : updates,
+            updates,
             since,
             runId,
             summary,

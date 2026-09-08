@@ -7,7 +7,8 @@
 #   GITHUB_TOKEN=ghp_... ./production-environment/scripts/replay-to-github.sh
 #   # or SSH: ssh -T git@github.com  then run without a token
 #
-# Optional: REPLAY_B2B=1 also updates unseencurtain/sillage-b2b README to point here.
+# Optional: REPLAY_B2B=1 is **off by default**. sillage-b2b is its own deployable
+# shop; do not overwrite it with a pointer README.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -151,6 +152,6 @@ EOF
 
 install_unseencurtain_key
 replay_sillage
-if [[ "${REPLAY_B2B:-1}" == "1" ]]; then
+if [[ "${REPLAY_B2B:-0}" == "1" ]]; then
   replay_b2b_pointer
 fi

@@ -6,7 +6,6 @@
 export const DEFAULT_LIVE_MAX_PER_DAY: Record<string, number> = {
   beautyfort: 20,
   bts: 48,
-  "wholesale-perfumes": 1,
 };
 
 export const DEFAULT_WHOLESALE_PERFUMES_STORE_MAX_PER_DAY = 24;

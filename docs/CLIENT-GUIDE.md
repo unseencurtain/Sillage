@@ -10,7 +10,7 @@ dashboard — not for developers. Button names and page titles match what you se
 | Customer shop (retail) | https://prinscosmetic.eu |
 | Operations dashboard (retail) | https://sillage.prinscosmetic.eu |
 | Track an order (retail customers) | https://prinscosmetic.eu/track-order/ |
-| Wholesale shop | https://wholesale.mirainikki.xyz |
+| Wholesale shop | https://wholesale.mirainikki.xyz (separate repo: [sillage-b2b](https://github.com/unseencurtain/sillage-b2b)) |
 | Wholesale operations dashboard | https://sillage-wholesale.mirainikki.xyz |
 
 The wholesale shop is a **different website**: different catalogue (wholesale-perfumes only),
@@ -56,8 +56,9 @@ Sillage does three jobs:
 Shoppers never see “BeautyFort” or “BTS” as shop categories. They see brands, product types, and
 normal WooCommerce pages. The dashboard is for **you**.
 
-A third wholesaler (wholesale-perfumes) is **not** on the retail shop. It is sold on the
-separate wholesale site (https://wholesale.mirainikki.xyz) with a **€300** minimum order.
+A third wholesaler (wholesale-perfumes) is **not** in this Sillage repo. It is sold on the
+separate wholesale site (https://wholesale.mirainikki.xyz) from
+[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) with a **€300** minimum order.
 
 ---
 
