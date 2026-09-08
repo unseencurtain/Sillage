@@ -290,16 +290,17 @@ database-level, which apply before the tables exist.
 `mysql.tables_priv` and `mysql.db` and labels it `ok`, `pending` (table not created yet) or
 `MISSING`. The deploy runs it in report mode; `--finish` runs it `--strict` after activation.
 
-### The wholesale grants file existed only on the server
+### A fallback that could not work
 
-`deploy-vps.sh` looked for `sillage-grants-wholesale.sql`, fell back to retail's file when it was
-absent, and the b2b repo never contained it — it had been written on the box by hand. The
-fallback grants name the `earth` database, which does not exist on `wholesale-db`, so a rebuild
-from a clean checkout would have given the engine user no privileges at all.
+The wholesale deploy looked for `sillage-grants-wholesale.sql` and quietly fell back to retail's
+`sillage-grants.sql` when it was absent. That fallback can never work: retail's grants name the
+`earth` database, which does not exist on `wholesale-db`. It would have applied nothing and said
+nothing.
 
-*Lesson:* a fallback that cannot work is worse than no fallback, because it hides the real
-failure. *Guard:* the file is committed, and a missing one is now a hard error instead of a
-silent switch to a file for the other shop.
+*Lesson:* a fallback that cannot work is worse than no fallback, because it turns a missing file
+into a mystery about the engine. *Guard:* a missing wholesale grants file is now a hard error.
+(The file itself was committed all along — a truncated directory listing during this review
+suggested otherwise, which is its own reminder to check before concluding.)
 
 ### Chased DNS symptoms instead of checking DNS
 
