@@ -218,6 +218,8 @@ export interface Overview {
   /** Exclusive hide reason: has a photo, but at/below the stock threshold. */
   hiddenStock: number;
   hiddenOperator?: number;
+  /** True on the development box, where Live dispatch is refused whatever the Orders page says. */
+  devBox?: boolean;
   lastSync: SyncRun | null;
   ordersByStatus: Record<string, number>;
   syncsLast7Days: Array<{ day: string; n: number }>;

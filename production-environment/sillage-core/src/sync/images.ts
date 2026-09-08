@@ -13,9 +13,16 @@ import { join } from "node:path";
 import { sil } from "../config/env.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { logger } from "../lib/log.ts";
-import { isUnusableImage, normalizeEan, resolveImageUrl, indexOfferImages } from "./imageRules.ts";
+import {
+  absolutizeImageUrl,
+  isUnusableImage,
+  normalizeEan,
+  resolveImageUrl,
+  indexOfferImages,
+} from "./imageRules.ts";
 
 export {
+  absolutizeImageUrl,
   isPlaceholderImage,
   isUnusableImage,
   isWeakVendorThumb,
@@ -30,27 +37,42 @@ export {
 
 const log = logger("images");
 
-let overridesCache: Map<string, string> | null = null;
+// Keyed by file + CDN origin: the same file resolves to different URLs on the dev box and in
+// production, and the origin is editable from Settings while the process is up.
+const overridesCache = new Map<string, Map<string, string>>();
 
-export function loadImageOverrides(root = process.cwd()): Map<string, string> {
-  if (overridesCache) return overridesCache;
+/**
+ * Read `data/image_overrides.json`, expanding bare filenames onto `cdnBaseUrl`.
+ *
+ * Photos we host ourselves are stored without an origin so the one committed file is correct on
+ * every box. Anything with a scheme is an external CDN's URL and is used as written.
+ */
+export function loadImageOverrides(root = process.cwd(), cdnBaseUrl = ""): Map<string, string> {
   const path = join(root, "data", "image_overrides.json");
+  const cacheKey = `${path}\u0000${cdnBaseUrl}`;
+  const cached = overridesCache.get(cacheKey);
+  if (cached) return cached;
+  const map = new Map<string, string>();
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
-    const map = new Map<string, string>();
+    let selfHosted = 0;
     for (const [k, v] of Object.entries(raw)) {
       const ean = normalizeEan(k);
-      if (!ean || isUnusableImage(v)) continue;
-      map.set(ean, v);
+      if (!ean) continue;
+      const url = absolutizeImageUrl(v, cdnBaseUrl);
+      if (isUnusableImage(url)) continue;
+      if (url !== (v ?? "").trim()) selfHosted += 1;
+      map.set(ean, url);
     }
-    overridesCache = map;
-    log.info(`loaded ${map.size} image overrides from ${path}`);
-    return map;
+    log.info(
+      `loaded ${map.size} image overrides from ${path}` +
+        (selfHosted ? ` (${selfHosted} self-hosted, resolved against ${cdnBaseUrl || "no CDN base"})` : ""),
+    );
   } catch (err) {
     log.warn(`image overrides not loaded: ${String(err)}`);
-    overridesCache = new Map();
-    return overridesCache;
   }
+  overridesCache.set(cacheKey, map);
+  return map;
 }
 
 /** Build EAN → image from non-vanished offers that already have a real URL.
@@ -73,8 +95,8 @@ export interface ImageLookup {
   resolve(eans: string[], current: string | null): string | null;
 }
 
-export async function buildImageLookup(root = process.cwd()): Promise<ImageLookup> {
-  const overrides = loadImageOverrides(root);
+export async function buildImageLookup(root = process.cwd(), cdnBaseUrl = ""): Promise<ImageLookup> {
+  const overrides = loadImageOverrides(root, cdnBaseUrl);
   const fromOffers = await loadOfferImageIndex();
   return {
     resolve(eans, current) {

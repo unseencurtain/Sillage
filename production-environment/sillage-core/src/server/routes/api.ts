@@ -262,6 +262,10 @@ api.get("/overview", async (c) => {
       stockThreshold: settings.stockThreshold,
       scheduleTimezone: settings.scheduleTimezone,
     },
+    // Whether this is the development box. The two shops are visually identical, and the dev one
+    // holds the same vendor credentials, so the dashboard has to say which one you are looking at
+    // before you press anything.
+    devBox: env.devBox,
     secrets: (() => {
       loadSecretsOverlay();
       const { secrets } = listSecretStatus();
@@ -532,7 +536,7 @@ api.get("/products", async (c) => {
   ]);
 
   const offerImages = await loadUsableImagesForEans(items.map((row) => offerEans(row)).flat());
-  const overrides = loadImageOverrides();
+  const overrides = loadImageOverrides(process.cwd(), settings.imageCdnBaseUrl);
 
   const decorated = items.map((row) => {
     const threshold =

@@ -1,0 +1,94 @@
+# Development overlay for the Sillage stack. Never used in production.
+#
+#   cd ~/sillage-dev/production-environment
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+#
+# `scripts/dev.sh` wraps that, and everything below assumes you are running compose from inside a
+# git checkout — the bind mounts are relative to this file, so the containers run the code you are
+# editing rather than a copy baked into an image.
+#
+# What this overlay buys you:
+#   * save a .ts file        → bun --hot restarts the API in about a second
+#   * save a .tsx file       → vite pushes the change into the open browser tab
+#   * save the bridge .php   → refresh the shop, it is already live
+#   * press Live on Orders   → refused, because SILLAGE_DEV_BOX makes dry-run non-negotiable
+#
+# What it deliberately does not do: run the sync scheduler. A dev box quietly pulling 51,000
+# products every hour burns vendor API budget nobody is watching. Add `--profile cron` when you
+# actually want to exercise the schedule.
+name: sillage
+
+x-dev-engine: &dev-engine
+  environment:
+    NODE_ENV: development
+    LOG_LEVEL: debug
+    # Not a setting — a property of the machine. See src/storefront/profile.ts.
+    SILLAGE_DEV_BOX: "1"
+  volumes:
+    # Source only. node_modules, web/dist and the data mounts stay as the image and the base
+    # compose file left them.
+    - ./sillage-core/src:/app/src
+    - ./sillage-core/migrations:/app/migrations
+    - ./sillage-core/tests:/app/tests
+    - ./sillage-core/crontab:/app/crontab:ro
+
+services:
+  sillage-core:
+    <<: *dev-engine
+    # --hot re-evaluates changed modules in place and keeps the port bound, so the browser does
+    # not race a restarting server.
+    command: ["bun", "run", "--hot", "src/server/index.ts"]
+
+  sillage-cron:
+    <<: *dev-engine
+    profiles: ["cron"]
+
+  # Vite with HMR, serving the dashboard domain. In production the API serves a prebuilt
+  # web/dist instead and this container does not exist.
+  sillage-web:
+    container_name: sillage-web
+    hostname: sillage-web
+    image: ${SILLAGE_CORE_IMAGE:-unseencurtain/sillage-core:latest}
+    working_dir: /app
+    command: ["bun", "run", "web:dev"]
+    restart: unless-stopped
+    networks:
+      - ecom_network
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-5174}:5173"
+    environment:
+      # Another container, not localhost.
+      VITE_API_PROXY_TARGET: http://sillage-core:4000
+      VITE_HOST: 0.0.0.0
+      # Vite rejects Host headers it does not recognise, and Caddy forwards the real hostname.
+      VITE_ALLOWED_HOSTS: ${DASH_DOMAIN:-localhost},localhost,127.0.0.1
+      # The browser reaches Caddy on 443; the HMR socket has to be told to call back there.
+      VITE_HMR_HOST: ${DASH_DOMAIN:-}
+    volumes:
+      - ./sillage-core/web:/app/web
+    depends_on:
+      - sillage-core
+
+  ecom:
+    volumes:
+      # The one part of wp-content that is ours. WordPress core and everything the operator
+      # installs stay in the volume; the bridge plugin comes from the checkout so editing PHP is
+      # a save and a refresh, with git history and no docker cp.
+      - ./ecom_sites/data/wp/wp-content/plugins/sillage-bridge:/var/www/html/wp-content/plugins/sillage-bridge
+    environment:
+      WORDPRESS_DEBUG: "1"
+      # Log to wp-content/debug.log instead of printing into the page, so a notice in the bridge
+      # does not corrupt a REST response the engine is parsing.
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_REDIS_HOST', 'valkey');
+        define('WP_REDIS_PORT', 6379);
+        define('WP_REDIS_PREFIX', 'sillage:');
+        define('SILLAGE_SHARED_SECRET', '${SILLAGE_SHARED_SECRET}');
+        define('SILLAGE_CORE_URL', 'http://sillage-core:4000');
+        define('SILLAGE_DASHBOARD_URL', '${SILLAGE_DASHBOARD_URL:-http://127.0.0.1:4000}');
+        define('SILLAGE_DB', '${SILLAGE_DB:-sillage}');
+        define('DISABLE_WP_CRON', true);
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_LOG', true);
+        define('WP_DEBUG_DISPLAY', false);
+        define('SCRIPT_DEBUG', true);

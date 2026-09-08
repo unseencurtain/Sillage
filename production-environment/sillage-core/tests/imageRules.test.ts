@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  absolutizeImageUrl,
   displayedShopImage,
   isUnusableImage,
   isWeakVendorThumb,
@@ -90,5 +91,45 @@ describe("imageRules weak BeautyFort thumbs", () => {
         operatorHidden: true,
       }),
     ).toBe("hidden_operator");
+  });
+});
+
+describe("absolutizeImageUrl", () => {
+  const cdn = "https://images.codeinmoon.xyz";
+
+  test("gives a self-hosted filename this deployment's origin", () => {
+    expect(absolutizeImageUrl("9424115.jpg", cdn)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
+    expect(absolutizeImageUrl("/9424115.jpg", cdn)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
+    expect(absolutizeImageUrl("9424115.jpg", `${cdn}/`)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
+  });
+
+  test("the same file follows the box it is deployed on", () => {
+    // The point of the whole change: one committed overrides file, no shop borrowing another
+    // shop's CDN. Baking the origin in is what left a rebuilt storefront serving 3,221 photos
+    // off the box it replaced.
+    expect(absolutizeImageUrl("9424115.jpg", "https://images.dev.example")).toBe(
+      "https://images.dev.example/9424115.jpg",
+    );
+  });
+
+  test("leaves somebody else's CDN alone", () => {
+    for (const url of [
+      "https://cdn.shopify.com/s/files/1/x.jpg",
+      "http://images.btswholesaler.com/y.webp",
+      "//cdn.shopify.com/protocol-relative.jpg",
+    ]) {
+      expect(absolutizeImageUrl(url, cdn)).toBe(url);
+    }
+  });
+
+  test("without a base, a relative value stays unusable rather than becoming a broken img", () => {
+    expect(absolutizeImageUrl("9424115.jpg", "")).toBe("9424115.jpg");
+    expect(isUnusableImage(absolutizeImageUrl("9424115.jpg", ""))).toBe(true);
+  });
+
+  test("junk stays junk, so the override is dropped and the product hides", () => {
+    expect(isUnusableImage(absolutizeImageUrl("None", cdn))).toBe(true);
+    expect(isUnusableImage(absolutizeImageUrl("", cdn))).toBe(true);
+    expect(isUnusableImage(absolutizeImageUrl(null, cdn))).toBe(true);
   });
 });
