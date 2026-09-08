@@ -109,11 +109,19 @@ import — that is what stage 3.5 confirms.
   --host ovh --shop codeinmoon.xyz --dash sillage.codeinmoon.xyz --finish
 ```
 
-Prints one line per check and repairs the *options* the architecture depends on — HPOS,
-permalinks, EUR, coming-soon off, and a real page on `/`. Plugin and theme activation is
-reported and never changed, so a half-customised shop is never overridden. Exit code is
-non-zero while anything required is still wrong, so the import is not started on a shop that
-cannot hold it.
+Two things happen, in this order:
+
+1. `apply-grants.sh --strict` re-applies the engine's database grants and verifies every one
+   against `mysql.tables_priv` / `mysql.db`. This is not belt-and-braces: MariaDB **refuses a
+   table-level `GRANT` on a table that does not exist** (ERROR 1146) and stops reading the file
+   there, so a deploy that ships WooCommerce inactive can only grant the WordPress core tables.
+   The nine `wp_wc_*` / `wp_woocommerce_*` grants can only be applied after activation.
+2. `wp-readiness.php` prints one line per prerequisite and repairs the *options* — HPOS,
+   permalinks, EUR, coming-soon off, and a real page on `/`. Plugin and theme activation is
+   reported and never changed, so a half-customised shop is not overridden.
+
+Both exit non-zero while anything required is still wrong, so the import is never started on a
+shop that cannot hold it.
 
 ### Stage 4 — wholesale stack (automated)
 
@@ -268,6 +276,30 @@ among a hundred other lines.
 *Guard:* activation is now the owner's step, and `wp-readiness.php` reports the active theme and
 each plugin's state as its own line, so "inactive" cannot hide. When `WP_ACTIVATE_PLUGINS=1` is
 used for an unattended install, the installer activates whichever companion directory exists.
+
+### Grants that cannot be applied before WooCommerce exists
+
+Found while making activation manual, before it could bite. Retail's grants are deliberately
+narrow — table-level, no DDL, nothing on `wp_users` — and MariaDB refuses a table-level `GRANT`
+for a table that does not exist, then stops reading the file. With WooCommerce inactive at deploy
+time, the `wp_wc_*` grants cannot be applied, and the import would have connected fine and then
+died on its first write to a lookup table. Wholesale is unaffected: its grants are
+database-level, which apply before the tables exist.
+
+*Guard:* `apply-grants.sh` applies with `--force`, then verifies each grant against
+`mysql.tables_priv` and `mysql.db` and labels it `ok`, `pending` (table not created yet) or
+`MISSING`. The deploy runs it in report mode; `--finish` runs it `--strict` after activation.
+
+### The wholesale grants file existed only on the server
+
+`deploy-vps.sh` looked for `sillage-grants-wholesale.sql`, fell back to retail's file when it was
+absent, and the b2b repo never contained it — it had been written on the box by hand. The
+fallback grants name the `earth` database, which does not exist on `wholesale-db`, so a rebuild
+from a clean checkout would have given the engine user no privileges at all.
+
+*Lesson:* a fallback that cannot work is worse than no fallback, because it hides the real
+failure. *Guard:* the file is committed, and a missing one is now a hard error instead of a
+silent switch to a file for the other shop.
 
 ### Chased DNS symptoms instead of checking DNS
 
