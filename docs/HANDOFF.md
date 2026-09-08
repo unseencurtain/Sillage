@@ -27,11 +27,9 @@ Read this checklist and execute it in order. Do not skip an item because a later
    - Do **not** build Hub images on a laptop or agent “because the VPS has only 4 GB”.
    - Do **not** skip the push because free RAM looks tight — that is how `2269d11`, `51ecd77`,
      and later tags were pushed from ovhe.
-   - Do **not** Hub-rebuild from this stripped retail tree while live `wholesale-core` still
-     runs `unseencurtain/sillage-core:*`. Cut wholesale over to
-     [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (`unseencurtain/sillage-b2b:<sha>`)
-     first. Recreating **live** `ecom` onto a new WordPress tag is a deliberate shop change;
-     an empty VPS must still pull and install that tagged image.
+   - Live `wholesale-core` already runs `unseencurtain/sillage-b2b:082d695`. Do not point it back
+     at `sillage-core:*`. Recreating **live** `ecom` onto a new WordPress tag is a deliberate shop
+     change; an empty VPS must still pull and install `sillage-wordpress:ab5ead8`.
 3. **This repo is the retail shop only** (BeautyFort + BTS, `prinscosmetic.eu`). Wholesale-perfumes
    is a **separate product** in [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
    with its own compose, Hub image, and WordPress. Do not add wholesale vendor code, compose
@@ -39,11 +37,10 @@ Read this checklist and execute it in order. Do not skip an item because a later
    bootstrapped from sillage-b2b alone — it must not look at this repo.
 4. **Retail MariaDB is `ecom-db` only** (`earth` / `sillage`). Do not put `earth_wpf` / `sillage_wpf`
    on this database. Wholesale’s database lives in the sillage-b2b stack (`wholesale-db`).
-5. **Live ovhe still hosts both shops** until wholesale is cut over. Retail uses Valkey db 0;
-   the old wholesale container used prefix `wholesale:` / db 1. Do not share MariaDB. After cutover,
-   wholesale brings its own Valkey (`wholesale-valkey`) from sillage-b2b compose.
-   `deploy-vps.sh` will **not** overwrite `/etc/caddy/Caddyfile` when it already serves hostnames
-   this shop does not own (so a retail deploy on ovhe will not drop wholesale.mirainikki.xyz).
+5. **Live ovhe still hosts both shops** (shared Caddy + volumes). Engines are split (retail
+   `sillage-core:ab5ead8`, wholesale `sillage-b2b:082d695`). Retail uses Valkey db 0. Do not share
+   MariaDB. `deploy-vps.sh` will **not** overwrite `/etc/caddy/Caddyfile` when it already serves
+   hostnames this shop does not own (so a retail deploy on ovhe will not drop wholesale.mirainikki.xyz).
    Pass `--replace-caddy` only on a box that should become this shop alone.
 6. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
    (BeautyFort + BTS) and [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
@@ -81,12 +78,18 @@ Read this checklist and execute it in order. Do not skip an item because a later
 
 ---
 
-## Right now (2026-09-08) — wholesale is a separate repo
+## Right now (2026-09-08) — wholesale engine is cut over
 
-Wholesale-perfumes is **not** in this checkout. Source: [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
-Live shop https://wholesale.mirainikki.xyz still runs on ovhe from the **old combined** Hub image
-`unseencurtain/sillage-core:a5b94ee`. Do **not** rebuild that retail image until wholesale-core is
-pointed at `unseencurtain/sillage-b2b:<sha>`. Do **not** enable live vendor dispatch on wholesale.
+Wholesale-perfumes source is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+Live ovhe still **hosts** both shops (one Caddyfile, two compose services). Engines are split:
+
+| Shop | Container | Hub image |
+|---|---|---|
+| Retail | `sillage-core` / `sillage-cron` | `unseencurtain/sillage-core:ab5ead8` |
+| Wholesale | `wholesale-core` / `wholesale-cron` | `unseencurtain/sillage-b2b:082d695` |
+| Both WordPress | `ecom` / `wholesale-ecom` | `unseencurtain/sillage-wordpress:d35613d` (live datadir) |
+
+Empty-VPS WordPress image is on Hub as `unseencurtain/sillage-wordpress:ab5ead8` (pinned WP 7.1 / PHP 8.3). Do **not** recreate live `ecom` onto that tag unless you are deliberately rebuilding the shop. A **new** VPS must pull it and run `wp-fresh-install.php`. Do **not** enable live vendor dispatch on wholesale.
 
 Retail shop rules below are unchanged.
 
