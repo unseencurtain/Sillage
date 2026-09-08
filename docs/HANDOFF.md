@@ -10,30 +10,42 @@ schema facts and [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) for UI control
 These are operator rules. If a later message seems to contradict them, **this section wins**.
 Read this checklist and execute it in order. Do not skip an item because a later doc looks older.
 
-1. **Docker Hub builds always happen on ovhe.** That box is already `docker login` as
-   `unseencurtain`. Copy this **retail** tree to `~/sillage/`, then on **that VPS** run
-   `~/sillage/scripts/build-push-images.sh` (or `docker build` + `docker push` there). Then point
-   `SILLAGE_CORE_IMAGE` at the new tag and `docker compose --env-file .env up -d`.
+1. **Empty VPS is first-class.** Hand this repo to an agent with a blank Ubuntu box and it
+   must bring up WordPress, WooCommerce, HPOS, Caddy, MariaDB, Valkey, the image CDN, and
+   sillage-core without cloning the live shop. Recipe: `bootstrap-host.sh` as root, then
+   `deploy-vps.sh --host <new> --shop … --dash … --images …` (default builds **core + WordPress**).
+   `--core-only` is a **day-2** engine bump on an already-running shop — never the first boot.
+   WordPress is **pinned** in `wordpress-image/Dockerfile` (`wordpress:7.1-php8.3-apache`). Do
+   not float `wordpress:latest`. First boot runs `scripts/wp-fresh-install.php` (EUR, Blocksy,
+   WooCommerce, HPOS on, Coming soon off, permalinks).
+2. **Docker Hub builds always happen on a VPS that is already `docker login` as
+   `unseencurtain` (today: ovhe).** Copy this **retail** tree to `~/sillage/`, then on **that
+   VPS** run `~/sillage/scripts/build-push-images.sh` (default: core + WordPress). Then point
+   `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` at the new tags and `docker compose --env-file .env up -d`.
    - Do **not** install Docker in a cloud-agent pod.
    - Do **not** copy `~/.docker/config.json` off the VPS.
    - Do **not** build Hub images on a laptop or agent “because the VPS has only 4 GB”.
    - Do **not** skip the push because free RAM looks tight — that is how `2269d11`, `51ecd77`,
      and later tags were pushed from ovhe.
-   - Do **not** rebuild `sillage-wordpress` from `wordpress:latest` unless an operator asked;
-     a WP version bump on the live shop is a real risk. Core-only is the default.
    - Do **not** Hub-rebuild from this stripped retail tree while live `wholesale-core` still
-     runs `unseencurtain/sillage-core:*`. That combined image still serves both shops. Cut wholesale
-     over to [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (`unseencurtain/sillage-b2b:<sha>`) first.
-2. **This repo is the retail shop only** (BeautyFort + BTS, `prinscosmetic.eu`). Wholesale-perfumes
+     runs `unseencurtain/sillage-core:*`. Cut wholesale over to
+     [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (`unseencurtain/sillage-b2b:<sha>`)
+     first. Recreating **live** `ecom` onto a new WordPress tag is a deliberate shop change;
+     an empty VPS must still pull and install that tagged image.
+3. **This repo is the retail shop only** (BeautyFort + BTS, `prinscosmetic.eu`). Wholesale-perfumes
    is a **separate product** in [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
    with its own compose, Hub image, and WordPress. Do not add wholesale vendor code, compose
-   profiles, or Caddy blocks here. Do not add BeautyFort/BTS there.
-3. **Retail MariaDB is `ecom-db` only** (`earth` / `sillage`). Do not put `earth_wpf` / `sillage_wpf`
+   profiles, or Caddy blocks here. Do not add BeautyFort/BTS there. A new wholesale VPS is
+   bootstrapped from sillage-b2b alone — it must not look at this repo.
+4. **Retail MariaDB is `ecom-db` only** (`earth` / `sillage`). Do not put `earth_wpf` / `sillage_wpf`
    on this database. Wholesale’s database lives in the sillage-b2b stack (`wholesale-db`).
-4. **Live ovhe still hosts both shops** until wholesale is cut over. Retail uses Valkey db 0;
+5. **Live ovhe still hosts both shops** until wholesale is cut over. Retail uses Valkey db 0;
    the old wholesale container used prefix `wholesale:` / db 1. Do not share MariaDB. After cutover,
    wholesale brings its own Valkey (`wholesale-valkey`) from sillage-b2b compose.
-5. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
+   `deploy-vps.sh` will **not** overwrite `/etc/caddy/Caddyfile` when it already serves hostnames
+   this shop does not own (so a retail deploy on ovhe will not drop wholesale.mirainikki.xyz).
+   Pass `--replace-caddy` only on a box that should become this shop alone.
+6. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
    (BeautyFort + BTS) and [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
    for **wholesale** (wholesale-perfumes). Do not mix vendor code between the two. Cursor copies
    can have different SHAs; replay onto GitHub `main`, do not merge the remotes. The replay script
@@ -271,8 +283,9 @@ Polish **this retail shop (BF+BTS) first.** Wholesale sync is a separate next st
 ### Deploy / update (from laptop)
 
 ```bash
-# Hub images: ssh ovhe, copy sillage-core, run ~/sillage/scripts/build-push-images.sh --core-only
-# (docker login as unseencurtain lives there — see Memory). Then:
+# Hub images: ssh ovhe, copy sillage-core + wordpress-image, run ~/sillage/scripts/build-push-images.sh
+# (docker login as unseencurtain lives there — see Memory). Empty VPS: omit --core-only and --skip-build.
+# Day-2 engine bump on a live shop: --core-only then:
 ./production-environment/scripts/deploy-vps.sh \
   --host ovhe \
   --shop prinscosmetic.eu \
@@ -281,10 +294,10 @@ Polish **this retail shop (BF+BTS) first.** Wholesale sync is a separate next st
   --skip-build
 ```
 
-Day-2 pull on VPS (retail + wholesale):
+Day-2 pull on VPS (retail only — this repo has no wholesale compose profile):
 
 ```bash
-ssh ovhe 'cd ~/sillage && docker compose --env-file .env --profile wholesale pull && docker compose --env-file .env --profile wholesale up -d'
+ssh ovhe 'cd ~/sillage && docker compose --env-file .env pull && docker compose --env-file .env up -d'
 ```
 
 Full recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md). Dashboard login file: `.deploy/vps-dashboard-ovhe.txt`.
@@ -310,8 +323,7 @@ Changing TZ alone does not rewrite the catalogue.
 | Where | Path |
 |---|---|
 | VPS (retail) | `~/sillage/sillage-core/data/secrets.overlay.env` |
-| VPS (wholesale) | `~/sillage/sillage-core/data/secrets.overlay.wholesale.env` |
-| Laptop | `production-environment/sillage-core/data/secrets.overlay.env` (+ `.wpf.env` for wholesale) |
+| Laptop | `production-environment/sillage-core/data/secrets.overlay.env` |
 | Container | `/app/data/secrets.overlay.env` (`SILLAGE_SECRETS_FILE`) |
 
 Set/clear via dashboard **Secrets** (overlay wins over compose `.env`). `touch` the file before

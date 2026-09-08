@@ -7,7 +7,7 @@ only the one deep doc you need. Do not wander the tree.
 |---|---|
 | **Client / human how-to** | [`CLIENT-GUIDE.md`](CLIENT-GUIDE.md) — update with UI/shopper changes |
 | Resume / live host / current health | [`HANDOFF.md`](HANDOFF.md) |
-| **Wholesale shop** (`wholesale.mirainikki.xyz`) | [`WHOLESALE-SITE.md`](WHOLESALE-SITE.md) |
+| **Wholesale shop** (`wholesale.mirainikki.xyz`) | [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — separate repo, empty-VPS deploy of its own |
 | Schema, containers, what PHP may write | [`CONTEXT.md`](CONTEXT.md) |
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
 | Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
@@ -26,10 +26,10 @@ GitHub: [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main
 Live SSH: `ovhe` (`ubuntu@139.99.61.71`). App `~/sillage/`, data `~/ecom_sites/data/`.
 
 **Hub images:** build and push **on ovhe** (`docker login` as `unseencurtain` lives there).
-Copy `sillage-core` to `~/sillage/sillage-core` (do not overwrite `data/` or `logs/`), then
-`~/sillage/scripts/build-push-images.sh --core-only`. Do not install Docker in an agent VM
-and do not copy Hub credentials off the VPS. Canonical wording: [`HANDOFF.md`](HANDOFF.md)
-Memory.
+Copy `sillage-core` (keep `data/` / `logs/`) and `wordpress-image` to `~/sillage/`, then
+`~/sillage/scripts/build-push-images.sh`. Pass `--core-only` only on a live shop engine bump.
+Do not install Docker in an agent VM and do not copy Hub credentials off the VPS. Canonical
+wording: [`HANDOFF.md`](HANDOFF.md) Memory. Empty VPS recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md).
 
 ---
 

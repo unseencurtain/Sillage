@@ -9,15 +9,19 @@
 #       --host ovhe \
 #       [--shop …] [--dash …] [--images …] \
 #       [--dns] [--ip 139.99.61.71] \
-#       [--skip-build] [--fresh]
+#       [--skip-build] [--fresh] [--core-only] [--keep-caddy] [--replace-caddy]
 #
-# Flow:
-#   1) Hub images: rsync sillage-core onto the VPS and build+push THERE
-#      (docker login lives on the host — ovhe is unseencurtain). Never docker build
-#      on the laptop/agent that invoked this script. Default is --core-only so we
-#      do not bump the live WordPress image.
+# Flow (empty Ubuntu VPS — this is the default path):
+#   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
+#   1) Hub images: rsync source onto the VPS and build+push THERE
+#      (docker login lives on the host). Never docker build on the laptop/agent.
+#      Default builds **core + WordPress** (Dockerfile pins WP 7.1 / PHP 8.3).
+#      Pass --core-only only for a day-2 engine bump on an already-running shop.
 #   2) rsync compose/config/plugin/overrides only
-#   3) remote: docker compose pull && up -d && migrate
+#   3) remote: docker compose pull && up -d && migrate + first-boot WordPress
+#      (WooCommerce, HPOS, permalinks, Coming soon off, Blocksy).
+#      Caddy is written for this shop. If the VPS already serves other hostnames,
+#      the existing Caddyfile is left alone unless you pass --replace-caddy.
 #
 # Secrets live in remote ~/sillage/.env (created once; preserved on update).
 set -euo pipefail
@@ -31,9 +35,11 @@ IP=""
 SKIP_BUILD=0
 FRESH=0
 CLONE_FROM=""
+WITH_WORDPRESS=1
+KEEP_CADDY=""
 
 usage() {
-  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -47,6 +53,10 @@ while [[ $# -gt 0 ]]; do
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --fresh) FRESH=1; shift ;;
+    --core-only) WITH_WORDPRESS=0; shift ;;
+    --with-wordpress) WITH_WORDPRESS=1; shift ;;
+    --keep-caddy) KEEP_CADDY=1; shift ;;
+    --replace-caddy) KEEP_CADDY=0; shift ;;
     --clone-from) CLONE_FROM="${2:?}"; shift 2 ;;
     -h|--help) usage ;;
     *)
@@ -137,7 +147,7 @@ SHOP_DOMAIN="$(pick_domain "$CLI_SHOP" "$_R_SHOP" "$LOCAL_SHOP" "$DEFAULT_SHOP_D
 DASH_DOMAIN="$(pick_domain "$CLI_DASH" "$_R_DASH" "$LOCAL_DASH" "$DEFAULT_DASH_DOMAIN")"
 IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
 
-log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD}"
+log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS} keep_caddy=${KEEP_CADDY:-auto}"
 
 if [[ -z "$IP" ]]; then
   IP=$("${SSH[@]}" "$HOST" 'curl -4 -sS --max-time 5 ifconfig.me || curl -4 -sS --max-time 5 icanhazip.com' | tr -d '[:space:]')
@@ -162,19 +172,35 @@ fi
 NAMESPACE="${NAMESPACE:-unseencurtain}"
 CORE_IMAGE="${NAMESPACE}/sillage-core:${TAG}"
 WP_IMAGE="${NAMESPACE}/sillage-wordpress:${TAG}"
+if [[ "$WITH_WORDPRESS" -eq 0 ]]; then
+  WP_IMAGE="${NAMESPACE}/sillage-wordpress:latest"
+fi
+
+if [[ "$SKIP_BUILD" -eq 0 && "$WITH_WORDPRESS" -eq 0 ]]; then
+  echo "NOTE: --core-only skips the WordPress image. Empty VPS first boot must omit --core-only."
+fi
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   echo "==> Hub build on ${HOST} (docker login lives there; this machine does not docker build)"
-  "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/sillage-core ~/${REMOTE_DIR}/scripts"
+  "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/sillage-core ~/${REMOTE_DIR}/scripts ~/${REMOTE_DIR}/wordpress-image"
   "${RSYNC[@]}" --delete \
     --exclude data --exclude logs --exclude node_modules --exclude web/dist \
     --exclude .feedscratch \
     "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
   "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
-  "${SSH[@]}" "$HOST" "bash ~/${REMOTE_DIR}/scripts/build-push-images.sh --core-only --namespace '$NAMESPACE' --tag '$TAG'"
-  log_step "Pushed ${CORE_IMAGE} from ${HOST}"
+  BUILD_FLAGS=(--namespace "$NAMESPACE" --tag "$TAG")
+  if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
+    "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
+    BUILD_FLAGS+=(--with-wordpress)
+    log_step "Building core + WordPress ${CORE_IMAGE} ${WP_IMAGE}"
+  else
+    BUILD_FLAGS+=(--core-only)
+    log_step "Building core-only ${CORE_IMAGE}"
+  fi
+  "${SSH[@]}" "$HOST" "bash ~/${REMOTE_DIR}/scripts/build-push-images.sh ${BUILD_FLAGS[*]}"
+  log_step "Pushed Hub images from ${HOST}"
 else
-  log_step "Skipped image build; using ${CORE_IMAGE}"
+  log_step "Skipped image build; using ${CORE_IMAGE} ${WP_IMAGE}"
 fi
 
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
@@ -185,10 +211,9 @@ echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/config/" "$HOST:~/${REMOTE_DIR}/ecom_sites/config/"
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
-"${RSYNC[@]}" "$PE/scripts/bootstrap-wholesale.sh" "$HOST:~/${REMOTE_DIR}/scripts/bootstrap-wholesale.sh"
 "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
-"${RSYNC[@]}" "$PE/scripts/migrate-wholesale-own-db.sh" "$HOST:~/${REMOTE_DIR}/scripts/migrate-wholesale-own-db.sh"
 "${RSYNC[@]}" "$PE/scripts/fix-wp-content-perms.sh" "$HOST:~/${REMOTE_DIR}/scripts/fix-wp-content-perms.sh"
+"${RSYNC[@]}" "$PE/scripts/wp-fresh-install.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-fresh-install.php"
 if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"
@@ -196,12 +221,8 @@ fi
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
   "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
-"${SSH[@]}" "$HOST" 'if [[ -d ~/ecom_sites/data/wp-wholesale/wp-content/plugins ]]; then mkdir -p ~/ecom_sites/data/wp-wholesale/wp-content/plugins/sillage-bridge; fi'
-"${RSYNC[@]}" --delete \
-  "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
-  "$HOST:~/ecom_sites/data/wp-wholesale/wp-content/plugins/sillage-bridge/" || true
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
-"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media ~/ecom_sites/data/sitemaps-wholesale ~/ecom_sites/data/wp-wholesale ~/ecom_sites/data/wholesale-db; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.wholesale.env; echo '{}' > ~/${REMOTE_DIR}/sillage-core/data/image_overrides.wholesale.json; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.wholesale.env"
+"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media ~/ecom_sites/data/sitemaps; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
 log_step "Minimal rsync done"
 
 if [[ -n "$CLONE_FROM" ]]; then
@@ -263,6 +284,8 @@ SILLAGE_SECRETS_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/secrets.overla
 MARIADB_CNF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/mariadb.vps.cnf
 LPS_MEDIA_NGINX_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/nginx-lps-media.conf
 PHP_INI=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/php.ini
+APACHE_HIDE_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/apache-hide-version.conf
+SITEMAP_HOST_DIR=/home/ubuntu/ecom_sites/data/sitemaps
 
 DB_BIND=127.0.0.1
 DB_HOST_PORT=3307
@@ -331,7 +354,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 p = pathlib.Path.home() / "sillage" / ".env"
 text = p.read_text()
@@ -347,14 +370,14 @@ shop = os.environ["SHOP_DOMAIN"]
 dash = os.environ["DASH_DOMAIN"]
 images = os.environ.get("IMAGES_DOMAIN") or ""
 lps = f"https://{images}" if images else None
-for k, v in [
+pairs = [
     ("SILLAGE_CORE_IMAGE", os.environ["CORE_IMAGE"]),
-    ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]),
     ("SHOP_DOMAIN", shop),
     ("DASH_DOMAIN", dash),
     ("IMAGES_DOMAIN", images),
     ("WP_BASE_URL", f"https://{shop}"),
     ("LPS_MEDIA_BASE_URL", lps),
+    ("SITEMAP_HOST_DIR", "/home/ubuntu/ecom_sites/data/sitemaps"),
     ("BEAUTYFORT_USER", os.environ.get("LOCAL_BF_USER") or None),
     ("BEAUTYFORT_SECRET", os.environ.get("LOCAL_BF_SECRET") or None),
     ("BEAUTYFORT_ENDPOINT", os.environ.get("LOCAL_BF_ENDPOINT") or None),
@@ -362,7 +385,10 @@ for k, v in [
     ("BTS_BASE_URL", os.environ.get("LOCAL_BTS_BASE") or None),
     ("BRASTY_PRODUCT_FEED_URL", os.environ.get("LOCAL_BRASTY_PRODUCT") or None),
     ("BRASTY_AVAILABILITY_FEED_URL", os.environ.get("LOCAL_BRASTY_AVAIL") or None),
-]:
+]
+if os.environ.get("WITH_WORDPRESS") == "1":
+    pairs.insert(1, ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]))
+for k, v in pairs:
     if v is not None and v != "":
         text = set_key(text, k, v)
 p.write_text(text)
@@ -384,9 +410,9 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' KEEP_CADDY='${KEEP_CADDY:-}' bash -s" <<'REMOTE'
 set -euo pipefail
-cd "$HOME/sillage"
+cd "$APP_DIR"
 set -a; source .env; set +a
 
 WP_PORT="${ECOM_PORT:-104}"
@@ -406,8 +432,26 @@ if [[ -n "${IMAGES_DOMAIN:-}" ]]; then
 }"
 fi
 
+# Empty VPS: write the Caddyfile for this shop. If the box already terminates
+# TLS for other hostnames (shared retail+wholesale), leave it alone.
+if [[ -z "${KEEP_CADDY:-}" && -f /etc/caddy/Caddyfile ]]; then
+  while read -r site; do
+    [[ -z "$site" ]] && continue
+    ours=0
+    for d in ${SHOP_DOMAIN:-} ${DASH_DOMAIN:-} ${IMAGES_DOMAIN:-}; do
+      [[ "$site" == "$d" ]] && ours=1
+    done
+    if [[ "$ours" -eq 0 ]]; then
+      echo "Caddy already serves $site — leaving /etc/caddy/Caddyfile (pass --replace-caddy to overwrite)"
+      KEEP_CADDY=1
+      break
+    fi
+  done < <(grep -E '^[A-Za-z0-9._-]+\.[A-Za-z0-9.-]+ \{' /etc/caddy/Caddyfile | awk '{print $1}' || true)
 fi
 
+if [[ "${KEEP_CADDY:-0}" == "1" ]]; then
+  echo "Skipping Caddyfile rewrite"
+else
 sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 ${SHOP_DOMAIN} {
 	# AI training crawlers walk every /product and /brand page. Prefork PHP
@@ -457,7 +501,7 @@ ${DASH_DOMAIN} {
 		-Server
 		-Via
 	}
-	reverse_proxy localhost:4000 {
+	reverse_proxy localhost:${SILLAGE_PORT:-4000} {
 		header_down -Server
 		header_down -Via
 	}
@@ -467,6 +511,7 @@ EOF
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy
+fi
 
 docker network create ecom_network 2>/dev/null || true
 docker network create redis_network 2>/dev/null || true
@@ -479,14 +524,14 @@ if [[ -f "$HOME/ecom_sites/compose.yaml" ]]; then
   (cd "$HOME/ecom_sites" && docker compose down 2>/dev/null) || true
 fi
 
-mkdir -p "$DATA_DIR/media" "$DATA_DIR/wp" "$DATA_DIR/wp-db" \
-  "$HOME/sillage/sillage-core/logs" "$HOME/sillage/.feedscratch"
+mkdir -p "$DATA_DIR/media" "$DATA_DIR/wp" "$DATA_DIR/wp-db" "$DATA_DIR/sitemaps" \
+  "$APP_DIR/sillage-core/logs" "$APP_DIR/.feedscratch"
 # Ensure image overrides + secrets overlay files exist for bind mounts (file, not directory).
-[[ -f "$HOME/sillage/sillage-core/data/image_overrides.json" ]] \
-  || echo '{}' > "$HOME/sillage/sillage-core/data/image_overrides.json"
-[[ -f "$HOME/sillage/sillage-core/data/secrets.overlay.env" ]] \
-  || : > "$HOME/sillage/sillage-core/data/secrets.overlay.env"
-chmod 600 "$HOME/sillage/sillage-core/data/secrets.overlay.env" 2>/dev/null || true
+[[ -f "$APP_DIR/sillage-core/data/image_overrides.json" ]] \
+  || echo '{}' > "$APP_DIR/sillage-core/data/image_overrides.json"
+[[ -f "$APP_DIR/sillage-core/data/secrets.overlay.env" ]] \
+  || : > "$APP_DIR/sillage-core/data/secrets.overlay.env"
+chmod 600 "$APP_DIR/sillage-core/data/secrets.overlay.env" 2>/dev/null || true
 
 docker compose --env-file .env pull
 docker compose --env-file .env up -d ecom-db valkey
@@ -542,51 +587,32 @@ if [[ -z "${CLONE_MODE:-}" && ( "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ) ]]
   done
 
   if [[ -f "$DATA_DIR/wp/wp-config.php" ]]; then
-    cat > /tmp/wp-fresh-install.php <<'PHP'
-<?php
-define('WP_INSTALLING', true);
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-$_SERVER['HTTP_HOST'] = getenv('SHOP_DOMAIN') ?: 'localhost';
-$_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'];
-$_SERVER['REQUEST_URI'] = '/';
-require '/var/www/html/wp-load.php';
-require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-$url = 'https://' . $_SERVER['HTTP_HOST'];
-echo 'installed=' . (is_blog_installed() ? 'yes' : 'no') . PHP_EOL;
-if (!is_blog_installed()) {
-    $pass = getenv('WP_ADMIN_PASS') ?: wp_generate_password(20, false);
-    $r = wp_install('Cosmetic', 'admin', 'admin@' . $_SERVER['HTTP_HOST'], true, '', $pass, 'en_US');
-    echo 'wp_install_ok user=' . ($r['user_id'] ?? '?') . PHP_EOL;
-}
-update_option('siteurl', $url);
-update_option('home', $url);
-update_option('woocommerce_currency', 'EUR');
-require_once ABSPATH . 'wp-admin/includes/plugin.php';
-foreach (['woocommerce/woocommerce.php', 'redis-cache/redis-cache.php', 'sillage-bridge/sillage-bridge.php'] as $p) {
-    if (!file_exists(WP_PLUGIN_DIR . '/' . $p)) { echo "$p missing\n"; continue; }
-    $res = activate_plugin($p);
-    echo $p . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' ok') . PHP_EOL;
-}
-if (wp_get_theme('blocksy')->exists()) {
-    switch_theme('blocksy');
-}
-echo 'siteurl=' . get_option('siteurl') . PHP_EOL;
-PHP
-    docker cp /tmp/wp-fresh-install.php ecom:/tmp/wp-fresh-install.php
-    docker exec -e SHOP_DOMAIN="$SHOP_DOMAIN" -e WP_ADMIN_PASS="${WP_ADMIN_PASS:-}" ecom php /tmp/wp-fresh-install.php
+    if [[ -f "$APP_DIR/ecom_sites/config/wordpress.htaccess" ]]; then
+      cp "$APP_DIR/ecom_sites/config/wordpress.htaccess" "$DATA_DIR/wp/.htaccess"
+    fi
+    INSTALL_PHP="$APP_DIR/scripts/wp-fresh-install.php"
+    if [[ ! -f "$INSTALL_PHP" ]]; then
+      echo "Missing $INSTALL_PHP — cannot finish empty-VPS WordPress install" >&2
+      exit 1
+    fi
+    docker cp "$INSTALL_PHP" ecom:/tmp/wp-fresh-install.php
+    docker exec \
+      -e SHOP_DOMAIN="$SHOP_DOMAIN" \
+      -e WP_ADMIN_PASS="${WP_ADMIN_PASS:-}" \
+      -e SHOP_TITLE="${SHOP_TITLE:-Cosmetic}" \
+      ecom php /tmp/wp-fresh-install.php
   fi
 fi
 
 export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
-if [[ -f "$HOME/sillage/scripts/fix-wp-content-perms.sh" ]]; then
-  bash "$HOME/sillage/scripts/fix-wp-content-perms.sh" --dir "$DATA_DIR/wp" || true
+if [[ -f "$APP_DIR/scripts/fix-wp-content-perms.sh" ]]; then
+  bash "$APP_DIR/scripts/fix-wp-content-perms.sh" --dir "$DATA_DIR/wp" || true
 fi
 if [[ -f "$DATA_DIR/wp/wp-config.php" ]]; then
   sudo chown "$USER":"$USER" "$DATA_DIR/wp/wp-config.php" || true
   sudo chmod 664 "$DATA_DIR/wp/wp-config.php" || true
   # Point bootstrap at unified env
-  bash "$HOME/sillage/scripts/vps-bootstrap.sh"
+  bash "$APP_DIR/scripts/vps-bootstrap.sh"
   WP="$DATA_DIR/wp/wp-config.php"
   grep -q DISABLE_WP_CRON "$WP" || python3 - <<PY
 from pathlib import Path
@@ -608,7 +634,7 @@ if [[ -n "${CLONE_MODE:-}" ]]; then
   " || true
 fi
 
-cd "$HOME/sillage"
+cd "$APP_DIR"
 set -a; source .env; set +a
 if [[ -f ecom_sites/config/sillage-grants.sql ]]; then
   sed "s|__SILLAGE_DB_PASSWORD__|${SILLAGE_DB_PASSWORD}|g" ecom_sites/config/sillage-grants.sql \
