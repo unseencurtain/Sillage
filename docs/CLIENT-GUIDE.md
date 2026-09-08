@@ -285,8 +285,11 @@ These rules are on purpose. They match how dropship dispatch works.
 **Basket / checkout.** This retail shop has no supplier minimum. A cart cannot mix BeautyFort and BTS.
 
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
-image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. Extra files sitting in the
-EAN scrape folder are **not** shop photos until someone inspects them — many are tiny or generic.
+image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. **BTS does not send product
+photos**, so some bottle JPEGs live on this shop’s image host
+(`https://images.prinscosmetic.eu`, files in `~/ecom_sites/data/media` on the VPS). That folder
+is this retail shop, not wholesale. Extra files sitting in the EAN scrape folder are **not**
+shop photos until someone inspects them — many are tiny or generic.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
 + enough stock, not **Keep hidden**) are listed in the sitemap. Catalogue-hidden products are
 told not to be indexed. The sitemap is a static file Caddy serves (PHP does not build it). It

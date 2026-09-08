@@ -25,10 +25,13 @@ Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
 `redis_network` (ecom ↔ valkey ↔ sillage-core).
 
-**Product images (CDN / `lps-media`).** Host directory `production-environment/ecom_sites/data/media/`
-(on VPS: `~/ecom_sites/data/media`) is bind-mounted read-only into `lps-media` at
-`/usr/share/nginx/html` (never a named/anonymous Docker volume). Preferred public URLs are
-`https://images.<domain>/<file>` (Caddy site → `lps-media` document root). The CDN
+**Product images (CDN / `lps-media`).** This folder is **this retail shop**. BTS has no
+vendor photos; some bottle JPEGs are provided here so listings can show. Wholesale-perfumes
+uses catalog `flask_front` URLs and must not mount this directory. Host directory
+`production-environment/ecom_sites/data/media/` (on VPS: `~/ecom_sites/data/media`) is
+bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
+Docker volume). Preferred public URLs are `https://images.<domain>/<file>` (Caddy site →
+`lps-media` document root). The CDN
 does not list files, does not advertise nginx’s version on 404s, and only serves
 image extensions. Shop path
 `https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally

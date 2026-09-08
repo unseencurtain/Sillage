@@ -11,8 +11,11 @@ These are operator rules. If a later message seems to contradict them, **this se
 Read this checklist and execute it in order. Do not skip an item because a later doc looks older.
 
 1. **Empty VPS is first-class.** Hand this repo to an agent with a blank Ubuntu box and it
-   must bring up WordPress, WooCommerce, HPOS, Caddy, MariaDB, Valkey, the image CDN, and
-   sillage-core without cloning the live shop. Recipe: `bootstrap-host.sh` as root, then
+   must bring up WordPress, WooCommerce, HPOS, Caddy, MariaDB, Valkey, the image CDN
+   (`lps-media` → `~/ecom_sites/data/media` → `images.prinscosmetic.eu`), and sillage-core
+   without cloning the live shop. That JPEG folder is **this retail shop**: BTS has no vendor
+   photos, so files you host there are Sillage’s. Wholesale-perfumes uses catalog `flask_front`
+   URLs and must not mount this directory. Recipe: `bootstrap-host.sh` as root, then
    `deploy-vps.sh --host <new> --shop … --dash … --images …` (default builds **core + WordPress**).
    `--core-only` is a **day-2** engine bump on an already-running shop — never the first boot.
    WordPress is **pinned** in `wordpress-image/Dockerfile` (`wordpress:7.1-php8.3-apache`). Do
