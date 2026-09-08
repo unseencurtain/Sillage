@@ -94,7 +94,37 @@ Live ovhe still **hosts** both shops (one Caddyfile, two compose services). Engi
 
 Empty-VPS WordPress image is on Hub as `unseencurtain/sillage-wordpress:ab5ead8` (pinned WP 7.1 / PHP 8.3). Do **not** recreate live `ecom` onto that tag unless you are deliberately rebuilding the shop. A **new** VPS must pull it and run `wp-fresh-install.php`. Do **not** enable live vendor dispatch on wholesale.
 
+`d35613d` is a stale August build carrying **WordPress 7.0.2**. Live `ecom` reads 7.1 only
+because that datadir was upgraded in place afterwards, so the tag looks current on a running box
+and installs an old WordPress on an empty one. `deploy-vps.sh` now compares the image's bundled
+version against the Dockerfile pin and refuses the mismatch; `26bd779` carries 7.1.
+
 Retail shop rules below are unchanged.
+
+### Test VPS `ovh` (`51.79.255.226`) — both shops from scratch
+
+Two host folders, no cloned WordPress or MariaDB, JPEGs copied from ovhe (388 MB, 4228 files):
+
+| Hostname | Serves | Container |
+|---|---|---|
+| `codeinmoon.xyz` | retail shop | `ecom` (:104) |
+| `images.codeinmoon.xyz` | retail media | `lps-media` (:105) |
+| `sillage.codeinmoon.xyz` | retail dashboard | `sillage-core` (:4000) |
+| `wholesale.codeinmoon.xyz` | wholesale shop | `wholesale-ecom` (:106) |
+| `sillage-wholesale.codeinmoon.xyz` | wholesale dashboard | `wholesale-core` (:4001) |
+
+Both catalogues are **empty on purpose** and wait for the operator's first **Rebuild catalogue**.
+Operator logins are in `~/creds-retail.txt` and `~/creds-wholesale.txt` (never `admin`).
+
+Two things this box taught us, both now fixed in code:
+
+- **Swap is not optional.** A full sync peaks near 2 GB. With 3.7 GB of RAM, two MariaDB
+  instances and two WordPress containers, the kernel OOM-killed the sync every five minutes and
+  took storefront responsiveness with it. `bootstrap-host.sh` now creates 4 GB of swap.
+- **DNS host fields append the zone.** Cloudflare's panel turned a pasted
+  `sillage.codeinmoon.xyz` into `sillage.codeinmoon.xyz.codeinmoon.xyz`, which resolves for the
+  doubled name and NXDOMAINs for the real one — so Let's Encrypt cannot issue and the subdomain
+  looks dead while the apex works. Enter the label only (`sillage`, `@` for the apex).
 
 ---
 

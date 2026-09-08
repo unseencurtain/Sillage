@@ -104,6 +104,18 @@ Host my-sillage
 | `ops.example.com` | A | VPS IP |
 | `images.example.com` (optional CDN) | A | VPS IP |
 
+**Enter the label, not the FQDN.** Cloudflare's and Porkbun's host fields append the zone, so
+pasting `sillage.example.com` creates `sillage.example.com.example.com`. That name resolves,
+the one you wanted returns NXDOMAIN, and Let's Encrypt refuses the certificate — the apex works
+while every subdomain looks dead. Type `sillage`, `images`, `@` for the apex. Verify before
+deploying:
+
+```bash
+for h in shop.example.com ops.example.com images.example.com; do
+  dig +short "$h" A            # each must print the VPS IP
+done
+```
+
 ---
 
 ## Step 3 — One-shot deploy
@@ -185,6 +197,10 @@ Checklist:
 - [ ] Overview page loads  
 - [ ] Settings → **Orders dry-run** is **on** for demos  
 - [ ] `images.*` CDN serves files from `~/ecom_sites/data/media`  
+- [ ] `swapon --show` lists a swapfile (a full sync peaks near 2 GB; without swap the kernel
+      OOM-kills Apache or MariaDB mid-import)  
+- [ ] Catalogue is still **empty** — the first import is the operator's **Rebuild catalogue**,
+      never the scheduler's. Set the shop's pages, theme and shipping up first  
 
 ---
 

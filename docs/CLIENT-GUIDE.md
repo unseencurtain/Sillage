@@ -112,6 +112,12 @@ ask whoever holds the server secrets.
 
 Think of a loop, not a one-off import.
 
+**Nothing imports until you press the button.** A new shop sits with an empty catalogue on
+purpose, so you can finish WordPress first — pages, menus, theme, shipping, payment. The
+scheduler will not seed a catalogue on its own: until one import has succeeded, every check
+declines and says *no sync has ever succeeded — start the first import from the dashboard*.
+The first **Rebuild catalogue** is yours to press when the shop is ready for products.
+
 1. **Secrets** hold the BeautyFort and BTS API keys (set once; you never see the values again).
 2. **Rebuild catalogue** (on **Sync**) creates and structures products the first time, and later
    when you need new products and categories in WordPress.

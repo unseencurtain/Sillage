@@ -134,6 +134,13 @@ invisible `rewriteOnly` + `source=cache` from `sil_offers` (no vendor API; ignor
 on for this shop). Incremental checks still run at **Minutes between syncs**. BTS 25%/7-day stale recovery stays
 emergency-only. Order housekeeping runs every tick.
 
+**The first import is operator-only.** While `sil_sync_runs` holds no successful run, every tick
+skips with *no sync has ever succeeded — start the first import from the dashboard*, including the
+nightly full-sync window. The scheduler used to read an empty run table as "seed the catalogue",
+which on a fresh VPS filled WordPress before anyone had set the shop up and, on a 4 GB box, let
+the sync's ~2 GB heap trigger an OOM kill of Apache mid-run. Seeding is `POST /api/sync/run`
+`{mode:"full"}` — the **Rebuild catalogue** button — and nothing else.
+
 `--vendor=all` never includes parked slugs for this profile (WPF on retail, BF/BTS on wholesale).
 
 ---
