@@ -46,8 +46,11 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
 
 ## Hard rules
 
-1. **Never read or write `production-environment/ecom_sites/data/wp/` or `data/wp-db/`** apart from
-   the `sillage-bridge` plugin directory. They hold WordPress core and raw MariaDB files.
+1. **WordPress and MariaDB live in Docker volumes, not on the host.** Never write WordPress core
+   or raw DB files; edit `wp-config.php` with `scripts/wp-config-patch.php` inside the container,
+   and install plugins with `docker cp`. The only host data is media, sitemaps, logs, the feed
+   cache and config — see [`docs/REBUILD-FROM-SCRATCH.md`](docs/REBUILD-FROM-SCRATCH.md) §4. The
+   `sillage-bridge` plugin source is edited in this repo and shipped by the deploy.
 2. **Never commit secrets.** All credentials live in gitignored `.env` files.
 3. **Bun writes products via raw SQL; PHP never does.** The plugin's job list is closed and
    enumerated in `docs/CONTEXT.md`. Adding write logic to PHP is a design violation.

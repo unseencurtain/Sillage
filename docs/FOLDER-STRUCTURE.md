@@ -71,7 +71,7 @@ valkey / lps-media / sillage-core only.
 │   └── ecom_sites/config/
 ├── ecom_sites/data/
 │   ├── wp/                            Retail WordPress
-│   ├── wp-db/                         Retail MariaDB (earth + sillage)
+│   │                                  (MariaDB and WordPress live in Docker volumes)
 │   ├── media/                         Shop CDN photos
 │   └── sitemaps/                      robots + wp-sitemap*.xml (Caddy)
 └── caddy/Caddyfile                    Symlink → /etc/caddy/Caddyfile

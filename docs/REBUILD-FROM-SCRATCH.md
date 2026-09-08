@@ -51,16 +51,29 @@ And the rules behind them:
 
 ---
 
-## 2. The rebuild, in order
+## 2. The rebuild, in stages
+
+Two hand-offs are deliberate. Everything a script can do is scripted; the theme and the first
+import are the owner's, because the paid Blocksy companion is uploaded by hand and the shop
+should look right before 51,000 products land in it.
+
+### Stage 0 — host (automated)
 
 ```bash
-# 0. once, as root on the blank box — Docker, Caddy, ufw, ubuntu user, 4 GB swap
 ssh root@NEW_IP 'bash -s' < production-environment/scripts/bootstrap-host.sh
+```
 
-# 1. DNS first. Five A records → the new IP. Enter the LABEL, never the FQDN (see §4).
-#    @  images  sillage  wholesale  sillage-wholesale
+Docker, Compose, Caddy, ufw, the `ubuntu` user, and 4 GB of swap.
 
-# 2. retail, with the photos
+### Stage 1 — DNS (owner, then verified here)
+
+Five A records → the new IP, entered as **labels**: `@`, `images`, `sillage`, `wholesale`,
+`sillage-wholesale`. See §4 — pasting full hostnames is the trap that cost the first rebuild.
+The deploy refuses to start until all of them resolve to the box, so this cannot be skipped.
+
+### Stage 2 — retail stack (automated)
+
+```bash
 ./production-environment/scripts/deploy-vps.sh \
   --host ovh \
   --shop codeinmoon.xyz \
@@ -68,8 +81,22 @@ ssh root@NEW_IP 'bash -s' < production-environment/scripts/bootstrap-host.sh
   --images images.codeinmoon.xyz \
   --wp-user cherry --dash-user europa \
   --media-from ovhe
+```
 
-# 3. wholesale, from the other repo
+Ends with: WordPress installed (WooCommerce, HPOS, permalinks, EUR, coming-soon off, Blocksy
+theme, shop page as front page), the ~4,200 product photos in place and served over
+`images.…`, the bridge plugin active, the sitemap cron installed, **and an empty catalogue**.
+
+### Stage 3 — theme and WordPress setup (owner) — work stops here
+
+Hand over `~/creds-retail.txt` and wait. The owner uploads `blocksy-companion-pro.zip` in
+Plugins → Add New → Upload, activates it, and sets up the theme, homepage, menus and shipping.
+`FS_METHOD` is pinned to `direct` so the upload never asks for FTP credentials, and the
+installer activates whichever companion directory it finds, so nothing here needs a redeploy.
+
+### Stage 4 — wholesale stack (automated)
+
+```bash
 cd ../sillage-b2b
 ./production-environment/scripts/deploy-vps.sh \
   --host ovh \
@@ -78,11 +105,18 @@ cd ../sillage-b2b
   --wp-user orange --dash-user wildwest
 ```
 
-Both scripts stop before building anything if a hostname does not already resolve to the box,
-and both refuse a Hub tag whose bundled WordPress does not match the Dockerfile pin.
+No photos: wholesale images are remote vendor URLs. Same end state, empty catalogue.
 
-Then hand over the credentials from `~/creds-retail.txt` and `~/creds-wholesale.txt`, and leave
-the catalogue empty.
+### Stage 5 — wholesale theme setup (owner) — work stops here
+
+### Stage 6 — first import (owner presses the button, verified here)
+
+The owner presses **Rebuild catalogue** on each dashboard. On an empty shop that starts
+immediately; with a catalogue already present and the schedule on, it queues and the next tick
+runs it. Then the checks in §3.
+
+Measured on the 2 vCPU box: retail 51,203 products in about two minutes, wholesale 19,073 in
+about two and a half.
 
 ---
 
@@ -107,7 +141,30 @@ done
 
 ---
 
-## 4. What went wrong the first time, and what now prevents it
+## 4. What may be bind-mounted, and what may not
+
+A bind mount is an interface between the host and a container. Anything mounted that way can be
+moved, replaced or edited behind the container's back, and that is exactly how this project lost
+an afternoon. So the rule is: **a host path only where a host process genuinely takes part.**
+
+| Path | Where it lives | Why |
+|---|---|---|
+| Product photos | host `data/media` | The scrapers write them and they are copied between boxes. |
+| Sitemaps / robots | host `data/sitemaps` | The host's Caddy serves these files directly. |
+| `php.ini`, `mariadb.cnf`, nginx and Caddy configs | host, read-only | Config the operator edits and a container only reads. |
+| Engine logs, vendor feed cache, secrets overlay | host | Read while debugging; feeds double as offline fixtures. |
+| **WordPress (`/var/www/html`)** | **Docker volume** | Core belongs to the image. A host copy is how a datadir drifted to a newer WordPress than the image it booted from. Plugins and themes the operator uploads persist in the volume. |
+| **MariaDB (`/var/lib/mysql`)** | **Docker volume** | Raw InnoDB files. Hard rule 1 already forbids touching them, so they should not be reachable. |
+
+Development is the exception, and it is a one-line exception: set `WP_DATA` and `WP_DB_DATA` to
+host paths and both go back to being bind mounts for editing.
+
+Because WordPress is a volume, the deploy no longer writes into a host `wp-content`. Plugins and
+themes are unpacked into a staging directory and copied in with `docker cp`; `wp-config.php` is
+patched by `scripts/wp-config-patch.php` running inside the container; `--clone-from` is gone,
+since cloning a live datadir was both forbidden and the source of the drift.
+
+## 5. What went wrong the first time, and what now prevents it
 
 Each of these cost real time on `ovh`. The fix is in code, not in memory.
 
@@ -189,6 +246,36 @@ The doubled names were briefly served so the dashboards were reachable. That was
 not asked for.
 
 *Lesson:* fix the cause or report the blocker. Do not add hostnames nobody chose.
+
+### The operator could queue the first import but nothing would run it
+
+Gating the scheduler against unattended seeding was right, but **Rebuild catalogue** parks a flag
+for the next scheduled call, and the gate declined every call until a sync had succeeded. On a
+shop with products and the schedule on, the two deadlocked: the button reported "queued" forever.
+
+*Lesson:* a gate and a queue must agree about who is allowed to break the tie.
+*Guard:* an operator-queued rebuild now outranks the never-synced gate, with a test for it. An
+unattended tick still refuses to seed.
+
+### Every sitemap URL 404'd while the shop looked fine
+
+The writer built a temp directory and renamed it over the target. The target is a bind mount, and
+unlinking a mount point fails with EBUSY, so the write failed on every sync — logged as a warning
+next to a successful import, which is easy to read past. The host script had the same swap and was
+worse: replacing the directory orphaned the mount inside every running container.
+
+*Lesson:* atomic-directory-swap is wrong for any path a container mounts. Swap files instead.
+*Guard:* both writers move files into the directory, pages before the index, pruning pages a
+smaller catalogue no longer references.
+
+### The wholesale bridge pointed at a database that did not exist
+
+`wp-config.php` on the wholesale shop defined `SILLAGE_DB` as `sillage` — the retail name — while
+that server only has `sillage_wpf`. An early install wrote the default and the patcher only ever
+*inserted* constants, never corrected one that was already present, so it never converged.
+
+*Lesson:* a config patcher that cannot fix a wrong value is a patcher that hides drift.
+*Guard:* `wp-config-patch.php` refreshes each constant it owns and is idempotent.
 
 ### Brought the wholesale stack up by hand, so the box drifted from the script
 

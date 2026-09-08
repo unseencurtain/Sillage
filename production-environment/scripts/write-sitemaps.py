@@ -124,11 +124,21 @@ def main() -> int:
             + "\n</urlset>\n",
             encoding="utf-8",
         )
-    if DEST.exists():
-        import shutil
+    # Move the files into DEST; never replace DEST itself. Containers bind-mount this exact
+    # directory, so deleting it orphans the mount inside every running container — the shop
+    # keeps working, but the engine's own sitemap write then fails with EBUSY/ENOENT until the
+    # container is restarted.
+    import shutil
 
-        shutil.rmtree(DEST)
-    tmp.rename(DEST)
+    DEST.mkdir(parents=True, exist_ok=True)
+    # Pages before the index that references them.
+    for f in sorted(tmp.iterdir(), key=lambda p: p.name == "wp-sitemap.xml"):
+        f.replace(DEST / f.name)
+    for f in DEST.glob("wp-sitemap-posts-product-*.xml"):
+        n = f.stem.rsplit("-", 1)[-1]
+        if n.isdigit() and int(n) > max(1, len(pages)):
+            f.unlink()
+    shutil.rmtree(tmp, ignore_errors=True)
     # Caddy runs as user `caddy` and cannot traverse a 750 home directory.
     for parent in [DEST, *DEST.parents]:
         try:
