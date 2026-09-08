@@ -37,6 +37,8 @@ FRESH=0
 CLONE_FROM=""
 WITH_WORDPRESS=1
 KEEP_CADDY=""
+WP_USER=""
+WP_ADMIN_USER=""
 
 usage() {
   sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
@@ -204,7 +206,11 @@ else
 fi
 
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
-"${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/ecom_sites/config ~/${REMOTE_DIR}/sillage-core/data ~/${REMOTE_DIR}/sillage-core/logs ~/ecom_sites/data/media ~/ecom_sites/data/wp/wp-content/plugins ~/${REMOTE_DIR}/.feedscratch ~/sillage/scripts"
+REMOTE_DATA=$("${SSH[@]}" "$HOST" 'test -f ~/sillage/.env && set -a && source ~/sillage/.env && set +a && printf %s "${DATA_DIR:-}"' 2>/dev/null || true)
+if [[ -z "$REMOTE_DATA" ]]; then
+  REMOTE_DATA="/home/ubuntu/${REMOTE_DIR}/data"
+fi
+"${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/ecom_sites/config ~/${REMOTE_DIR}/sillage-core/data ~/${REMOTE_DIR}/sillage-core/logs ~/${REMOTE_DIR}/.feedscratch ~/${REMOTE_DIR}/scripts ${REMOTE_DATA}/media ${REMOTE_DATA}/wp/wp-content/plugins ${REMOTE_DATA}/wp-db ${REMOTE_DATA}/sitemaps"
 
 "${RSYNC[@]}" "$PE/compose.yaml" "$HOST:~/${REMOTE_DIR}/compose.yaml"
 "${RSYNC[@]}" "$PE/.env.example" "$HOST:~/${REMOTE_DIR}/.env.example"
@@ -220,9 +226,9 @@ if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
 fi
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
-  "$HOST:~/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/"
+  "$HOST:${REMOTE_DATA}/wp/wp-content/plugins/sillage-bridge/"
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
-"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ~/ecom_sites/data/media ~/ecom_sites/data/sitemaps; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
+"${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ${REMOTE_DATA}/media ${REMOTE_DATA}/sitemaps; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
 log_step "Minimal rsync done"
 
 if [[ -n "$CLONE_FROM" ]]; then
@@ -248,6 +254,16 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
   DBPASS=$(openssl rand -hex 16)
   MYSQL_ROOT=$(openssl rand -hex 16)
   MYSQL_PWD_GEN=$(openssl rand -hex 16)
+  new_operator() {
+    local prefix="$1" id name
+    while true; do
+      id="$(openssl rand -hex 3)"
+      name="${prefix}-${id}"
+      [[ "${name,,}" != *admin* ]] && { printf '%s' "$name"; return; }
+    done
+  }
+  DASH_USER="$(new_operator desk)"
+  WP_USER="$(new_operator shop)"
 
   # Prefer existing DB passwords when updating an older split-env host.
   LEGACY_ECOM=$("${SSH[@]}" "$HOST" 'test -f ~/ecom_sites/.env && echo yes || echo no')
@@ -276,8 +292,8 @@ MARIADB_IMAGE=mariadb:latest
 VALKEY_IMAGE=valkey/valkey:8-alpine
 LPS_MEDIA_IMAGE=nginx:alpine
 
-DATA_DIR=/home/ubuntu/ecom_sites/data
-FEEDSCRATCH_DIR=/home/ubuntu/sillage/.feedscratch
+DATA_DIR=/home/ubuntu/${REMOTE_DIR}/data
+FEEDSCRATCH_DIR=/home/ubuntu/${REMOTE_DIR}/.feedscratch
 SILLAGE_LOGS_DIR=/home/ubuntu/${REMOTE_DIR}/sillage-core/logs
 IMAGE_OVERRIDES_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/image_overrides.json
 SILLAGE_SECRETS_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env
@@ -285,7 +301,7 @@ MARIADB_CNF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/mariadb.vps.cnf
 LPS_MEDIA_NGINX_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/nginx-lps-media.conf
 PHP_INI=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/php.ini
 APACHE_HIDE_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/apache-hide-version.conf
-SITEMAP_HOST_DIR=/home/ubuntu/ecom_sites/data/sitemaps
+SITEMAP_HOST_DIR=/home/ubuntu/${REMOTE_DIR}/data/sitemaps
 
 DB_BIND=127.0.0.1
 DB_HOST_PORT=3307
@@ -300,6 +316,7 @@ SHOP_DOMAIN=${SHOP_DOMAIN}
 DASH_DOMAIN=${DASH_DOMAIN}
 IMAGES_DOMAIN=${IMAGES_DOMAIN}
 WP_BASE_URL=https://${SHOP_DOMAIN}
+SILLAGE_DASHBOARD_URL=https://${DASH_DOMAIN}
 LPS_MEDIA_BASE_URL=${LPS_URL}
 
 MYSQL_ROOT_PWD=${MYSQL_ROOT}
@@ -330,8 +347,11 @@ BTS_LANGUAGE=en-US
 BRASTY_PRODUCT_FEED_URL=${BRASTY_PRODUCT_FEED_URL:-}
 BRASTY_AVAILABILITY_FEED_URL=${BRASTY_AVAILABILITY_FEED_URL:-}
 
-DASHBOARD_USER=admin
+DASHBOARD_USER=${DASH_USER}
 DASHBOARD_PASSWORD=${PASS}
+WP_ADMIN_USER=${WP_USER}
+WP_ADMIN_PASS=${WP_ADMIN_PASS}
+WP_ADMIN_EMAIL=${WP_USER}@${SHOP_DOMAIN}
 SESSION_SECRET=${SESSION}
 FIXTURES_DIR=/app/.feedscratch
 REDIS_URL=redis://valkey:6379
@@ -341,10 +361,10 @@ EOF
   cat > "$CREDS" <<EOF
 host=${HOST}
 url=https://${DASH_DOMAIN}
-user=admin
+user=${DASH_USER}
 password=${PASS}
 shop=https://${SHOP_DOMAIN}
-wp_admin_user=admin
+wp_admin_user=${WP_USER}
 wp_admin_password=${WP_ADMIN_PASS}
 ip=${IP}
 created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -377,7 +397,6 @@ pairs = [
     ("IMAGES_DOMAIN", images),
     ("WP_BASE_URL", f"https://{shop}"),
     ("LPS_MEDIA_BASE_URL", lps),
-    ("SITEMAP_HOST_DIR", "/home/ubuntu/ecom_sites/data/sitemaps"),
     ("BEAUTYFORT_USER", os.environ.get("LOCAL_BF_USER") or None),
     ("BEAUTYFORT_SECRET", os.environ.get("LOCAL_BF_SECRET") or None),
     ("BEAUTYFORT_ENDPOINT", os.environ.get("LOCAL_BF_ENDPOINT") or None),
@@ -396,10 +415,11 @@ print("ENV_UPDATED")
 PY
   # Refresh local creds file password from remote when possible
   REMOTE_PASS=$("${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf %s "$DASHBOARD_PASSWORD"')
+  REMOTE_USER=$("${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf %s "$DASHBOARD_USER"')
   cat > "$CREDS" <<EOF
 host=${HOST}
 url=https://${DASH_DOMAIN}
-user=admin
+user=${REMOTE_USER}
 password=${REMOTE_PASS}
 shop=https://${SHOP_DOMAIN}
 ip=${IP}
@@ -410,7 +430,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' KEEP_CADDY='${KEEP_CADDY:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' KEEP_CADDY='${KEEP_CADDY:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -474,13 +494,13 @@ ${SHOP_DOMAIN} {
 	# Product listing for Google: static files from Bun, not PHP.
 	# Fast price/stock sync does not rewrite these. See docs/SEO.md
 	handle /robots.txt {
-		root * /home/ubuntu/ecom_sites/data/sitemaps
+		root * ${DATA_DIR}/sitemaps
 		file_server
 		header Cache-Control "public, max-age=3600"
 		header -Server
 	}
 	handle /wp-sitemap* {
-		root * /home/ubuntu/ecom_sites/data/sitemaps
+		root * ${DATA_DIR}/sitemaps
 		file_server
 		header Cache-Control "public, max-age=86400"
 		header -Server
@@ -598,8 +618,14 @@ if [[ -z "${CLONE_MODE:-}" && ( "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ) ]]
     docker cp "$INSTALL_PHP" ecom:/tmp/wp-fresh-install.php
     docker exec \
       -e SHOP_DOMAIN="$SHOP_DOMAIN" \
+      -e WP_BASE_URL="${WP_BASE_URL:-https://${SHOP_DOMAIN}}" \
+      -e WP_ADMIN_USER="${WP_ADMIN_USER:-}" \
       -e WP_ADMIN_PASS="${WP_ADMIN_PASS:-}" \
+      -e WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}" \
       -e SHOP_TITLE="${SHOP_TITLE:-Cosmetic}" \
+      -e SILLAGE_SHARED_SECRET="${SILLAGE_SHARED_SECRET:-}" \
+      -e SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}" \
+      -e SILLAGE_CORE_INTERNAL_URL="http://sillage-core:4000" \
       ecom php /tmp/wp-fresh-install.php
   fi
 fi

@@ -30,6 +30,7 @@ x-sillage-common: &sillage-common
     DB_HOST: ecom-db
     DB_PORT: "3306"
     REDIS_URL: redis://valkey:6379
+    SILLAGE_PROFILE: retail
     SILLAGE_LOCK_PREFIX: sillage
     # Public shop URL (dashboard links); Settings → Shop URL can override at runtime.
     WP_BASE_URL: ${WP_BASE_URL:-http://127.0.0.1:104}
@@ -122,6 +123,16 @@ services:
       WORDPRESS_DB_USER: ${MYSQL_USER:-lime}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PWD}
       WORDPRESS_DB_NAME: ${MYSQL_DB:-earth}
+      # Official image writes these into wp-config.php on an empty volume.
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_REDIS_HOST', 'valkey');
+        define('WP_REDIS_PORT', 6379);
+        define('WP_REDIS_PREFIX', 'sillage:');
+        define('SILLAGE_SHARED_SECRET', '${SILLAGE_SHARED_SECRET}');
+        define('SILLAGE_CORE_URL', 'http://sillage-core:4000');
+        define('SILLAGE_DASHBOARD_URL', '${SILLAGE_DASHBOARD_URL:-http://127.0.0.1:4000}');
+        define('SILLAGE_DB', '${SILLAGE_DB:-sillage}');
+        define('DISABLE_WP_CRON', true);
 
   # API + dashboard. Separate from cron so a full sync cannot stall webhooks.
   sillage-core:

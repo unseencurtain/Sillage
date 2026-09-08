@@ -15,8 +15,8 @@ A separate wholesale-perfumes shop (different repo, different catalogue, €300 
 https://wholesale.mirainikki.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 This Sillage dashboard is **BeautyFort + BTS only**.
 
-Ask the operator who deployed the shop for the dashboard password. It is **not** in this repository.
-The operator user is `admin` in `DASHBOARD_USER`; the password lives only in `~/sillage/.env` on the VPS.
+Ask the operator who deployed the shop for the **username and password**. They are **not** in this repository.
+They live only in the password file from deploy (and `~/sillage/.env` on the VPS). The username is **not** `admin`.
 
 ---
 
@@ -99,7 +99,7 @@ The dashboard shows a red banner when dry-run is off.
 ## 4. Sign in
 
 1. Open https://sillage.prinscosmetic.eu
-2. **User** is usually `admin`
+2. **User** is the operator name you were given (it is not `admin`)
 3. Enter the password you were given → **Sign in**
 4. Use **Sign out** at the bottom of the left menu when you are done
 
@@ -380,5 +380,5 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 | Shop | https://prinscosmetic.eu |
 | Customer tracking | https://prinscosmetic.eu/track-order/ |
 
-User for the dashboard is **admin** unless you were told otherwise. Keep the password off GitHub
-and out of chat logs.
+Use the dashboard username and password from the operator password file. Keep them off GitHub
+and out of chat logs. The username is never `admin`.

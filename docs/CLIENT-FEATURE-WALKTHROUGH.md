@@ -300,7 +300,7 @@ Safe ops workflow that avoids accidental double-spend while still supporting rea
 
 | Surface | URL | Notes |
 |---|---|---|
-| Dashboard | https://sillage.prinscosmetic.eu | User `admin`; password from operator `.deploy/vps-dashboard.txt` |
+| Dashboard | https://sillage.prinscosmetic.eu | Username + password from operator `.deploy/vps-dashboard-<host>.txt` (not `admin`) |
 | Storefront | https://prinscosmetic.eu | Customer-facing shop |
 | Track order | https://prinscosmetic.eu/track-order/ | Order number + email |
 
