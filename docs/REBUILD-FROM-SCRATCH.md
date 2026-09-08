@@ -149,7 +149,14 @@ swap, cron, sysctl, mounts.
 `deploy-vps.sh` created `data/sitemaps` and pointed Caddy at it for `robots.txt` and
 `wp-sitemap*.xml`, but only `ovhe`'s hand-added crontab entry ever filled it.
 
-*Guard:* the retail deploy installs the `write-sitemaps.py` cron and runs it once.
+Worse, the script's own defaults were the live box's: it wrote to `~/ecom_sites/data/sitemaps`
+(the fresh layout is `~/sillage/data/sitemaps`) and advertised `prinscosmetic.eu` in
+`robots.txt`. Both are silent — Caddy just keeps serving an empty directory, and Google is
+pointed at another shop.
+
+*Lesson:* a default that encodes one host is a landmine on the second host. Pass the values.
+*Guard:* the retail deploy installs the cron with `SITEMAP_HOST_DIR` and `WP_BASE_URL` set
+explicitly and runs it once; `write-sitemaps.py` now detects the layout instead of assuming it.
 
 ### Homepage redirected to a random product
 

@@ -13,7 +13,21 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 PAGE = 2000
-DEST = Path(os.environ.get("SITEMAP_HOST_DIR", os.path.expanduser("~/ecom_sites/data/sitemaps")))
+def _default_dest() -> Path:
+    """Fall back to whichever layout this host uses.
+
+    The live box keeps data in ~/ecom_sites/data; a VPS deployed from scratch keeps it beside
+    the app, in ~/sillage/data. Writing to the wrong one is silent: Caddy keeps serving an
+    empty directory and every sitemap URL 404s.
+    """
+    legacy = Path(os.path.expanduser("~/ecom_sites/data/sitemaps"))
+    if legacy.is_dir():
+        return legacy
+    beside_app = Path(__file__).resolve().parent.parent / "data" / "sitemaps"
+    return beside_app if beside_app.is_dir() else legacy
+
+
+DEST = Path(os.environ["SITEMAP_HOST_DIR"]) if os.environ.get("SITEMAP_HOST_DIR") else _default_dest()
 BASE = os.environ.get("WP_BASE_URL", "https://prinscosmetic.eu").rstrip("/")
 
 SQL = r"""
