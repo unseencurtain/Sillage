@@ -109,6 +109,21 @@ Brasty camera graphic (grey camera + “BRASTY”) is **not** a product photo. M
 Victoria’s Secret EAN `0197575132998` (`BF-F558351` / `BTS-419906`) still needs a **manual**
 photo. ~12k leftover SKUs have EANs that are simply not in the 36k Brasty dump.
 
+**Which products are still waiting on a photo** — `scripts/export-missing-images.py`, on the VPS.
+The path you invoke picks the shop: it reads the `.env` of the stack it sits in, so retail's copy
+cannot read wholesale's databases (`earth`/`sillage` vs `earth_wpf`/`sillage_wpf`).
+
+```bash
+python3 ~/sillage/scripts/export-missing-images.py             # → ~/missing-images-retail.csv
+python3 ~/sillage-wholesale/scripts/export-missing-images.py   # → ~/missing-images-wholesale.csv
+```
+
+It writes EAN, name, brand, price, stock, vendor and SKU for every published, non-pinned product
+whose `_external_thumbnail_url` is empty, sorted by stock descending. That meta is the writer's own
+verdict after `isUnusableImage`, so the row count equals the `hiddenNoImage` a sync reports — do not
+re-derive the rule from `sil_offers.image_url` in a query, which is what made the dashboard
+undercount retail by 11,328.
+
 Restore onto a new VPS: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
 
 ---

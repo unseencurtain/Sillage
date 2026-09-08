@@ -86,7 +86,8 @@ Polls `GET /api/overview` every 15s.
 | Published in WP | Includes catalog-hidden products |
 | Sillage products | `COUNT(sil_products)` |
 | Sync on/off · orders dry-run/LIVE | Snapshot of rails (edit on Settings) |
-| Catalogue visibility stats | Exclusive hide reasons that **add** to Hidden: no/weak image, out of stock (has image), operator pin. Out of stock card is the Woo `outofstock` term (can include no-image SKUs). Visible + Hidden = Published |
+| Catalogue visibility stats | Exclusive hide reasons that **add** to Hidden: no photo, out of stock (has a photo), operator pin. Counted from `_external_thumbnail_url` — the photo the shop prints — not from the vendor's raw `image_url`, which is often a placeholder or a weak BeautyFort `/pic/` thumb the writer rejected. Out of stock card is the Woo `outofstock` term, so it also counts photo-less SKUs and the tile names that overlap. Visible + Hidden = Published |
+| `unattributed — please report this` | Hidden minus the three reasons. Should always be absent. If it shows, the hide-reason query has drifted from what the writer does — see the retrospective in `REBUILD-FROM-SCRATCH.md` |
 | Last sync | Latest `sil_sync_runs` (+ link to Sync). Fetched is WPF SKUs on wholesale, not BF/BTS |
 | Vendor orders by status | Counts only |
 | Syncs · last 7 days | Activity chart |
