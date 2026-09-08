@@ -814,13 +814,18 @@ if ! swapon --show | grep -q '^/swapfile'; then
 fi
 swapon --show
 
-SITEMAP_CRON="0 19 * * * python3 ${APP_DIR}/scripts/write-sitemaps.py >> ${APP_DIR}/sillage-core/logs/sitemap-cron.log 2>&1"
+# Pass the directory and the base URL explicitly: the script defaults to the live box's layout
+# and the live shop's domain, and cron has none of the deploy environment. Getting either wrong
+# is silent — Caddy serves an empty directory, or robots.txt advertises another shop's sitemap.
+SITEMAP_ENV="SITEMAP_HOST_DIR=${SITEMAP_HOST_DIR:-${DATA_DIR}/sitemaps} WP_BASE_URL=https://${SHOP_DOMAIN}"
+SITEMAP_CRON="0 19 * * * ${SITEMAP_ENV} python3 ${APP_DIR}/scripts/write-sitemaps.py >> ${APP_DIR}/sillage-core/logs/sitemap-cron.log 2>&1"
 if ! crontab -l 2>/dev/null | grep -qF "write-sitemaps.py"; then
   ( crontab -l 2>/dev/null; echo "$SITEMAP_CRON" ) | crontab -
   echo "==> installed sitemap cron"
 fi
 mkdir -p "$DATA_DIR/sitemaps"
-python3 "$APP_DIR/scripts/write-sitemaps.py" >>"$APP_DIR/sillage-core/logs/sitemap-cron.log" 2>&1 \
+SITEMAP_HOST_DIR="${SITEMAP_HOST_DIR:-${DATA_DIR}/sitemaps}" WP_BASE_URL="https://${SHOP_DOMAIN}" \
+  python3 "$APP_DIR/scripts/write-sitemaps.py" >>"$APP_DIR/sillage-core/logs/sitemap-cron.log" 2>&1 \
   && echo "==> sitemaps written" || echo "NOTE: first sitemap run failed; catalogue is probably still empty"
 
 curl -sS "http://127.0.0.1:${SILLAGE_PORT:-4000}/health" || true
