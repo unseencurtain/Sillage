@@ -84,6 +84,7 @@ ssh root@YOUR_VPS_IP 'bash -s' < production-environment/scripts/bootstrap-host.s
 ```
 
 Installs Docker + Compose plugin, Caddy, ufw, fail2ban, `ubuntu` user, and networks `ecom_network` / `redis_network`.
+On Ubuntu 26.04 (`resolute`) the script uses Docker’s 24.04 (`noble`) packages when Docker has not published a repo for that release yet.
 
 ```sshconfig
 Host my-sillage
