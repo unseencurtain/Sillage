@@ -1,10 +1,8 @@
 # Sillage — agent entry point
 
 Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce storefront
-(**BeautyFort + BTS** retail). A second WordPress on the same VPS,
-[`wholesale.mirainikki.xyz`](docs/WHOLESALE-SITE.md) (`docs/WHOLESALE-SITE.md`), sells
-**wholesale-perfumes only** (minimum order €300, sandbox dispatch). Do not implement that
-site on the old [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) tree.
+(**BeautyFort + BTS** retail). Wholesale-perfumes is a **separate product** in
+[unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
 **Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first — including the Memory section.** Hub images are
 built on ovhe (`docker login` lives there). Wholesale is a second shop with its own MariaDB and
@@ -39,7 +37,6 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
 | `.feedscratch/` | Real downloaded vendor feeds, used as offline test fixtures (gitignored) |
 | `product-dropshipping/` | Original standalone vendor clients. Reference only — do not edit |
 | `docs/` | Client how-to [`CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md); engineers start at `CONTEXT.md` |
-| `b2b-wholesale/` | Pointer to live wholesale in this repo ([`docs/WHOLESALE-SITE.md`](docs/WHOLESALE-SITE.md)). Old extract: [sillage-b2b](https://github.com/unseencurtain/sillage-b2b) (archive, do not deploy) |
 | `tools/images/` | Offline image tools (Brasty Playwright scrape, etc.) |
 
 ## Hard rules

@@ -28,21 +28,13 @@ function bool(key: string, fallback: boolean): boolean {
 
 const rootDir = resolve(import.meta.dir, "../..");
 
-export type SillageProfile = "retail" | "wholesale";
-
-export function parseSillageProfile(raw: string): SillageProfile {
-  return raw.trim().toLowerCase() === "wholesale" ? "wholesale" : "retail";
-}
-
-const sillageProfile = parseSillageProfile(opt("SILLAGE_PROFILE", "retail"));
-const lockPrefix =
-  opt("SILLAGE_LOCK_PREFIX") || (sillageProfile === "wholesale" ? "sillage-wholesale" : "sillage");
+const lockPrefix = opt("SILLAGE_LOCK_PREFIX") || "sillage";
 
 export const env = {
   rootDir,
-  /** `retail` = BeautyFort + BTS shop. `wholesale` = wholesale-perfumes only, sandbox dispatch. */
-  sillageProfile,
-  /** MariaDB GET_LOCK / IS_USED_LOCK prefix. Must differ per storefront on a shared server. */
+  /** BeautyFort + BTS retail shop. Wholesale is a separate repo (unseencurtain/sillage-b2b). */
+  sillageProfile: "retail" as const,
+  /** MariaDB GET_LOCK / IS_USED_LOCK prefix. */
   lockPrefix,
   nodeEnv: opt("NODE_ENV", "development"),
   isProduction: opt("NODE_ENV", "development") === "production",
@@ -82,20 +74,6 @@ export const env = {
     language: opt("BTS_LANGUAGE", "en-US"),
   },
 
-  wholesalePerfumes: {
-    user: opt("WHOLESALE_PERFUMES_USER"),
-    token: opt("WHOLESALE_PERFUMES_TOKEN"),
-    catalogUrl: opt(
-      "WHOLESALE_PERFUMES_CATALOG_URL",
-      "https://www.wholesale-perfumes.eu/xml/catalog/LovelyXml/en",
-    ),
-    storeUrl: opt(
-      "WHOLESALE_PERFUMES_STOCK_URL",
-      "https://www.wholesale-perfumes.eu/xml/store/LovelyXml/EUR",
-    ),
-    apiBaseUrl: opt("WHOLESALE_PERFUMES_API_BASE_URL", "https://www.wholesale-perfumes.eu/api/v1"),
-  },
-
   dashboard: {
     user: opt("DASHBOARD_USER", "admin"),
     password: opt("DASHBOARD_PASSWORD"),
@@ -115,8 +93,6 @@ export function refreshVendorSecretsFromProcessEnv(): void {
   env.beautyfort.user = opt("BEAUTYFORT_USER");
   env.beautyfort.secret = opt("BEAUTYFORT_SECRET");
   env.bts.token = opt("BTS_JWT_TOKEN");
-  env.wholesalePerfumes.user = opt("WHOLESALE_PERFUMES_USER");
-  env.wholesalePerfumes.token = opt("WHOLESALE_PERFUMES_TOKEN");
 }
 
 /**
@@ -139,11 +115,7 @@ export function sil(table: string): string {
   return `\`${env.db.sillage}\`.\`${table}\``;
 }
 
-/** Advisory lock name. Retail uses `sillage:sync`; wholesale uses `sillage-wholesale:sync`. */
+/** Advisory lock name, e.g. `sillage:sync`. */
 export function lockName(name: string): string {
   return `${env.lockPrefix}:${name}`;
-}
-
-export function isWholesaleProfile(): boolean {
-  return env.sillageProfile === "wholesale";
 }

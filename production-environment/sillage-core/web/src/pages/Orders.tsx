@@ -187,10 +187,7 @@ export function Orders() {
     settingsQ.data?.orders_dry_run === undefined
       ? true
       : settingsQ.data.orders_dry_run === "1" || settingsQ.data.orders_dry_run === "true";
-  const sandboxLocked =
-    settingsQ.data?.sillage_profile === "wholesale" ||
-    settingsQ.data?.orders_sandbox_locked === "1" ||
-    settingsQ.data?.orders_sandbox_locked === "true";
+  const sandboxLocked = false;
 
   const detailData = detail.data;
   const order = detailData?.order;

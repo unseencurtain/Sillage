@@ -35,8 +35,7 @@ import {
 import type { OrderAddress } from "../../orders/types.ts";
 import { getStorefrontLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
-import { isParkedVendor, parkedVendorSlugsFor, storefrontVendorSlugs } from "../../vendors/registry.ts";
-import { isWholesaleProfile } from "../../storefront/profile.ts";
+import { isParkedVendor, storefrontVendorSlugs } from "../../vendors/registry.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
 
 const log = logger("api");
@@ -294,7 +293,7 @@ api.post("/sync/run", async (c) => {
     ? body.vendors.filter((v): v is string => allowed.has(v))
     : undefined;
   const vendorList = vendors?.length ? vendors : storefrontVendorSlugs();
-  const vendorNames = isWholesaleProfile() ? "wholesale-perfumes" : "BeautyFort + BTS";
+  const vendorNames = "BeautyFort + BTS";
 
   await clearSyncAbort();
 
@@ -397,9 +396,7 @@ api.get("/secrets", (c) => {
   return c.json({
     path,
     hotReload: true,
-    note: isWholesaleProfile()
-      ? "Changes apply immediately. This wholesale instance only uses wholesale-perfumes credentials. Dispatch is sandbox-locked (dry-run)."
-      : "Changes apply immediately to this process and at the start of each sync. No container restart required for BF/BTS credentials.",
+    note: "Changes apply immediately to this process and at the start of each sync. No container restart required for BF/BTS credentials.",
     secrets,
   });
 });
@@ -446,7 +443,6 @@ api.get("/sync/live-status", async (c) => {
     isCatalogueRebuildPending(),
     hasSuccessfulCatalogue(),
   ]);
-  const wpf = cooldown.wholesalePerfumes;
   return c.json({
     profile: env.sillageProfile,
     vendors: storefrontVendorSlugs(),
@@ -479,16 +475,6 @@ api.get("/sync/live-status", async (c) => {
       usedToday: cooldown.bts.usedToday,
       dailyRemaining: null,
     },
-    wholesalePerfumes: wpf
-      ? {
-          allow: wpf.allow,
-          reason: wpf.reason,
-          retryInMinutes: wpf.retryInMinutes,
-          maxPerDay: wpf.maxPerDay,
-          usedToday: wpf.usedToday,
-          dailyRemaining: null,
-        }
-      : null,
   });
 });
 
@@ -630,25 +616,20 @@ api.get("/vendors", async (c) => {
     `SELECT setting_key, setting_value FROM ${sil("sil_settings")}
       WHERE setting_key IN (
         'last_live_fetch_beautyfort',
-        'last_live_fetch_bts',
-        'last_live_fetch_wholesale-perfumes'
+        'last_live_fetch_bts'
       )`,
   );
   const lastLiveFetch: Record<string, string | null> = {
     beautyfort: null,
     bts: null,
-    "wholesale-perfumes": null,
   };
   for (const row of lastFetchRows) {
     if (row.setting_key === "last_live_fetch_beautyfort") lastLiveFetch.beautyfort = row.setting_value;
     if (row.setting_key === "last_live_fetch_bts") lastLiveFetch.bts = row.setting_value;
-    if (row.setting_key === "last_live_fetch_wholesale-perfumes") {
-      lastLiveFetch["wholesale-perfumes"] = row.setting_value;
-    }
   }
   return c.json({
     profile: env.sillageProfile,
-    parkedVendors: [...parkedVendorSlugsFor()],
+    parkedVendors: [],
     globalPriceMultiplier: settings.priceMultiplier,
     globalStockThreshold: settings.stockThreshold,
     callIntervalMinutes: settings.liveFeedMinMinutes,
@@ -1048,8 +1029,8 @@ api.get("/settings", async (c) => {
   ]);
   return c.json({
     sillage_profile: env.sillageProfile,
-    parked_vendors: [...parkedVendorSlugsFor()].join(","),
-    orders_sandbox_locked: isWholesaleProfile() ? "1" : "0",
+    parked_vendors: "",
+    orders_sandbox_locked: "0",
     sync_enabled: s.syncEnabled ? "1" : "0",
     fast_sync_minutes: String(s.fastSyncMinutes),
     full_sync_enabled: s.fullSyncEnabled ? "1" : "0",
@@ -1167,13 +1148,6 @@ api.put("/settings", async (c) => {
     }
     const changed = prior.get(key) !== persist;
     if (!changed) continue;
-    if (
-      isWholesaleProfile() &&
-      ((key === "orders_dry_run" && persist !== "1" && persist !== "true") ||
-        (key === "orders_auto_dispatch" && persist !== "0" && persist !== "false"))
-    ) {
-      continue;
-    }
     await setSetting(key, persist);
     n++;
     // One operator "minutes between syncs" keeps schedule cadence and vendor gate in lockstep.

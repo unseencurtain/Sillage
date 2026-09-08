@@ -185,8 +185,8 @@ export function Settings() {
 
   const dryRunOff = !isTruthy(form.orders_dry_run);
   const autoOn = isTruthy(form.orders_auto_dispatch);
-  const wholesale = form.sillage_profile === "wholesale";
-  const sandboxLocked = wholesale || isTruthy(form.orders_sandbox_locked);
+  const wholesale = false;
+  const sandboxLocked = false;
 
   return (
     <div className="space-y-6">

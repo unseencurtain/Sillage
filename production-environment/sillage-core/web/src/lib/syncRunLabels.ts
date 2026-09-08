@@ -8,9 +8,6 @@ export function fetchedLabel(r: {
 }): string {
   const by = r.fetched_by_vendor;
   const skipped = new Set(r.skipped_vendors ?? []);
-  if (by && by["wholesale-perfumes"] != null) {
-    return `WPF ${Number(by["wholesale-perfumes"]).toLocaleString()}`;
-  }
   if (by && (by.beautyfort != null || by.bts != null)) {
     const bf = skipped.has("beautyfort")
       ? "BF skipped"

@@ -81,8 +81,8 @@ export function Sync() {
   const pendingRebuild = live.data?.pendingRebuild === true;
   const catalogueReady = live.data?.catalogueReady !== false;
   const intervalMin = live.data?.cooldownMinutes ?? 30;
-  const wholesale = live.data?.profile === "wholesale";
-  const vendorPair = wholesale ? "wholesale-perfumes" : "BeautyFort + BTS";
+  const wholesale = false;
+  const vendorPair = "BeautyFort + BTS";
 
   const run = useMutation({
     mutationFn: (opts: { mode: "fast" | "full" }) =>

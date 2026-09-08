@@ -33,7 +33,7 @@ describe("retail live cooldown — no silent cache", () => {
 
   test("fast live path skips vendor when gate blocks — no disk fallback", () => {
     expect(runSrc).toContain("skipping live price/stock sync");
-    expect(runSrc).toContain('options.source === "live" && vendor.slug !== "wholesale-perfumes"');
+    expect(runSrc).toContain('if (options.source === "live")');
   });
 
   test("BF/BTS connectors throw when live is blocked", () => {
