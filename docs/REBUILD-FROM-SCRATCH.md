@@ -95,7 +95,10 @@ the ~4,200 product photos in place and served over `images.…`, the sitemap cro
 
 ### Stage 3 — activation and WordPress setup (owner) — work stops here
 
-Hand over `~/creds-retail.txt` and wait. The owner uploads `blocksy-companion-pro.zip` in
+Hand over both logins from `.deploy/vps-dashboard-<host>.txt` — the WordPress pair
+(`wp_admin_user` / `wp_admin_password`) and the dashboard pair — and wait. That file is written by
+the deploy and is the only copy outside the server's `.env`. The owner uploads
+`blocksy-companion-pro.zip` in
 Plugins → Add New → Upload, activates the plugins and the theme, and sets up the homepage, menus
 and shipping. `FS_METHOD` is pinned to `direct` so the upload never asks for FTP credentials.
 
@@ -276,6 +279,50 @@ among a hundred other lines.
 *Guard:* activation is now the owner's step, and `wp-readiness.php` reports the active theme and
 each plugin's state as its own line, so "inactive" cannot hide. When `WP_ACTIVATE_PLUGINS=1` is
 used for an unattended install, the installer activates whichever companion directory exists.
+
+### The install gate asked the wrong question
+
+The block deciding whether to install WordPress ran `wp_has_config || NEED_FRESH=1` — true only
+when `wp-config.php` is missing. The loop immediately above it *waits up to three minutes for the
+image entrypoint to create that exact file*. So on the first real rebuild the gate was already
+false, and the whole install was skipped in silence: no WooCommerce, no Blocksy, no admin user,
+and a shop serving the five-minute install screen. The deploy reported success for everything it
+had not done.
+
+*Lesson:* a gate that tests a file another step is waiting for is not a gate. Ask the question you
+actually mean — is WordPress installed — of the thing that holds the answer. *Guard:*
+`wp_installed()` counts the `wp_options` table in `information_schema`.
+
+### The cron install died on a box with no crontab
+
+`( crontab -l 2>/dev/null; echo "$SITEMAP_CRON" ) | crontab -` looks defensive. It is not: on a
+machine that has never had a crontab, `crontab -l` exits non-zero, `set -e` kills the subshell
+before the `echo`, `pipefail` propagates it, and the deploy aborts having installed an *empty*
+crontab. The error was invisible because it went to `/dev/null`. Every earlier deploy passed
+because the box already had a crontab from a previous run.
+
+*Guard:* `{ crontab -l 2>/dev/null || true; echo "$SITEMAP_CRON"; } | crontab -`.
+
+### A second deploy erased the WordPress password from the creds file
+
+The first run writes `.deploy/vps-dashboard-<host>.txt` with both logins. The update branch — taken
+on every subsequent run — rewrote the same file with only the dashboard pair, so the wp-admin
+password existed nowhere but the server's `.env`.
+
+*Lesson:* code that rewrites a file wholesale has to re-read everything in it. *Guard:* the update
+branch reads the WordPress login back from the remote `.env` alongside the dashboard one.
+
+### Hub images that predate the fix they are supposed to carry
+
+`sillage-core:latest` and `sillage-b2b:latest` were both built *before* the scheduler fix that
+lets an operator-queued rebuild start on a shop that has never synced. Deploying from them would
+have reproduced the original complaint exactly — pressing **Rebuild catalogue** and nothing
+happening — with the repo, the docs and the retrospective all claiming it was fixed.
+
+*Lesson:* "the fix is committed" and "the fix is in the image the VPS boots" are different
+statements. The WordPress version guard existed for precisely this reason and covered only
+WordPress. *Guard for now:* both engine images are rebuilt from the checkout and pinned in `.env`
+by commit SHA, never `:latest`, and the image is grepped for the fix before deploying.
 
 ### Grants that cannot be applied before WooCommerce exists
 

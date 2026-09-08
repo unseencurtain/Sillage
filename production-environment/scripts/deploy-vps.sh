@@ -555,15 +555,21 @@ for k, v in pairs:
 p.write_text(text)
 print("ENV_UPDATED")
 PY
-  # Refresh local creds file password from remote when possible
-  REMOTE_PASS=$("${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf %s "$DASHBOARD_PASSWORD"')
-  REMOTE_USER=$("${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf %s "$DASHBOARD_USER"')
+  # Read every credential back from the remote .env, which is the only copy that survives. This
+  # rewrites the file, so anything not read here is lost: the WordPress login used to be dropped
+  # on any second deploy, leaving no record of the wp-admin password anywhere but the server.
+  read -r REMOTE_USER REMOTE_PASS REMOTE_WP_USER REMOTE_WP_PASS <<<"$(
+    "${SSH[@]}" "$HOST" 'set -a; source ~/sillage/.env; set +a; printf "%s %s %s %s" \
+      "$DASHBOARD_USER" "$DASHBOARD_PASSWORD" "${WP_ADMIN_USER:-}" "${WP_ADMIN_PASS:-}"'
+  )"
   cat > "$CREDS" <<EOF
 host=${HOST}
 url=https://${DASH_DOMAIN}
 user=${REMOTE_USER}
 password=${REMOTE_PASS}
 shop=https://${SHOP_DOMAIN}
+wp_admin_user=${REMOTE_WP_USER}
+wp_admin_password=${REMOTE_WP_PASS}
 ip=${IP}
 updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
@@ -733,8 +739,20 @@ if [[ -d "$APP_DIR/wp-staging/sillage-bridge" ]]; then
   echo "sillage-bridge copied into the WordPress volume"
 fi
 
+# Whether WordPress needs installing is a question about the *database*, not about wp-config.php.
+# The official image's entrypoint writes wp-config.php on first boot, and the loop above waits for
+# exactly that, so a file test here is always false by the time it is read — which silently skipped
+# the whole install: no WooCommerce, no Blocksy, no admin user, and a shop that answered on :80
+# with the WordPress five-minute install screen.
+wp_installed() {
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot -N \
+    -e "SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema='${MYSQL_DB}' AND table_name='${WP_TABLE_PREFIX:-wp_}options';" \
+    </dev/null 2>/dev/null | grep -q '^1$'
+}
+
 NEED_FRESH=0
-wp_has_config || NEED_FRESH=1
+wp_installed || NEED_FRESH=1
 if [[ -z "${CLONE_MODE:-}" && ( "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ) ]]; then
   echo "Fetching WooCommerce / redis-cache / Blocksy from wordpress.org..."
   STAGE="$(mktemp -d)"
@@ -846,7 +864,11 @@ swapon --show
 SITEMAP_ENV="SITEMAP_HOST_DIR=${SITEMAP_HOST_DIR:-${DATA_DIR}/sitemaps} WP_BASE_URL=https://${SHOP_DOMAIN}"
 SITEMAP_CRON="0 19 * * * ${SITEMAP_ENV} python3 ${APP_DIR}/scripts/write-sitemaps.py >> ${APP_DIR}/sillage-core/logs/sitemap-cron.log 2>&1"
 if ! crontab -l 2>/dev/null | grep -qF "write-sitemaps.py"; then
-  ( crontab -l 2>/dev/null; echo "$SITEMAP_CRON" ) | crontab -
+  # A box that has never had a crontab makes `crontab -l` exit non-zero, which under `set -e`
+  # killed the subshell before the echo and left an empty crontab behind — silently, because the
+  # error was sent to /dev/null. The live box had a crontab already, so this only ever showed up
+  # on a genuinely fresh machine.
+  { crontab -l 2>/dev/null || true; echo "$SITEMAP_CRON"; } | crontab -
   echo "==> installed sitemap cron"
 fi
 mkdir -p "$DATA_DIR/sitemaps"
