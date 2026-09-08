@@ -12,7 +12,7 @@
 #       [--media-from ovhe] [--skip-dns-check] \
 #       --finish   # after the operator has activated plugins and customised
 #       [--dns] [--ip 139.99.61.71] \
-#       [--skip-build] [--fresh] [--core-only] [--keep-caddy] [--replace-caddy]
+#       [--skip-build] [--fresh] [--core-only]
 #
 # Flow (empty Ubuntu VPS — this is the default path):
 #   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
@@ -22,9 +22,9 @@
 #      Pass --core-only only for a day-2 engine bump on an already-running shop.
 #   2) rsync compose/config/plugin/overrides only
 #   3) remote: docker compose pull && up -d && migrate + first-boot WordPress
-#      (WooCommerce, HPOS, permalinks, Coming soon off, Blocksy).
-#      Caddy is written for this shop. If the VPS already serves other hostnames,
-#      the existing Caddyfile is left alone unless you pass --replace-caddy.
+#      (shop options written; plugins and theme staged inactive for the operator).
+#      Caddy: this stack writes /etc/caddy/sites/retail.caddy and the main Caddyfile
+#      only imports sites/*.caddy, so retail and wholesale never overwrite each other.
 #
 # Operator names: --dash-user / --wp-user pick the dashboard and WordPress logins.
 # Omit them and a random non-admin pair is generated. "admin" is refused either way.
@@ -45,7 +45,6 @@ SKIP_BUILD=0
 FRESH=0
 CLONE_FROM=""
 WITH_WORDPRESS=1
-KEEP_CADDY=""
 DASH_USER=""
 WP_USER=""
 WP_ADMIN_USER=""
@@ -88,8 +87,6 @@ while [[ $# -gt 0 ]]; do
     --fresh) FRESH=1; shift ;;
     --core-only) WITH_WORDPRESS=0; shift ;;
     --with-wordpress) WITH_WORDPRESS=1; shift ;;
-    --keep-caddy) KEEP_CADDY=1; shift ;;
-    --replace-caddy) KEEP_CADDY=0; shift ;;
     --clone-from) CLONE_FROM="${2:?}"; shift 2 ;;
     -h|--help) usage ;;
     *)
@@ -201,7 +198,7 @@ if [[ "$FINISH" -eq 1 ]]; then
   exit $?
 fi
 
-log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS} keep_caddy=${KEEP_CADDY:-auto}"
+log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS}"
 
 if [[ -z "$IP" ]]; then
   IP=$("${SSH[@]}" "$HOST" 'curl -4 -sS --max-time 5 ifconfig.me || curl -4 -sS --max-time 5 icanhazip.com' | tr -d '[:space:]')
@@ -275,6 +272,14 @@ if [[ "$WITH_WORDPRESS" -eq 0 ]]; then
   WP_IMAGE="${NAMESPACE}/sillage-wordpress:latest"
 fi
 
+# When building, the tag is this commit — that is the point. When not building, deploy what .env
+# pins: a doc-only commit moves HEAD without changing any image, and deriving the tag from HEAD
+# regardless would demand a pointless rebuild for a tag that was never pushed.
+if [[ "$SKIP_BUILD" -eq 1 ]]; then
+  CORE_IMAGE="${SILLAGE_CORE_IMAGE:-$CORE_IMAGE}"
+  WP_IMAGE="${WORDPRESS_IMAGE:-$WP_IMAGE}"
+fi
+
 if [[ "$SKIP_BUILD" -eq 0 && "$WITH_WORDPRESS" -eq 0 ]]; then
   echo "NOTE: --core-only skips the WordPress image. Empty VPS first boot must omit --core-only."
 fi
@@ -323,6 +328,33 @@ if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
     exit 1
   fi
   log_step "WordPress image carries ${IMAGE_WP} (matches pin)"
+fi
+
+# The same trap, one layer down. A tag says nothing about the engine code inside it either, and
+# that is worse than a stale WordPress because it is invisible: the shop looks fine and one
+# behaviour is quietly missing. A rebuild once shipped an image predating the fix that lets an
+# operator start the first import, so pressing Rebuild catalogue did nothing — with the repo, the
+# docs and the retrospective all insisting it was fixed. Compare the source in the image against
+# the checkout being deployed.
+if [[ "$SKIP_BUILD" -eq 1 ]]; then
+  # LC_ALL applies to sort, not just find: the container sorts in C and a glibc host sorts
+  # case-insensitively, which reorders VendorConnector.ts and changes the hash of identical trees.
+  src_hash() { find . -type f -name '*.ts' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64; }
+  LOCAL_SRC="$(cd "$PE/sillage-core/src" && src_hash)"
+  IMAGE_SRC="$("${SSH[@]}" "$HOST" "docker pull -q '$CORE_IMAGE' >/dev/null 2>&1; docker run --rm --entrypoint sh '$CORE_IMAGE' -c 'cd /app/src && find . -type f -name \"*.ts\" | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64'" 2>/dev/null | tr -d '[:space:]')"
+  if [[ -z "$IMAGE_SRC" ]]; then
+    echo "Could not read engine source from ${CORE_IMAGE} (missing on Hub?)" >&2
+    exit 1
+  fi
+  if [[ "$LOCAL_SRC" != "$IMAGE_SRC" ]]; then
+    echo "${CORE_IMAGE} was built from different engine source than this checkout." >&2
+    echo "  image ${IMAGE_SRC}" >&2
+    echo "  local ${LOCAL_SRC}" >&2
+    echo "Rebuild and push that tag on the Hub-logged-in host, then deploy again:" >&2
+    echo "  ssh <build-host> 'cd ~/build-retail && bash scripts/build-push-images.sh --core-only --tag <sha>'" >&2
+    exit 1
+  fi
+  log_step "Engine image matches the checkout's sillage-core/src"
 fi
 
 echo "==> rsync compose/config/plugin → ${HOST}:~/${REMOTE_DIR}"
@@ -578,7 +610,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' KEEP_CADDY='${KEEP_CADDY:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -600,27 +632,38 @@ if [[ -n "${IMAGES_DOMAIN:-}" ]]; then
 }"
 fi
 
-# Empty VPS: write the Caddyfile for this shop. If the box already terminates
-# TLS for other hostnames (shared retail+wholesale), leave it alone.
-if [[ -z "${KEEP_CADDY:-}" && -f /etc/caddy/Caddyfile ]]; then
-  while read -r site; do
-    [[ -z "$site" ]] && continue
-    ours=0
-    for d in ${SHOP_DOMAIN:-} ${DASH_DOMAIN:-} ${IMAGES_DOMAIN:-}; do
-      [[ "$site" == "$d" ]] && ours=1
-    done
-    if [[ "$ours" -eq 0 ]]; then
-      echo "Caddy already serves $site — leaving /etc/caddy/Caddyfile (pass --replace-caddy to overwrite)"
-      KEEP_CADDY=1
-      break
-    fi
-  done < <(grep -E '^[A-Za-z0-9._-]+\.[A-Za-z0-9.-]+ \{' /etc/caddy/Caddyfile | awk '{print $1}' || true)
+# Two stacks share this box, so neither may own /etc/caddy/Caddyfile. Choosing between
+# clobbering the other shop's hostnames and skipping its own left the wholesale shop with no
+# TLS at all while the deploy printed "Deploy finished" — the previous box only worked because
+# someone merged the two configs by hand, which is exactly the drift this rebuild exists to end.
+# Each stack now writes one file under /etc/caddy/sites/ and the main file only imports them.
+sudo mkdir -p /etc/caddy/sites
+
+if [[ -f /etc/caddy/Caddyfile ]] && ! grep -q 'import /etc/caddy/sites' /etc/caddy/Caddyfile; then
+  sudo mv /etc/caddy/Caddyfile /etc/caddy/sites/legacy.caddy
+  echo "==> moved the monolithic Caddyfile to sites/legacy.caddy"
+fi
+printf 'import /etc/caddy/sites/*.caddy\n' | sudo tee /etc/caddy/Caddyfile >/dev/null
+
+# Our hostnames must appear in exactly one file. Caddy refuses duplicate site addresses, so
+# strip ours out of the legacy file we just inherited before writing our own.
+if [[ -f /etc/caddy/sites/legacy.caddy ]]; then
+  sudo awk -v names="${SHOP_DOMAIN:-} ${DASH_DOMAIN:-} ${IMAGES_DOMAIN:-}" '
+    BEGIN { n = split(names, a, " "); for (i = 1; i <= n; i++) if (a[i] != "") drop[a[i]] = 1 }
+    # A top-level site block opens at column 0 and closes with a bare } at column 0.
+    /^[^ \t}]/ && /\{[ \t]*$/ {
+      skip = 0
+      for (i = 1; i < NF; i++) { gsub(/,/, "", $i); if ($i in drop) skip = 1 }
+    }
+    skip && /^\}/ { skip = 0; next }
+    !skip { print }
+  ' /etc/caddy/sites/legacy.caddy | sudo tee /etc/caddy/sites/legacy.caddy.new >/dev/null
+  sudo mv /etc/caddy/sites/legacy.caddy.new /etc/caddy/sites/legacy.caddy
+  # An empty leftover would make `caddy validate` fail on an import that matches nothing useful.
+  grep -q '[^[:space:]]' /etc/caddy/sites/legacy.caddy || sudo rm -f /etc/caddy/sites/legacy.caddy
 fi
 
-if [[ "${KEEP_CADDY:-0}" == "1" ]]; then
-  echo "Skipping Caddyfile rewrite"
-else
-sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
+sudo tee /etc/caddy/sites/retail.caddy >/dev/null <<EOF
 ${SHOP_DOMAIN} {
 	# AI training crawlers walk every /product and /brand page. Prefork PHP
 	# cannot survive that on a ~4 GB box. Images CDN stays open (cheap files).
@@ -676,10 +719,11 @@ ${DASH_DOMAIN} {
 }
 ${IMAGES_SITE_BLOCK}
 EOF
-sudo caddy fmt --overwrite /etc/caddy/Caddyfile
+sudo caddy fmt --overwrite /etc/caddy/sites/retail.caddy
+[[ -f /etc/caddy/sites/legacy.caddy ]] && sudo caddy fmt --overwrite /etc/caddy/sites/legacy.caddy
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy
-fi
+echo "==> caddy sites: $(ls /etc/caddy/sites/*.caddy 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
 
 docker network create ecom_network 2>/dev/null || true
 docker network create redis_network 2>/dev/null || true
@@ -827,9 +871,6 @@ if [[ -f ecom_sites/config/sillage-grants.sql ]]; then
   # MariaDB refuses a grant on a missing table. --finish applies the rest and enforces it.
   bash scripts/apply-grants.sh
 fi
-docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
-  -e "GRANT SELECT, INSERT, UPDATE ON earth.wp_wc_order_addresses TO 'sillage'@'%'; FLUSH PRIVILEGES;" || true
-
 docker compose --env-file .env up -d
 docker exec sillage-core bun run migrate
 # Drop unused Hub tags / dangling layers so day-2 deploys do not pile up 20+ images.
