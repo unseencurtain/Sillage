@@ -280,6 +280,34 @@ among a hundred other lines.
 each plugin's state as its own line, so "inactive" cannot hide. When `WP_ACTIVATE_PLUGINS=1` is
 used for an unattended install, the installer activates whichever companion directory exists.
 
+### Neither stack could own the Caddyfile
+
+Both deploys wrote the whole of `/etc/caddy/Caddyfile`, with a check that skipped the rewrite when
+the box already served someone else's hostname. On one box that means the second stack deployed is
+never served: wholesale finished, printed "Deploy finished", and had no TLS for either of its
+hostnames. The previous box only worked because the two configs had been merged by hand.
+
+*Lesson:* when two components each need part of a shared file, neither can own it. *Guard:* each
+stack writes exactly one `/etc/caddy/sites/<stack>.caddy`, the main Caddyfile only holds
+`import /etc/caddy/sites/*.caddy`, and a monolithic Caddyfile is migrated to `sites/legacy.caddy`
+once with the deploying stack's own blocks stripped, since Caddy rejects duplicate site addresses.
+`--keep-caddy` and `--replace-caddy` are gone; there is nothing left to choose between.
+
+Wholesale's block also still pointed `robots.txt` and `/wp-sitemap*` at
+`/home/ubuntu/ecom_sites/data/sitemaps`, a path from before the host folders were renamed, so Caddy
+would have served an empty directory. It uses `$DATA_DIR` now.
+
+### A guard that asked the daemon instead of the file
+
+The wholesale deploy refused to run: "This VPS already runs wholesale-ecom from ~/sillage (combined
+live stack)." It was looking at its own containers, started by its own previous run twenty minutes
+earlier. The intended check — is this box running the *combined* stack, where retail's compose file
+also defines the wholesale containers — is a question about the compose file.
+
+*Lesson:* a guard against a name collision has to ask what *claims* the name, not what currently
+holds it, or the script stops being re-runnable. *Guard:* it greps retail's compose file for
+`container_name: wholesale-`.
+
 ### The install gate asked the wrong question
 
 The block deciding whether to install WordPress ran `wp_has_config || NEED_FRESH=1` — true only
@@ -311,6 +339,10 @@ password existed nowhere but the server's `.env`.
 
 *Lesson:* code that rewrites a file wholesale has to re-read everything in it. *Guard:* the update
 branch reads the WordPress login back from the remote `.env` alongside the dashboard one.
+
+Wholesale had it worse: it never wrote `WP_ADMIN_USER` / `WP_ADMIN_PASS` into the remote `.env` at
+all, so when the second deploy rewrote the creds file the wholesale wp-admin password existed in no
+file on either machine and had to be reset. Both scripts now persist it in `.env` and read it back.
 
 ### Hub images that predate the fix they are supposed to carry
 
