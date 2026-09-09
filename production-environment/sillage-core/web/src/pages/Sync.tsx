@@ -76,7 +76,7 @@ export function Sync() {
   const syncRunning = isRunActive(newest);
   const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set);
   const cooldownMin = live.data?.retryInMinutes ?? 0;
-  const onCooldown = Boolean(live.data && !(live.data.anyAllow ?? live.data.allow));
+  const onCooldown = Boolean(live.data && !live.data.allow);
   const scheduleOn = live.data?.syncEnabled === true;
   const pendingRebuild = live.data?.pendingRebuild === true;
   const catalogueReady = live.data?.catalogueReady !== false;

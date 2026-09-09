@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveDispatchDryRun } from "../src/storefront/profile.ts";
 import {
   isParkedVendor,
   storefrontVendorSlugs,
@@ -17,9 +16,12 @@ describe("retail storefront", () => {
     expect(vendorSelectableForSync("wholesale-perfumes", true)).toBe(false);
   });
 
-  test("dispatch dry-run follows the requested flag (no sandbox lock)", () => {
-    expect(resolveDispatchDryRun(true)).toBe(true);
-    expect(resolveDispatchDryRun(false)).toBe(false);
+  test("dry-run comes from the request or the setting, and nothing else overrides it", () => {
+    // Every stack runs against the same two wholesalers with the same credentials, so no stack is
+    // a sandbox and none of them may quietly overrule the Orders page in either direction.
+    const src = readFileSync(join(import.meta.dir, "../src/orders/dispatch.ts"), "utf8");
+    expect(src).toContain("options.dryRun ?? settings.ordersDryRun");
+    expect(src).not.toContain("devBox");
   });
 
   test("overview hidden reasons are exclusive (image, stock, operator)", () => {

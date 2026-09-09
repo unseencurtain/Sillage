@@ -51,16 +51,6 @@ export const env = {
   lockPrefix,
   nodeEnv: opt("NODE_ENV", "development"),
   isProduction: opt("NODE_ENV", "development") === "production",
-  /**
-   * This deployment is the development box, so no vendor order may leave it.
-   *
-   * Dev runs against the same two wholesalers as production, with the same credentials and no
-   * sandbox on either API — a dispatch here spends real money and ships real stock to whatever
-   * address the test order carried. `resolveDispatchDryRun` therefore ignores the dashboard's
-   * Live button while this is set. It is a property of the machine, not a setting, so it cannot
-   * be clicked off by someone exercising the Orders page.
-   */
-  devBox: bool("SILLAGE_DEV_BOX", false),
   logLevel: opt("LOG_LEVEL", "info"),
   port: int("PORT", 4000),
 

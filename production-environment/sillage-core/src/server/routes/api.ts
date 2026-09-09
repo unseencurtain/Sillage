@@ -262,10 +262,6 @@ api.get("/overview", async (c) => {
       stockThreshold: settings.stockThreshold,
       scheduleTimezone: settings.scheduleTimezone,
     },
-    // Whether this is the development box. The two shops are visually identical, and the dev one
-    // holds the same vendor credentials, so the dashboard has to say which one you are looking at
-    // before you press anything.
-    devBox: env.devBox,
     secrets: (() => {
       loadSecretsOverlay();
       const { secrets } = listSecretStatus();
@@ -377,7 +373,10 @@ api.post("/sync/run", async (c) => {
   // silently reuse a stale on-disk feed.
   if (source === "live") {
     const cooldown = await getStorefrontLiveCooldown();
-    if (!cooldown.anyAllow) {
+    // Every vendor or none: a rebuild that fetched one wholesaler would write half a catalogue
+    // and desynchronise the call intervals. Queue it instead — pendingRebuild above makes the
+    // next joint sync a rebuild, which is what the operator wanted anyway.
+    if (!cooldown.allow) {
       return c.json({
         ok: true,
         started: false,
@@ -472,7 +471,6 @@ api.get("/sync/live-status", async (c) => {
     /** @deprecated use cooldownMinutes — same value as live_feed_min_minutes */
     liveFeedMinMinutes: cooldown.cooldownMinutes,
     allow: cooldown.allow,
-    anyAllow: cooldown.anyAllow,
     retryInMinutes: cooldown.retryInMinutes,
     nextAllowedAt: cooldown.nextAllowedAt,
     reason: cooldown.reason,

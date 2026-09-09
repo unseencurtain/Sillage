@@ -10,7 +10,6 @@ import { sil } from "../config/env.ts";
 import { execute, query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, loadVendor, recordEvent, type GlobalSettings } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
-import { resolveDispatchDryRun } from "../storefront/profile.ts";
 import type { VendorOrderAdapter, VendorOrderResult } from "./adapter.ts";
 import { createOrderAdapter } from "./adapters/index.ts";
 import { resolveBillingAddress, resolveDeliveryAddress } from "./addresses.ts";
@@ -192,7 +191,7 @@ export async function dispatchVendorOrder(
 ): Promise<DispatchResult> {
   const settings = await loadSettings();
   const force = options.force ?? false;
-  const dryRun = resolveDispatchDryRun(options.dryRun ?? settings.ordersDryRun);
+  const dryRun = options.dryRun ?? settings.ordersDryRun;
 
   // A prior dry-run ends in `submitted` with dry_run=1 and no vendor order number. Live follow-up
   // must reopen that row — otherwise approve fails with "cannot approve from status submitted"

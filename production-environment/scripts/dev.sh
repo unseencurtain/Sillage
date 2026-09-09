@@ -20,8 +20,10 @@
 # the open tab, and the bridge plugin's PHP is live on the next request. None of that needs a
 # rebuild, a docker cp, or this script.
 #
-# Vendor orders cannot leave this box — the engine runs with SILLAGE_DEV_BOX=1, which overrules
-# the Orders page's Live button. See src/storefront/profile.ts.
+# Nothing about this box is a sandbox. The vendor feeds and the order APIs are the live ones, on
+# the shop's own credentials, so `sync-live` spends real API budget and a Live dispatch from the
+# Orders page here places a real order. The dry-run setting is the only thing standing between the
+# two, exactly as in production.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

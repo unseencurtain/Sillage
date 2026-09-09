@@ -47,7 +47,16 @@ FLUSH PRIVILEGES;
 SQL
 echo "DB_USER_OK"
 
-DASH_URL="${SILLAGE_DASHBOARD_URL:-https://${DASH_DOMAIN:-sillage.prinscosmetic.eu}}"
+if [[ -n "${SILLAGE_DASHBOARD_URL:-}" ]]; then
+  DASH_URL="$SILLAGE_DASHBOARD_URL"
+elif [[ -n "${DASH_DOMAIN:-}" ]]; then
+  DASH_URL="https://${DASH_DOMAIN}"
+else
+  # No default. This becomes the dashboard link baked into wp-config, and the old fallback named a
+  # specific VPS, so a shop on a new domain got a wp-admin link back to the previous box.
+  echo "Set DASH_DOMAIN or SILLAGE_DASHBOARD_URL — this is the dashboard link wp-config carries" >&2
+  exit 1
+fi
 # WordPress lives in a Docker volume, so wp-config.php is edited inside the container.
 PATCH="$SCRIPT_HOME/scripts/wp-config-patch.php"
 if [[ ! -f "$PATCH" ]]; then
