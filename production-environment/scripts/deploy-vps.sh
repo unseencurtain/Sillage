@@ -2,10 +2,10 @@
 # Deploy / update Sillage on a Ubuntu VPS from one compose + one .env.
 #
 # Usage (from repo root):
-#   ./production-environment/scripts/deploy-vps.sh --host ovh --role production \
+#   ./production-environment/scripts/deploy-vps.sh --host ovh \
 #       --shop … --dash … --images …
 #   ./production-environment/scripts/deploy-vps.sh \
-#       --host ovh --role production \
+#       --host ovh \
 #       [--shop …] [--dash …] [--images …] \
 #       [--dash-user europa] [--wp-user cherry] \
 #       [--media-from ovh] [--skip-dns-check] \
@@ -13,18 +13,16 @@
 #       [--dns] [--ip 51.79.255.226] \
 #       [--skip-build] [--fresh] [--core-only]
 #
-# --role is required and has no default. It labels what the stack is for, not which machine it is
-# on, and it changes no behaviour: both roles run the same image against the same live vendor APIs,
-# and the Orders page decides dry-run versus Live on either. What it buys is this script refusing
-# to deploy a role a box does not already hold unless you pass --switch-role, so a development
-# deploy cannot quietly land on the live shop. To relabel only, run scripts/set-role.sh on the box.
-# Domains have no default either — every default we set was correct until the shop moved.
+# Every box is a production box: same image, same compose file, same live vendor APIs, same
+# credentials. There is no development tier here because neither wholesaler offers one. What
+# differs between two boxes is which hostnames they answer on and which one customers reach.
+# Domains have no default — every default we ever set was correct until the shop moved.
 #
 #   [--overlay]  layer compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite dashboard,
-#                bridge plugin editable in place. A way of working, refused on production. Without
-#                it a development stack runs exactly what production runs.
+#                bridge plugin editable in place. A way of working while you edit code on a box,
+#                not a kind of box. Without it, every box runs the published image.
 #
-# Rules for which box is what: docs/ENVIRONMENTS.md.
+# Rules that apply to every box: docs/ENVIRONMENTS.md.
 #
 # Flow (empty Ubuntu VPS — this is the default path):
 #   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
@@ -63,8 +61,6 @@ WP_ADMIN_USER=""
 SKIP_DNS_CHECK=0
 MEDIA_FROM=""
 FINISH=0
-ROLE=""
-SWITCH_ROLE=0
 OVERLAY=0
 
 usage() {
@@ -96,9 +92,6 @@ while [[ $# -gt 0 ]]; do
     --dns) DO_DNS=1; shift ;;
     --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
     --finish) FINISH=1; shift ;;
-    --role) ROLE="${2:?}"; shift 2 ;;
-    --dev) ROLE="development"; shift ;;   # legacy spelling
-    --switch-role) SWITCH_ROLE=1; shift ;;
     --overlay) OVERLAY=1; shift ;;
     --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
@@ -121,21 +114,12 @@ done
 
 : "${HOST:?SSH host required}"
 
-# Say what you are deploying. There is no default and no inference from the hostname: which box
-# holds which role changes every time one is rebuilt, and a deploy that guesses is a deploy that
-# eventually turns a scratch copy into something that can spend money.
-case "$ROLE" in
-  production|development) ;;
-  "") echo "need --role production or --role development" >&2; exit 1 ;;
-  *) echo "--role must be production or development, not \"$ROLE\"" >&2; exit 1 ;;
-esac
-
 # --overlay layers compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite instead of the
-# prebuilt bundle. It is a way of working, not a role. A development stack without it is byte-for-
-# byte what production runs, which is the only way it can tell you anything about production.
-if [[ "$OVERLAY" -eq 1 && "$ROLE" == "production" ]]; then
-  echo "--overlay runs code straight off the box instead of a published image; not on production." >&2
-  exit 1
+# prebuilt bundle. It is a way of working, not a kind of box: without it, every box runs the same
+# published image, which is the only way one box can tell you anything about another.
+if [[ "$OVERLAY" -eq 1 ]]; then
+  echo "NOTE: --overlay runs engine code straight off the box instead of a published image."
+  echo "      Take it off with a plain deploy, or this box runs code that exists nowhere else."
 fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -155,37 +139,12 @@ SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
 SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
 RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
 
-# Dev uses production's directory names on purpose: the dev box is a mirror of the shop box, so
-# ~/sillage and ~/sillage-wholesale mean the same thing on both and every path in the runbook reads
-# the same wherever you are. What makes it a dev box is the compose overlay, not a suffix.
-#
-# The price of identical names is that deploying the wrong role at a box would adopt the stack that
-# is already there, so a role change is refused below rather than left to care.
+# Every box uses the same directory names: ~/sillage and ~/sillage-wholesale mean the same thing
+# everywhere, so every path in the runbook reads the same wherever you are standing.
 COMPOSE_FILES=(-f compose.yaml)
 [[ "$OVERLAY" -eq 1 ]] && COMPOSE_FILES+=(-f compose.dev.yaml)
 REMOTE_DIR=sillage
 COMPOSE_ARGS="${COMPOSE_FILES[*]}"
-
-# Every role uses the same directory names, so the box has to say what it is already running. Ask
-# the box; never infer a role from the hostname on the command line, because which machine holds
-# which role changes whenever one gets rebuilt.
-EXISTING_ROLE=$("${SSH[@]}" "$HOST" \
-  'for d in ~/sillage ~/sillage-wholesale; do
-     if [ -f "$d/.env" ]; then
-       r=$(grep -E "^SILLAGE_ROLE=" "$d/.env" | tail -1 | cut -d= -f2-)
-       [ -z "$r" ] && r=production
-       echo "$r"; exit
-     fi
-   done
-   echo empty' 2>/dev/null || echo unknown)
-if [[ "$SWITCH_ROLE" -eq 0 && "$EXISTING_ROLE" != "empty" && "$EXISTING_ROLE" != "unknown" \
-      && "$EXISTING_ROLE" != "$ROLE" ]]; then
-  echo "${HOST} already runs a ${EXISTING_ROLE} stack; you asked to deploy ${ROLE}." >&2
-  echo "Deploying over it would change what that box is for. If that is the intent, pass" >&2
-  echo "--switch-role. To change only the role of what is already there, run" >&2
-  echo "scripts/set-role.sh on the box instead — it does not touch the shop." >&2
-  exit 1
-fi
 
 # Fail on the tool, not on a bare "command not found" 200 lines in.
 for _tool in ssh rsync; do
@@ -585,11 +544,6 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
     LPS_URL="${LPS_MEDIA_BASE_URL:-}"
   fi
 
-  # What this stack is for. A label for the people and scripts that deploy here — the engine reads
-  # nothing from it, because a development stack is meant to behave exactly like the shop.
-  DEV_ENV_BLOCK="SILLAGE_ROLE=${ROLE}
-"
-
   "${SSH[@]}" "$HOST" "cat > ~/${REMOTE_DIR}/.env" <<EOF
 # Generated by deploy-vps.sh — do not commit
 SILLAGE_CORE_IMAGE=${CORE_IMAGE}
@@ -680,7 +634,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' ROLE='$ROLE' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 # This stack's .env. Hardcoding "sillage" here made every update write production's file.
 p = pathlib.Path.home() / os.environ["STACK"] / ".env"
@@ -714,8 +668,6 @@ pairs = [
 ]
 if os.environ.get("WITH_WORDPRESS") == "1":
     pairs.insert(1, ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]))
-# Refresh the role on an existing stack rather than requiring a from-scratch redeploy.
-pairs += [("SILLAGE_ROLE", os.environ.get("ROLE", "development"))]
 for k, v in pairs:
     if v is not None and v != "":
         text = set_key(text, k, v)

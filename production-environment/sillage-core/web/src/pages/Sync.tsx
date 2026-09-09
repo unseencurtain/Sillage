@@ -133,7 +133,9 @@ export function Sync() {
   const busy = starting || syncRunning;
   const secretsBlock = secretsMissing.length > 0;
   const fastDisabled = busy || secretsBlock || scheduleOn || onCooldown;
-  const rebuildDisabled = busy || secretsBlock || (pendingRebuild && scheduleOn && catalogueReady);
+  // A queued rebuild is a done decision: the next vendor call rebuilds. Pressing again cannot make
+  // it happen sooner, so the button goes dead until that call has run.
+  const rebuildDisabled = busy || secretsBlock || pendingRebuild;
 
   useEffect(() => {
     if (watchingRunId.current === -1 && newest && isRunActive(newest)) {

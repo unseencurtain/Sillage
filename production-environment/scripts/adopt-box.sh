@@ -18,31 +18,27 @@
 #   5. sil_settings.image_cdn_base_url        what bare filenames in the overrides resolve against
 #   6. wp_postmeta._external_thumbnail_url    the photo URL already written on each product
 #
-# --role is required and labels what the adopted stack is for. It changes no behaviour: a restored
-# copy carries the real vendor credentials, and neither vendor API has a sandbox, so development
-# talks to the same live wholesalers the shop does and the Orders page decides dispatch on both.
-# What the label buys is that deploy-vps.sh will not push the other role over this stack by
-# accident. There is no default, on purpose — a default would be a guess about which box you are
-# standing on. scripts/set-role.sh changes it later without re-adopting.
+# An adopted stack is a shop like any other: it carries the vendor credentials and the settings the
+# pack was taken with, and neither vendor API has a sandbox. Open the Sync and Orders pages
+# afterwards and set them the way you want *this* box to behave — see docs/SYNC-RULES.md. This
+# script never touches those settings.
 set -euo pipefail
 
-SHOP=""; DASH=""; IMAGES=""; ROLE=""
+SHOP=""; DASH=""; IMAGES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --shop) SHOP="${2:?}"; shift 2 ;;
     --dash) DASH="${2:?}"; shift 2 ;;
     --images) IMAGES="${2:?}"; shift 2 ;;
-    --role) ROLE="${2:?}"; shift 2 ;;
-    --dev) ROLE="development"; shift ;;   # legacy spelling
+    # Retired: there is no development tier. Still swallowed so an old command line works.
+    --role|--dev)
+      shift
+      if [[ "${1:-}" =~ ^(production|development)$ ]]; then shift; fi
+      ;;
     *) echo "unexpected argument: $1" >&2; exit 1 ;;
   esac
 done
 [[ -n "$SHOP" && -n "$DASH" ]] || { echo "need --shop and --dash (and normally --images)" >&2; exit 1; }
-case "$ROLE" in
-  production|development) ;;
-  "") echo "need --role production or --role development; there is no default" >&2; exit 1 ;;
-  *) echo "--role must be production or development, not \"$ROLE\"" >&2; exit 1 ;;
-esac
 [[ -f .env && -f compose.yaml ]] || { echo "run this from a restored stack directory" >&2; exit 1; }
 
 STACK="$(basename "$PWD")"
@@ -50,14 +46,12 @@ set -a; . ./.env; set +a
 OLD_SHOP="${SHOP_DOMAIN:-}"; OLD_DASH="${DASH_DOMAIN:-}"; OLD_IMAGES="${IMAGES_DOMAIN:-}"
 echo "adopting ${STACK}: ${OLD_SHOP:-?} → ${SHOP}"
 
-COMPOSE=(docker compose -f compose.yaml)
-DEV=0; [[ "$ROLE" == "development" ]] && DEV=1
-COMPOSE+=(--env-file .env)
+COMPOSE=(docker compose -f compose.yaml --env-file .env)
 
 echo "==> 1/6 .env"
-python3 - "$SHOP" "$DASH" "$IMAGES" "$DEV" <<'PY'
+python3 - "$SHOP" "$DASH" "$IMAGES" <<'PY'
 import pathlib, sys
-shop, dash, images, dev = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
+shop, dash, images = sys.argv[1], sys.argv[2], sys.argv[3]
 values = {
     "SHOP_DOMAIN": shop,
     "DASH_DOMAIN": dash,
@@ -67,7 +61,6 @@ values = {
 if images:
     values["IMAGES_DOMAIN"] = images
     values["LPS_MEDIA_BASE_URL"] = f"https://{images}"
-values["SILLAGE_ROLE"] = "development" if dev else "production"
 p = pathlib.Path(".env")
 out, seen = [], set()
 for line in p.read_text().splitlines():
@@ -169,4 +162,4 @@ echo "${STACK} adopted:"
 echo "  shop      https://${SHOP}"
 echo "  dashboard https://${DASH}"
 [[ -n "$IMAGES" ]] && echo "  images    https://${IMAGES}"
-echo "  role      ${ROLE} (label; dispatch follows the Orders page either way)"
+echo "  settings  untouched — check Sync and Orders on this box (docs/SYNC-RULES.md)"
