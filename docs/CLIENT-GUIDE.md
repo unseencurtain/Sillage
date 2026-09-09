@@ -7,12 +7,12 @@ dashboard — not for developers. Button names and page titles match what you se
 
 | What | Address |
 |---|---|
-| Customer shop | https://prinscosmetic.eu |
-| Operations dashboard | https://sillage.prinscosmetic.eu |
-| Track an order | https://prinscosmetic.eu/track-order/ |
+| Customer shop | https://codeinmoon.xyz |
+| Operations dashboard | https://sillage.codeinmoon.xyz |
+| Track an order | https://codeinmoon.xyz/track-order/ |
 
 A separate wholesale-perfumes shop (different repo, different catalogue, €300 minimum) lives at
-https://wholesale.mirainikki.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+https://wholesale.codeinmoon.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 This Sillage dashboard is **BeautyFort + BTS only**.
 
 Ask the operator who deployed the shop for the **username and password**. They are **not** in this repository.
@@ -98,7 +98,7 @@ The dashboard shows a red banner when dry-run is off.
 
 ## 4. Sign in
 
-1. Open https://sillage.prinscosmetic.eu
+1. Open https://sillage.codeinmoon.xyz
 2. **User** is the operator name you were given (it is not `admin`)
 3. Enter the password you were given → **Sign in**
 4. Use **Sign out** at the bottom of the left menu when you are done
@@ -293,7 +293,7 @@ These rules are on purpose. They match how dropship dispatch works.
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
 image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. **BTS does not send product
 photos**, so some bottle JPEGs live on this shop’s image host
-(`https://images.prinscosmetic.eu`, files in `~/ecom_sites/data/media` on the VPS). That folder
+(`https://images.codeinmoon.xyz`, files in `~/sillage/data/media` on the VPS). That folder
 is this retail shop, not wholesale. Extra files sitting in the EAN scrape folder are **not**
 shop photos until someone inspects them — many are tiny or generic.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
@@ -314,7 +314,7 @@ BeautyFort is a smaller EU set; BTS is broader.
 
 **EAN.** The barcode appears on the product page. Shop search understands barcodes.
 
-**Track order.** Customers open https://prinscosmetic.eu/track-order/ and enter order
+**Track order.** Customers open https://codeinmoon.xyz/track-order/ and enter order
 number + checkout email.
 
 **Vendor names.** LPS01 / LPS02 are operations labels. They must not appear as shop categories or
@@ -408,9 +408,9 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 
 | Surface | URL |
 |---|---|
-| Dashboard | https://sillage.prinscosmetic.eu |
-| Shop | https://prinscosmetic.eu |
-| Customer tracking | https://prinscosmetic.eu/track-order/ |
+| Dashboard | https://sillage.codeinmoon.xyz |
+| Shop | https://codeinmoon.xyz |
+| Customer tracking | https://codeinmoon.xyz/track-order/ |
 
 Use the dashboard username and password from the operator password file. Keep them off GitHub
 and out of chat logs. The username is never `admin`.

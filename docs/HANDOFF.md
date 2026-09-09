@@ -22,7 +22,8 @@ Read this checklist and execute it in order. Do not skip an item because a later
    not float `wordpress:latest`. First boot runs `scripts/wp-fresh-install.php` (EUR, Blocksy,
    WooCommerce, HPOS on, Coming soon off, permalinks).
 2. **Docker Hub builds always happen on a VPS that is already `docker login` as
-   `unseencurtain` (today: ovhe).** Copy this **retail** tree to `~/sillage/`, then on **that
+   `unseencurtain` — today the development box, `ovhe`.** Production does not build; it pulls a
+   tag. Copy this **retail** tree to `~/sillage/`, then on **that
    VPS** run `~/sillage/scripts/build-push-images.sh` (default: core + WordPress). Then point
    `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` at the new tags and `docker compose --env-file .env up -d`.
    - Do **not** install Docker in a cloud-agent pod.
@@ -40,12 +41,25 @@ Read this checklist and execute it in order. Do not skip an item because a later
    bootstrapped from sillage-b2b alone — it must not look at this repo.
 4. **Retail MariaDB is `ecom-db` only** (`earth` / `sillage`). Do not put `earth_wpf` / `sillage_wpf`
    on this database. Wholesale’s database lives in the sillage-b2b stack (`wholesale-db`).
-5. **Live ovhe still hosts both shops** (shared Caddy + volumes). Engines are split (retail
-   `sillage-core:ab5ead8`, wholesale `sillage-b2b:082d695`). Retail uses Valkey db 0. Do not share
-   MariaDB. `deploy-vps.sh` will **not** overwrite `/etc/caddy/Caddyfile` when it already serves
-   hostnames this shop does not own (so a retail deploy on ovhe will not drop wholesale.mirainikki.xyz).
-   Pass `--replace-caddy` only on a box that should become this shop alone.
-6. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
+5. **`ovh` is production and `ovhe` is development. This swapped on 2026-09-08 — older text
+   below and in other docs may still say the opposite, and this item wins.** Both boxes run both
+   shops, from `~/sillage/` and `~/sillage-wholesale/`, with the same compose files and the same
+   image tags. They differ only in their `.env`: hostnames, and `SILLAGE_ROLE`. That role is a
+   label the deploy script reads so it will not push the wrong stack over a live shop; the engine
+   ignores it. Both boxes hold the same vendor credentials against APIs with no sandbox, so a Live
+   dispatch is a real order on either one and the Orders page dry-run setting is the only gate.
+   **The role is per stack, not per machine** — `scripts/set-role.sh` relabels one instantly. `ovhe` is disposable and is not held at parity with production; so is `ovh`. Copy a
+   box with `~/pack.sh` on it, and download the result — nothing backs itself up on a timer.
+   Rules: [`ENVIRONMENTS.md`](ENVIRONMENTS.md). Each stack
+   owns one file under `/etc/caddy/sites/`, so the two never fight over a shared Caddyfile.
+6. **Bind mounts only. Never a Docker named volume for WordPress or MariaDB.** Both boxes keep
+   WordPress core and the database files under `<stack>/data/wp/` and `<stack>/data/wp-db/`, so a
+   `tar` of the home folder is a complete, restorable backup. Volumes live under
+   `/var/lib/docker`, where that same `tar` silently omits WordPress, every plugin and theme, and
+   the entire database — a backup that looks fine until you restore it and find no shop inside.
+   That happened here. Convert any volume-era box with `scripts/to-bind-mounts.sh` before packing
+   it, and check `docker volume ls` is empty when you are done.
+7. **GitHub** is [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) for **retail**
    (BeautyFort + BTS) and [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b)
    for **wholesale** (wholesale-perfumes). Do not mix vendor code between the two. Cursor copies
    can have different SHAs; replay onto GitHub `main`, do not merge the remotes. The replay script
@@ -57,10 +71,11 @@ Read this checklist and execute it in order. Do not skip an item because a later
 
 | Item | Location |
 |---|---|
-| **Live VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. App dir `~/sillage/`; data `~/ecom_sites/data/`. |
-| **Test VPS** | SSH `ovh` — `51.79.255.226`, hostname `ovh`. Fresh shops in `~/sillage/` and `~/wholesale-sillage/` (the running box was brought up by hand; `deploy-vps.sh` uses `~/sillage-wholesale`). |
+| **Production VPS** | SSH `ovh` — `ubuntu@51.79.255.226`, hostname `ovh`. Stacks `~/sillage/` and `~/sillage-wholesale/`; each keeps all its data under its own `data/`. |
+| **Development VPS** | SSH `ovhe` — `ubuntu@139.99.61.71`, hostname `ovh-experi`. Same two stack directories, restored from a production pack ([`VPS-MIGRATE.md`](VPS-MIGRATE.md)), `SILLAGE_ROLE=development`, scheduled sync off. Disposable: wiped and rebuilt on demand. |
 | **Wipe and rebuild** | [`REBUILD-FROM-SCRATCH.md`](REBUILD-FROM-SCRATCH.md) — standing hostnames/usernames, ordered commands, and the traps that cost the first rebuild |
-| **Public URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu`. Wholesale (separate repo): `https://wholesale.mirainikki.xyz` / `https://sillage-wholesale.mirainikki.xyz` |
+| **Production URLs** | Shop `https://codeinmoon.xyz` · Dashboard `https://sillage.codeinmoon.xyz` · Images `https://images.codeinmoon.xyz` · Wholesale `https://wholesale.codeinmoon.xyz` / `https://sillage-wholesale.codeinmoon.xyz` |
+| **Development URLs** | Shop `https://prinscosmetic.eu` · Dashboard `https://sillage.prinscosmetic.eu` · Images `https://images.prinscosmetic.eu` · Wholesale `https://wholesale.mirainikki.xyz` / `https://sillage-wholesale.mirainikki.xyz` |
 | **Domain change** | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) · trees: [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | **Single env** | Laptop `production-environment/.env` → VPS `~/sillage/.env` (same shape; gitignored) |
 | **Compose** | `production-environment/compose.yaml` only |

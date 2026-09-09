@@ -1,122 +1,142 @@
-# Migrate or rebuild on a new VPS
+# Back up a box, or move it to another one
 
-Two honest paths. Prefer A if the old host (`ovhe`) still exists. Use B when you only have
-GitHub + secrets + (optional) a Brasty dump.
+One box holds two stacks, `~/sillage/` (retail) and `~/sillage-wholesale/`. Each keeps
+**everything** it needs under its own directory: `compose.yaml`, `.env`, `scripts/`, WordPress in
+`data/wp/`, MariaDB in `data/wp-db/`, photos in `data/media/`. Nothing lives in a Docker named
+volume. So the backup is the obvious thing — tar the home folder — and it actually restores.
 
-Photos are **not** in git. Git has the EAN → URL map and a restore script. The JPEG bytes
-(~380 MB on the live CDN volume) must be copied or rebuilt.
+That is the whole design. If you only read one line: **the stack directory is the stack.**
 
 ---
 
-## What GitHub already has
+## Why not named volumes
 
-| Path | Role |
+WordPress and MariaDB used to sit in named volumes, under `/var/lib/docker`. A `tar` of the home
+folder then quietly excluded WordPress core, every installed plugin and theme, `wp-config.php`,
+the uploads directory, and the entire database. The archive looked plausible — right directories,
+hundreds of megabytes of photos — and you find out what is missing at the worst possible moment,
+restoring onto a machine that never had them. It happened here, on 2026-09-08, after an
+`rm -rf` on production; the shop came back only because a second box still had the data.
+
+Both boxes are now bind-mount only and `docker volume ls` is empty on each. Keep it that way.
+
+---
+
+## Back up
+
+Run on the box:
+
+```bash
+ssh <box>
+./pack.sh                                   # the usual one: no downtime, keeps the newest three
+```
+
+`~/pack.sh` is a two-line wrapper over the real script, sitting where you land. The longer form,
+if you want the other mode:
+
+```bash
+bash ~/sillage/scripts/pack-box.sh          # stops both stacks, packs, starts them again
+bash ~/sillage/scripts/pack-box.sh --live --keep 3
+```
+
+Nothing runs either of them on a schedule. The file is yours to make and yours to download.
+
+You get `~/box-<stamp>.tar.gz` — every stack directory, `/etc/caddy`, and the databases, with
+ownership preserved. Download it. Skipped: `.ssh`, earlier packs, and the vendor feed cache,
+which re-downloads itself.
+
+The default stops the stacks first, because MariaDB data files copied while the server is writing
+to them can restore into a corrupt table. `--live` avoids the downtime and writes consistent SQL
+dumps alongside the files, so a hot pack is still restorable.
+
+## Move it to another box
+
+The target needs Docker, Docker Compose and Caddy, and the two networks
+(`docker network create ecom_network redis_network`). Then:
+
+```bash
+ssh SOURCE 'cat ~/box-<stamp>.tar.gz' | ssh TARGET 'cat > ~/box.tar.gz'
+ssh TARGET 'sudo tar --numeric-owner -C ~ -xzf ~/box.tar.gz'
+```
+
+The unpacked copy is byte-for-byte the source box, which means every hostname in it still names
+the source. `adopt-box.sh` repoints all six places that hold one and restarts the stack:
+
+```bash
+cd ~/sillage && bash scripts/adopt-box.sh \
+  --shop prinscosmetic.eu --dash sillage.prinscosmetic.eu --images images.prinscosmetic.eu \
+  --role development
+
+cd ~/sillage-wholesale && bash scripts/adopt-box.sh \
+  --shop wholesale.mirainikki.xyz --dash sillage-wholesale.mirainikki.xyz --role development
+```
+
+| Where a hostname hides | What is wrong if you miss it |
 |---|---|
-| `production-environment/sillage-core/data/image_overrides.json` | Canonical EAN → image URL (~11k keys) |
-| `production-environment/sillage-core/data/found-images-manifest.json` | Filenames that must exist on the CDN volume |
-| `python-analysis/beautyfort-enriched/restore_found_images.py` | Copy/download those files onto `ecom_sites/data/media/` |
-| `python-analysis/beautyfort-enriched/fill_missing_shop_images.py` | Re-match from Brasty + CSVs if the map is lost |
-| `python-analysis/beautyfort-enriched/brasty_placeholders.py` | Skip Brasty camera “no photo” graphics |
+| `.env` | The engine and the deploy scripts disagree with the shop |
+| `/etc/caddy/sites/<stack>.caddy` | Box does not answer, or has no certificate |
+| `wp_options.siteurl` / `.home` | Every link WordPress prints goes to the other box |
+| `sil_settings.wp_base_url` | Dashboard links and finalize calls miss |
+| `sil_settings.image_cdn_base_url` | Bare filenames in the overrides resolve nowhere |
+| `wp_postmeta._external_thumbnail_url` | Pages render with every photo broken |
 
-Hotlinked URLs (Shopify CDN, `images.btswholesaler.com`, oceanfragrances) do **not** need
-to sit on disk. Only `https://images.prinscosmetic.eu/<file>` (or your new CDN host) does.
+**`--role` is required and has no default,** but it is only a label: it tells a later
+`deploy-vps.sh` which stack this is so it will not push the other role over it. A restored copy
+carries production's vendor credentials against APIs with no sandbox, so it can place a real order
+whatever you label it — the Orders page dry-run setting is the gate, on every stack.
+[`ENVIRONMENTS.md`](ENVIRONMENTS.md) has the rules; `set-role.sh` relabels without re-adopting.
+
+Wholesale takes no `--images`: it hotlinks catalog `flask_front` URLs and hosts no photos.
+
+## Converting a box that still uses volumes
+
+Once per stack, before packing it:
+
+```bash
+cd ~/sillage && bash scripts/to-bind-mounts.sh
+```
+
+It stops the stack, copies both volumes into `data/wp/` and `data/wp-db/`, rewrites the two
+`.env` paths and starts back up. Idempotent, and it deletes nothing — the old volumes stay until
+you remove them yourself, so rolling back is putting the two `.env` lines back.
 
 ---
 
-## A — Clone the live shop (fastest)
+## Rebuild without a source box
 
-From a laptop that can SSH to **old** and **new**:
+Only if every box is gone. Git has the EAN → image map, not the JPEG bytes.
 
-```bash
-# 1. Fresh host: docs/VPS-DEPLOY.md steps 0–1 (Docker, Caddy, networks)
-# 2. Copy secrets (never commit)
-scp ovhe:~/sillage/.env ubuntu@NEW:~/sillage/.env
-scp ovhe:~/sillage/sillage-core/data/secrets.overlay.env \
-    ubuntu@NEW:~/sillage/sillage-core/data/secrets.overlay.env
-
-# 3. Databases + WordPress + CDN files
-ssh ovhe 'docker exec ecom-db mariadb-dump -uroot -p"$MYSQL_ROOT_PWD" --all-databases --single-transaction' \
-  > /tmp/sillage-db.sql   # or use the root password from old .env inside the dump command on the host
-rsync -aH --info=progress2 ovhe:~/ecom_sites/data/ ubuntu@NEW:~/ecom_sites/data/
-rsync -a ovhe:~/sillage/sillage-core/data/image_overrides.json \
-  ubuntu@NEW:~/sillage/sillage-core/data/image_overrides.json
-
-# 4. Point DNS (shop / dash / images) at NEW, or test via /etc/hosts
-# 5. Compose up on NEW with the same image tags, then: docker exec sillage-core bun run migrate
-```
-
-Dump MariaDB **on the old host** so the password never hits the laptop command line:
+1. [`VPS-DEPLOY.md`](VPS-DEPLOY.md) until WordPress and the dashboard answer.
+2. Vendor keys into `~/sillage/.env` or dashboard **Secrets**.
+3. Copy `sillage-core/data/image_overrides.json` from the clone onto the box. Values are bare
+   filenames, resolved against `image_cdn_base_url` — so photos follow the box they are on.
+4. Restore the JPEGs into `~/sillage/data/media/`:
 
 ```bash
-ssh ovhe 'PW=$(grep ^MYSQL_ROOT_PWD= ~/sillage/.env | cut -d= -f2-)
-docker exec -e MYSQL_PWD="$PW" ecom-db mariadb-dump -uroot --all-databases --single-transaction --routines' \
-  | ssh ubuntu@NEW 'cat > /tmp/sillage-db.sql'
-```
-
-Import on the new host into `ecom-db` after compose has created the empty volume.
-
-Optional: the old `~/brasty/` dump is gone on ovhe (2026-09-03). Shop photos restore from
-`data/media/` + `image_overrides.json` only.
-
----
-
-## B — GitHub + restore photos (no old VPS)
-
-1. Follow [`VPS-DEPLOY.md`](VPS-DEPLOY.md) until WordPress + dashboard are up.
-2. Put vendor keys in `~/sillage/.env` or dashboard **Secrets**.
-3. Copy `image_overrides.json` from the clone onto
-   `~/sillage/sillage-core/data/image_overrides.json`.
-4. Restore CDN files into `~/ecom_sites/data/media/`:
-
-```bash
-# On the new VPS, from a clone of this repo
 python3 production-environment/python-analysis/beautyfort-enriched/restore_found_images.py \
   --overrides production-environment/sillage-core/data/image_overrides.json \
-  --dest ~/ecom_sites/data/media \
-  --brasty-root /home/ubuntu/brasty \    # if you copied the dump
-  --from-cdn                             # pulls remaining files from images.prinscosmetic.eu
+  --dest ~/sillage/data/media \
+  --from-cdn        # only works while some box still serves the old images host
 ```
 
-`--from-cdn` only works while the **old** CDN still answers. If that host is gone, you need
-either a media rsync (path A) or a Brasty dump + matcher rerun.
-
-5. Recreate `sillage-core` / `sillage-cron` so overrides reload.
-6. Run a live **Rebuild catalogue** (or `--source=local` only if you have `.feedscratch`).
-7. Then content rewrite so Woo picks up override URLs:
+5. Recreate `sillage-core` so the overrides reload, run a live **Rebuild catalogue**, then
+   rewrite content so Woo picks the URLs up:
 
 ```bash
 docker exec sillage-core bun run sync -- --mode=full --source=cache --rewrite-only
 ```
 
-### Re-run matching from Brasty (no old CDN)
-
-If you have the dump + ocean/Shopify CSVs but a stale or empty override file:
-
-```bash
-# Export shop rows (sku, primary_ean, eans, image_url) then:
-python3 fill_missing_shop_images.py \
-  --products-json /tmp/shop_products.json \
-  --overrides ../../sillage-core/data/image_overrides.json \
-  --ocean /path/oceanfragrances.csv \
-  --shopify /path/products_export_1.csv \
-  --brasty-root /home/ubuntu/brasty \
-  --brasty-eans /tmp/brasty_eans.txt \
-  --out-delta /tmp/image_overrides.delta.json \
-  --out-merged ../../sillage-core/data/image_overrides.json \
-  --brasty-copy-list /tmp/brasty_copy.tsv
-```
-
-Copy listed files into `data/media/`. Skip placeholder MD5s. Commit the merged JSON back to
-GitHub so the next agent does not start from zero.
+If the map itself is lost, `fill_missing_shop_images.py` re-matches from a Brasty dump and the
+ocean/Shopify CSVs; `brasty_placeholders.py` skips the "no photo" camera graphic. Commit the
+merged JSON so the next agent does not start from zero.
 
 ---
 
-## After migrate checklist
+## After a move, check
 
-- [ ] Shop, dashboard, images DNS + TLS
-- [ ] `hide_products_without_image=1`, `orders_dry_run=1`, `full_sync_enabled=1`
-- [ ] Dashboard login works; Sync runs table shows recent success
-- [ ] Spot-check a Brasty-filled EAN: `https://images.<domain>/<ean>.jpg` is a product photo,
-      not a 404 and not the Brasty camera graphic
-- [ ] Bind-mount overrides: `docker exec sillage-core ls /app/data/image_overrides.json`
-- [ ] Do **not** place a live vendor order to “test”
+- [ ] All five hostnames answer over HTTPS, shop and dashboard both
+- [ ] A product page shows a photo, and `https://images.<domain>/<ean>.jpg` is a real one
+- [ ] Dashboard login works and the Sync page shows the restored history
+- [ ] `docker volume ls` is empty
+- [ ] Every stack declares its role: `grep SILLAGE_ROLE ~/*/.env`
+- [ ] Do **not** place a live vendor order to "test"

@@ -52,10 +52,24 @@ cd production-environment && docker compose --env-file .env up -d
 Compose: `production-environment/compose.yaml`. Env template: `production-environment/.env.example`.
 Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
-**Live VPS:** SSH `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`) — shop
-`prinscosmetic.eu`, dashboard `sillage.prinscosmetic.eu`, images `images.prinscosmetic.eu`.
-App dir `~/sillage/`; data at `~/ecom_sites/data/`. Use `mariadb.vps.cnf` (1G buffer pool) —
-WordPress, Valkey, Bun and MariaDB share ~4 GB RAM. SSH `ovh` (`51.79.255.226`) is empty/unused.
+**Production VPS:** SSH `ovh` (`ubuntu@51.79.255.226`) — shop `codeinmoon.xyz`, dashboard
+`sillage.codeinmoon.xyz`, images `images.codeinmoon.xyz`, plus wholesale on
+`wholesale.codeinmoon.xyz` / `sillage-wholesale.codeinmoon.xyz`.
+
+**Development VPS:** SSH `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`) — the same two
+stacks restored from a production pack, on `prinscosmetic.eu` / `sillage.prinscosmetic.eu` /
+`images.prinscosmetic.eu` and `wholesale.mirainikki.xyz` / `sillage-wholesale.mirainikki.xyz`,
+and `SILLAGE_ROLE=development`, which is a deploy-time label only: the engine behaves identically
+on either role, hits the same live vendor APIs on the same credentials, and lets the Orders page
+decide dry-run versus Live. The role is declared per stack in its own `.env`, never inferred from
+the hostname ([`ENVIRONMENTS.md`](ENVIRONMENTS.md)). These roles swapped on 2026-09-08;
+`ovhe` used to be the live shop, and older text may still say so.
+
+On both boxes each stack lives in its own directory (`~/sillage/`, `~/sillage-wholesale/`) and
+keeps **all** of its state under that directory's `data/` — WordPress in `data/wp/`, MariaDB in
+`data/wp-db/`, photos in `data/media/`. There are no Docker named volumes; see
+[`VPS-MIGRATE.md`](VPS-MIGRATE.md) for why, and for how to pack and clone a box. Use
+`mariadb.vps.cnf` (1G buffer pool) — WordPress, Valkey, Bun and MariaDB share ~4 GB RAM.
 Resume context: [`HANDOFF.md`](HANDOFF.md).
 
 One image, one role per container. `sillage-core` runs supercronic; the dashboard service overrides

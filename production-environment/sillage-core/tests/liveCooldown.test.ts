@@ -43,10 +43,14 @@ describe("retail live cooldown — no silent cache", () => {
     expect(btsSrc).not.toContain("live gated — cached");
   });
 
-  test("scheduler skips live ticks only when the storefront is cooling", () => {
+  test("a live tick waits for every vendor, never starts on the first one ready", () => {
     expect(scheduleSrc).toContain("getStorefrontLiveCooldown");
     expect(scheduleSrc).toContain("storefront cooling");
-    expect(scheduleSrc).toContain("anyAllow");
+    expect(scheduleSrc).toContain("!cooldown.allow");
+    // Starting a run on "any vendor is ready" resets that vendor's clock alone, which is how the
+    // two wholesalers drifted half an hour apart and began alternating every run.
+    expect(scheduleSrc).not.toContain("anyAllow");
+    expect(apiSrc).not.toContain("anyAllow");
   });
 
   test("Vendors UI does not expose the retired daily download cap", () => {

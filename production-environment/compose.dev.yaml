@@ -11,7 +11,10 @@
 #   * save a .ts file        → bun --hot restarts the API in about a second
 #   * save a .tsx file       → vite pushes the change into the open browser tab
 #   * save the bridge .php   → refresh the shop, it is already live
-#   * press Live on Orders   → refused, because SILLAGE_DEV_BOX makes dry-run non-negotiable
+#
+# What it does not change is behaviour. The engine here talks to the same two wholesalers on the
+# same credentials as the shop, and the Orders page Dry-run / Live choice means exactly what it
+# means in production — neither vendor API has a sandbox to hide behind.
 #
 # What it deliberately does not do: run the sync scheduler. A dev box quietly pulling 51,000
 # products every hour burns vendor API budget nobody is watching. Add `--profile cron` when you
@@ -22,8 +25,6 @@ x-dev-engine: &dev-engine
   environment:
     NODE_ENV: development
     LOG_LEVEL: debug
-    # Not a setting — a property of the machine. See src/storefront/profile.ts.
-    SILLAGE_DEV_BOX: "1"
   volumes:
     # Source only. node_modules, web/dist and the data mounts stay as the image and the base
     # compose file left them.

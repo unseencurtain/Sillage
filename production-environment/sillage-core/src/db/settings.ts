@@ -176,7 +176,12 @@ export async function loadSettings(): Promise<GlobalSettings> {
       )
         .trim()
         .replace(/\/$/, "");
-      return fromEnv || "https://images.prinscosmetic.eu";
+      // No hostname default. A wrong image host is invisible: every override resolves, every URL
+      // looks valid, and the shop serves broken pictures from a box it should not know about. That
+      // exact fallback once pointed a migrated shop's photos back at the old VPS. Empty is the
+      // honest answer — self-hosted overrides then stay relative, `isUnusableImage` rejects them,
+      // and the products land in the Overview's "no photo" count where someone will see them.
+      return fromEnv;
     })(),
     wpBaseUrl: (() => {
       const fromDb = (map.get("wp_base_url") ?? "").trim().replace(/\/$/, "");

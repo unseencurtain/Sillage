@@ -80,3 +80,4 @@ production-environment/sillage-core/data/secrets.overlay.wpf.env
 # Scratch DB left behind by the standalone BTS reference client
 /data/
 
+.recovery/

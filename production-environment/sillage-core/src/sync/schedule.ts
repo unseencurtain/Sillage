@@ -172,10 +172,16 @@ export async function runScheduledSync(override?: "full" | "fast"): Promise<Sync
 
   if (settings.syncSource === "live") {
     const cooldown = await getStorefrontLiveCooldown();
-    // Retail: per-vendor gates still skip BeautyFort or BTS inside the run. Do not abort
-    // the whole tick when only one wholesaler is still inside its call interval.
-    // Wholesale: store-feed gate (hourly XML).
-    if (!cooldown.anyAllow) {
+    // Wait for every vendor, not the first one to come off cooldown.
+    //
+    // Starting on "any vendor is ready" looks more productive and is what made the shop's two
+    // wholesalers leapfrog forever: a run fetched whichever one was eligible, reset only that
+    // vendor's clock, and left the other's untouched. With a 60 minute call interval and a 30
+    // minute tick they settled half an hour apart and every run thereafter reported one of them
+    // skipped — each refreshed hourly, but never together, so no single run ever saw the whole
+    // catalogue. Requiring all of them costs at most one tick of freshness and re-converges the
+    // clocks on the first joint run.
+    if (!cooldown.allow) {
       log.info(
         `tick: skip live ${decision.action} — storefront cooling ${cooldown.retryInMinutes}m (${cooldown.reason})`,
       );

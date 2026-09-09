@@ -2,25 +2,29 @@
 # Deploy / update Sillage on a Ubuntu VPS from one compose + one .env.
 #
 # Usage (from repo root):
-#   ./production-environment/scripts/deploy-vps.sh --host ovhe
-#   # Domains optional — defaults from production-environment/.env, else live-shop defaults:
-#   #   shop=prinscosmetic.eu dash=sillage.prinscosmetic.eu images=images.prinscosmetic.eu
+#   ./production-environment/scripts/deploy-vps.sh --host ovh --role production \
+#       --shop … --dash … --images …
 #   ./production-environment/scripts/deploy-vps.sh \
-#       --host ovhe \
+#       --host ovh --role production \
 #       [--shop …] [--dash …] [--images …] \
 #       [--dash-user europa] [--wp-user cherry] \
-#       [--media-from ovhe] [--skip-dns-check] \
+#       [--media-from ovh] [--skip-dns-check] \
 #       --finish   # after the operator has activated plugins and customised
-#       [--dns] [--ip 139.99.61.71] \
+#       [--dns] [--ip 51.79.255.226] \
 #       [--skip-build] [--fresh] [--core-only]
 #
-# Development box:
-#   ./production-environment/scripts/deploy-vps.sh --host ovhe --dev
-#   Deploys to ~/sillage-dev with compose.dev.yaml layered on: the engine and dashboard
-#   bind-mount this checkout and hot-reload, the bridge plugin is editable in place, the sync
-#   scheduler is off unless asked for, and SILLAGE_DEV_BOX makes a Live vendor order impossible.
-#   Its own directory, volumes and Caddy site file, so it never touches a production stack.
-#   See docs/DEV-ENVIRONMENT.md.
+# --role is required and has no default. It says what the stack is for, not which machine it is
+# on: `development` makes the engine refuse a live vendor order and print a banner, `production`
+# lets the Orders page decide. Domains have no default either. Both used to be inferred, and both
+# inferences eventually pointed a deploy at the wrong shop. Deploying a role a box does not
+# already hold is refused unless you pass --switch-role; to change only the role, run
+# scripts/set-role.sh on the box.
+#
+#   [--overlay]  layer compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite dashboard,
+#                bridge plugin editable in place. A way of working, refused on production. Without
+#                it a development stack runs exactly what production runs.
+#
+# Rules for which box is what: docs/ENVIRONMENTS.md.
 #
 # Flow (empty Ubuntu VPS — this is the default path):
 #   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
@@ -59,6 +63,9 @@ WP_ADMIN_USER=""
 SKIP_DNS_CHECK=0
 MEDIA_FROM=""
 FINISH=0
+ROLE=""
+SWITCH_ROLE=0
+OVERLAY=0
 DEV=0
 
 usage() {
@@ -90,7 +97,10 @@ while [[ $# -gt 0 ]]; do
     --dns) DO_DNS=1; shift ;;
     --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
     --finish) FINISH=1; shift ;;
-    --dev) DEV=1; shift ;;
+    --role) ROLE="${2:?}"; shift 2 ;;
+    --dev) ROLE="development"; shift ;;   # legacy spelling
+    --switch-role) SWITCH_ROLE=1; shift ;;
+    --overlay) OVERLAY=1; shift ;;
     --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -112,6 +122,24 @@ done
 
 : "${HOST:?SSH host required}"
 
+# Say what you are deploying. There is no default and no inference from the hostname: which box
+# holds which role changes every time one is rebuilt, and a deploy that guesses is a deploy that
+# eventually turns a scratch copy into something that can spend money.
+case "$ROLE" in
+  production|development) ;;
+  "") echo "need --role production or --role development" >&2; exit 1 ;;
+  *) echo "--role must be production or development, not \"$ROLE\"" >&2; exit 1 ;;
+esac
+[[ "$ROLE" == "development" ]] && DEV=1 || DEV=0
+
+# --overlay layers compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite instead of the
+# prebuilt bundle. It is a way of working, not a role. A development stack without it is byte-for-
+# byte what production runs, which is the only way it can tell you anything about production.
+if [[ "$OVERLAY" -eq 1 && "$ROLE" == "production" ]]; then
+  echo "--overlay runs code straight off the box instead of a published image; not on production." >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PE="$ROOT/production-environment"
 # Prefer unified .env; fall back to legacy sillage-core/.env for vendor keys.
@@ -129,16 +157,37 @@ SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
 SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
 RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
 
-# The dev stack is a second, independent stack: its own directory, its own volumes, its own
-# Caddy site file. Same box could host both, and nothing it does may reach production's data.
-if [[ "$DEV" -eq 1 ]]; then
-  REMOTE_DIR=sillage-dev
-  COMPOSE_FILES=(-f compose.yaml -f compose.dev.yaml)
-else
-  REMOTE_DIR=sillage
-  COMPOSE_FILES=(-f compose.yaml)
-fi
+# Dev uses production's directory names on purpose: the dev box is a mirror of the shop box, so
+# ~/sillage and ~/sillage-wholesale mean the same thing on both and every path in the runbook reads
+# the same wherever you are. What makes it a dev box is the compose overlay, not a suffix.
+#
+# The price of identical names is that deploying the wrong role at a box would adopt the stack that
+# is already there, so a role change is refused below rather than left to care.
+COMPOSE_FILES=(-f compose.yaml)
+[[ "$OVERLAY" -eq 1 ]] && COMPOSE_FILES+=(-f compose.dev.yaml)
+REMOTE_DIR=sillage
 COMPOSE_ARGS="${COMPOSE_FILES[*]}"
+
+# Every role uses the same directory names, so the box has to say what it is already running. Ask
+# the box; never infer a role from the hostname on the command line, because which machine holds
+# which role changes whenever one gets rebuilt.
+EXISTING_ROLE=$("${SSH[@]}" "$HOST" \
+  'for d in ~/sillage ~/sillage-wholesale; do
+     if [ -f "$d/.env" ]; then
+       r=$(grep -E "^SILLAGE_ROLE=" "$d/.env" | tail -1 | cut -d= -f2-)
+       [ -z "$r" ] && r=production
+       echo "$r"; exit
+     fi
+   done
+   echo empty' 2>/dev/null || echo unknown)
+if [[ "$SWITCH_ROLE" -eq 0 && "$EXISTING_ROLE" != "empty" && "$EXISTING_ROLE" != "unknown" \
+      && "$EXISTING_ROLE" != "$ROLE" ]]; then
+  echo "${HOST} already runs a ${EXISTING_ROLE} stack; you asked to deploy ${ROLE}." >&2
+  echo "Deploying over it would change what that box is for. If that is the intent, pass" >&2
+  echo "--switch-role. To change only the role of what is already there, run" >&2
+  echo "scripts/set-role.sh on the box instead — it does not touch the shop." >&2
+  exit 1
+fi
 
 # Fail on the tool, not on a bare "command not found" 200 lines in.
 for _tool in ssh rsync; do
@@ -159,15 +208,11 @@ START_EPOCH=$(date +%s)
 # quietly pointed a production deploy at the wrong hostname — the kind of default that is correct
 # right up until it silently is not. A production deploy now has to be told, or read it from an
 # .env, or stop.
-if [[ "$DEV" -eq 1 ]]; then
-  DEFAULT_SHOP_DOMAIN=prinscosmetic.eu
-  DEFAULT_DASH_DOMAIN=sillage.prinscosmetic.eu
-  DEFAULT_IMAGES_DOMAIN=images.prinscosmetic.eu
-else
-  DEFAULT_SHOP_DOMAIN=""
-  DEFAULT_DASH_DOMAIN=""
-  DEFAULT_IMAGES_DOMAIN=""
-fi
+# Neither role gets one. Development used to default to three hostnames, which tied a role to a
+# machine and made "the dev box" mean one specific VPS instead of one specific .env.
+DEFAULT_SHOP_DOMAIN=""
+DEFAULT_DASH_DOMAIN=""
+DEFAULT_IMAGES_DOMAIN=""
 
 log_step() {
   local msg="$1" now elapsed
@@ -207,6 +252,9 @@ if [[ -n "$REMOTE_DOMAINS" ]]; then
   IFS=$'\t' read -r _R_SHOP _R_DASH _R_IMAGES <<<"$REMOTE_DOMAINS"
 fi
 
+# What the stack already answers on outranks the checkout's .env, which is whichever config the
+# operator happens to have locally. Neither role has a built-in fallback: a development deploy that
+# knows three hostnames by heart is a development deploy tied to one machine.
 pick_domain() {
   local cli="$1" remote="$2" localv="$3" fallback="$4"
   if [[ -n "$cli" ]]; then echo "$cli"; return; fi
@@ -387,7 +435,12 @@ fi
 # operator start the first import, so pressing Rebuild catalogue did nothing — with the repo, the
 # docs and the retrospective all insisting it was fixed. Compare the source in the image against
 # the checkout being deployed.
-if [[ "$SKIP_BUILD" -eq 1 ]]; then
+if [[ "$SKIP_BUILD" -eq 1 && "$OVERLAY" -eq 1 ]]; then
+  # The overlay bind-mounts this checkout over /app/src and runs `bun --hot`, so the source baked
+  # into the image is never executed. Comparing it would block the deploy on a Hub push that
+  # cannot change what the box runs.
+  log_step "Dev stack runs the bind-mounted checkout; engine image source not compared"
+elif [[ "$SKIP_BUILD" -eq 1 ]]; then
   # LC_ALL applies to sort, not just find: the container sorts in C and a glibc host sorts
   # case-insensitively, which reorders VendorConnector.ts and changes the hash of identical trees.
   src_hash() { find . -type f -name '*.ts' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64; }
@@ -417,22 +470,24 @@ fi
 
 "${RSYNC[@]}" "$PE/compose.yaml" "$HOST:~/${REMOTE_DIR}/compose.yaml"
 "${RSYNC[@]}" "$PE/.env.example" "$HOST:~/${REMOTE_DIR}/.env.example"
-if [[ "$DEV" -eq 1 ]]; then
-  "${RSYNC[@]}" "$PE/compose.dev.yaml" "$HOST:~/${REMOTE_DIR}/compose.dev.yaml"
-  # Production runs the code baked into the image. Dev bind-mounts it, so the source has to
-  # actually be on the box — that is the whole point of the box.
-  "${RSYNC[@]}" --delete \
-    --exclude 'node_modules' --exclude 'logs' --exclude 'web/dist' --exclude '.env' \
-    --exclude 'data/secrets.overlay.env' \
-    "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
-  # The Hub images are built on a docker-login'd host, and this is it. Shipping the WordPress
-  # Dockerfile too means one checkout serves both jobs instead of a second copy drifting.
-  "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
-  "${RSYNC[@]}" "$PE/scripts/dev.sh" "$HOST:~/${REMOTE_DIR}/scripts/dev.sh"
-fi
+# Every box gets the engine source and the WordPress Dockerfile, whatever its role. Images are
+# built from a checkout sitting on a box that is `docker login`ed, and any box may end up being
+# that box — a boot-strapping step that only works on one machine is how "it runs over there"
+# starts. The overlay additionally runs this source instead of the image.
+"${RSYNC[@]}" "$PE/compose.dev.yaml" "$HOST:~/${REMOTE_DIR}/compose.dev.yaml"
+"${RSYNC[@]}" --delete \
+  --exclude 'node_modules' --exclude 'logs' --exclude 'web/dist' --exclude '.env' \
+  --exclude 'data/secrets.overlay.env' \
+  "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
+"${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
+"${RSYNC[@]}" "$PE/scripts/dev.sh" "$HOST:~/${REMOTE_DIR}/scripts/dev.sh"
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/config/" "$HOST:~/${REMOTE_DIR}/ecom_sites/config/"
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
+"${RSYNC[@]}" "$PE/scripts/set-role.sh" "$HOST:~/${REMOTE_DIR}/scripts/set-role.sh"
+"${RSYNC[@]}" "$PE/scripts/pack-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/pack-box.sh"
+"${RSYNC[@]}" "$PE/scripts/adopt-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/adopt-box.sh"
+"${RSYNC[@]}" "$PE/scripts/to-bind-mounts.sh" "$HOST:~/${REMOTE_DIR}/scripts/to-bind-mounts.sh"
 "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
 "${RSYNC[@]}" "$PE/scripts/fix-wp-content-perms.sh" "$HOST:~/${REMOTE_DIR}/scripts/fix-wp-content-perms.sh"
 "${RSYNC[@]}" "$PE/scripts/wp-fresh-install.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-fresh-install.php"
@@ -520,24 +575,22 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
     eval "$("${SSH[@]}" "$HOST" 'set -a; source ~/sillage-core/.env; set +a; printf "DBPASS=%q\nSECRET=%q\nSESSION=%q\nPASS=%q\n" "$SILLAGE_DB_PASSWORD" "$SILLAGE_SHARED_SECRET" "$SESSION_SECRET" "$DASHBOARD_PASSWORD"')"
   fi
 
-  LPS_URL="https://${IMAGES_DOMAIN:-images.${SHOP_DOMAIN#*.}}"
-  if [[ -z "$IMAGES_DOMAIN" ]]; then
-    LPS_URL="${LPS_MEDIA_BASE_URL:-https://images.prinscosmetic.eu}"
-  else
+  # The public origin for this shop's own JPEGs. Told, or blank — never guessed.
+  #
+  # This used to fall back to a hostname, and a hostname is the one wrong answer that cannot be
+  # spotted: the overrides all resolve, the URLs all look right, and the shop serves its photos from
+  # whichever box that name still points at. Blank instead leaves self-hosted images unusable, which
+  # surfaces as products in the Overview's "no photo" count — wrong, but wrong out loud.
+  if [[ -n "$IMAGES_DOMAIN" ]]; then
     LPS_URL="https://${IMAGES_DOMAIN}"
+  else
+    LPS_URL="${LPS_MEDIA_BASE_URL:-}"
   fi
 
-  # Dev-only keys. The volume names matter even though dev has its own box today: a stack that
-  # reuses production's volume name is one `docker compose up` away from adopting its database.
-  DEV_ENV_BLOCK=""
-  if [[ "$DEV" -eq 1 ]]; then
-    DEV_ENV_BLOCK="WEB_BIND=127.0.0.1
-WEB_PORT=5174
-SILLAGE_DEV_BOX=1
-WP_VOLUME=sillage_dev_wp_html
-WP_DB_VOLUME=sillage_dev_wp_db
+  # What this stack is for. A label for the people and scripts that deploy here — the engine reads
+  # nothing from it, because a development stack is meant to behave exactly like the shop.
+  DEV_ENV_BLOCK="SILLAGE_ROLE=${ROLE}
 "
-  fi
 
   "${SSH[@]}" "$HOST" "cat > ~/${REMOTE_DIR}/.env" <<EOF
 # Generated by deploy-vps.sh — do not commit
@@ -629,7 +682,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' DEV='$DEV' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' DEV='$DEV' ROLE='$ROLE' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 # This stack's .env. Hardcoding "sillage" here made every update write production's file.
 p = pathlib.Path.home() / os.environ["STACK"] / ".env"
@@ -663,15 +716,8 @@ pairs = [
 ]
 if os.environ.get("WITH_WORDPRESS") == "1":
     pairs.insert(1, ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]))
-# Repair an existing dev box rather than requiring a from-scratch redeploy to gain these.
-if os.environ.get("DEV") == "1":
-    pairs += [
-        ("WEB_BIND", "127.0.0.1"),
-        ("WEB_PORT", "5174"),
-        ("SILLAGE_DEV_BOX", "1"),
-        ("WP_VOLUME", "sillage_dev_wp_html"),
-        ("WP_DB_VOLUME", "sillage_dev_wp_db"),
-    ]
+# Refresh the role on an existing stack rather than requiring a from-scratch redeploy.
+pairs += [("SILLAGE_ROLE", os.environ.get("ROLE", "development"))]
 for k, v in pairs:
     if v is not None and v != "":
         text = set_key(text, k, v)
@@ -701,7 +747,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' DEV='$DEV' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' DEV='$DEV' OVERLAY='$OVERLAY' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -757,10 +803,11 @@ fi
 # One file per stack, named after the stack directory, so retail / wholesale / dev on one box
 # never overwrite each other's site config.
 CADDY_SITE="/etc/caddy/sites/${STACK:-retail}.caddy"
-# In dev the dashboard is Vite with hot reload, not the API serving a prebuilt bundle. Websockets
+# Under the overlay the dashboard is Vite with hot reload, not the API serving a prebuilt bundle.
+# Websockets
 # need no special handling — Caddy upgrades them through reverse_proxy on its own.
 DASH_UPSTREAM_PORT="${SILLAGE_PORT:-4000}"
-if [[ "${DEV:-0}" == "1" ]]; then
+if [[ "${OVERLAY:-0}" == "1" ]]; then
   DASH_UPSTREAM_PORT="${WEB_PORT:-5174}"
 fi
 sudo tee "$CADDY_SITE" >/dev/null <<EOF
@@ -876,7 +923,12 @@ for i in $(seq 1 90); do
 done
 
 # The bridge plugin ships on every deploy, into the volume rather than a host wp-content.
-if [[ -d "$APP_DIR/wp-staging/sillage-bridge" ]]; then
+if [[ "${OVERLAY:-0}" == "1" ]]; then
+  # The overlay bind-mounts the checkout's plugin over that path so it can be edited in place, and
+  # a bind mount cannot be replaced from inside the container — the rm fails with "device or
+  # resource busy". Copying would also be backwards: there the host directory is the original.
+  echo "sillage-bridge is bind-mounted from the checkout; not copying"
+elif [[ -d "$APP_DIR/wp-staging/sillage-bridge" ]]; then
   docker exec ecom rm -rf /var/www/html/wp-content/plugins/sillage-bridge
   docker cp "$APP_DIR/wp-staging/sillage-bridge" ecom:/var/www/html/wp-content/plugins/
   wp_chown

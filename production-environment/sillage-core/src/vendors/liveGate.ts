@@ -1,7 +1,9 @@
 /**
  * Interval gates on live vendor API usage (call-based, not a daily download cap).
  *
- * Each vendor is gated independently by `live_feed_min_minutes` since its last live fetch.
+ * Each vendor is gated by `live_feed_min_minutes` since its own last live fetch, but a sync run
+ * takes every vendor or none: see getRetailLiveCooldown, and the comment in sync/schedule.ts for
+ * what partial runs did to the two clocks.
  * Daily download counters are recorded for diagnostics but never block a call.
  */
 import { sil } from "../config/env.ts";
@@ -120,10 +122,9 @@ async function liveFetchesUsedToday(vendor: CacheVendor): Promise<number> {
   return n ?? 0;
 }
 
-/** Combined BF+BTS cooldown for dashboard buttons and POST /sync/run. */
+/** Combined BF+BTS cooldown for the scheduler, the dashboard buttons and POST /sync/run. */
 export async function getRetailLiveCooldown(): Promise<{
   allow: boolean;
-  anyAllow: boolean;
   retryInMinutes: number;
   reason: string;
   cooldownMinutes: number;
@@ -141,24 +142,17 @@ export async function getRetailLiveCooldown(): Promise<{
     liveFetchesUsedToday("beautyfort"),
     liveFetchesUsedToday("bts"),
   ]);
+  // The wait is the longest vendor's, because a run takes every vendor or none.
   const retryInMinutes = Math.max(bfGate.retryInMinutes, btsGate.retryInMinutes);
-  /** Both vendors may be called now (manual one-off). */
   const allow = bfGate.allow && btsGate.allow;
-  /** At least one vendor may be called (scheduler should still start). */
-  const anyAllow = bfGate.allow || btsGate.allow;
   const blockers = [bfGate, btsGate].filter((g) => !g.allow).map((g) => g.reason);
-  const reason = allow
-    ? "live allowed for BeautyFort and BTS"
-    : anyAllow
-      ? `partial: ${blockers.join("; ")}`
-      : blockers.join("; ");
+  const reason = allow ? "live allowed for BeautyFort and BTS" : blockers.join("; ");
   const nextAllowedAt =
     allow || retryInMinutes <= 0
       ? null
       : new Date(Date.now() + retryInMinutes * 60_000).toISOString();
   return {
     allow,
-    anyAllow,
     retryInMinutes: allow ? 0 : retryInMinutes,
     reason,
     cooldownMinutes,

@@ -90,6 +90,10 @@ cp production-environment/.env.example production-environment/.env   # fill vend
   --host ovhe --shop … --dash … --images … --skip-build   # or omit --skip-build to push
 ```
 
-Full recipe: `docs/VPS-DEPLOY.md`. Live shop: SSH `ovhe` (`139.99.61.71`). SSH `ovh`
-(`51.79.255.226`) is empty/unused. Split `ecom_sites/.env` / `sillage-core/.env` are
-local-dev / migration leftovers only.
+Full recipe: `docs/VPS-DEPLOY.md`. **Which box is what, and the rules that keep it that way:
+[`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) — read it before deploying.** Short version:
+production is SSH `ovh` (`51.79.255.226`), the disposable test box is SSH `ovhe`
+(`139.99.61.71`), and every stack declares `SILLAGE_ROLE` in its own `.env` rather than anyone
+inferring a role from a hostname. Bind mounts only, no Docker named volumes; pack and move a box
+with `docs/VPS-MIGRATE.md`. Split `ecom_sites/.env` / `sillage-core/.env` are local-dev /
+migration leftovers only.
