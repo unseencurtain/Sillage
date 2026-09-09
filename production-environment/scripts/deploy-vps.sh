@@ -437,11 +437,10 @@ fi
   --exclude 'data/secrets.overlay.env' \
   "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
 "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
-"${RSYNC[@]}" "$PE/scripts/dev.sh" "$HOST:~/${REMOTE_DIR}/scripts/dev.sh"
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/config/" "$HOST:~/${REMOTE_DIR}/ecom_sites/config/"
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
-"${RSYNC[@]}" "$PE/scripts/set-role.sh" "$HOST:~/${REMOTE_DIR}/scripts/set-role.sh"
+"${RSYNC[@]}" "$PE/scripts/ship.sh" "$HOST:~/${REMOTE_DIR}/scripts/ship.sh"
 "${RSYNC[@]}" "$PE/scripts/pack-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/pack-box.sh"
 "${RSYNC[@]}" "$PE/scripts/adopt-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/adopt-box.sh"
 "${RSYNC[@]}" "$PE/scripts/to-bind-mounts.sh" "$HOST:~/${REMOTE_DIR}/scripts/to-bind-mounts.sh"

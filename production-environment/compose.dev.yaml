@@ -1,11 +1,11 @@
-# Development overlay for the Sillage stack. Never used in production.
+# Hot-reload overlay. Opt-in per deploy: `deploy-vps.sh --overlay`, or by hand with
 #
-#   cd ~/sillage-dev/production-environment
-#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+#   cd ~/sillage && docker compose -f compose.yaml -f compose.dev.yaml up -d
 #
-# `scripts/dev.sh` wraps that, and everything below assumes you are running compose from inside a
-# git checkout — the bind mounts are relative to this file, so the containers run the code you are
-# editing rather than a copy baked into an image.
+# Everything below assumes compose is being run from inside a git checkout — the bind mounts are
+# relative to this file, so the containers run the code you are editing rather than a copy baked
+# into an image. Nothing here changes how the shop behaves: a box running this overlay still talks
+# to the live wholesalers, so the Orders page dry-run setting is still the only gate.
 #
 # What this overlay buys you:
 #   * save a .ts file        → bun --hot restarts the API in about a second

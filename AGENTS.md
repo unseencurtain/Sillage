@@ -4,6 +4,18 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 (**BeautyFort + BTS** retail). Wholesale-perfumes is a **separate product** in
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
+**Changed code? Ship it with one command: [`docs/SHIP.md`](docs/SHIP.md).**
+
+```bash
+./production-environment/scripts/ship.sh              # gates → build → push → ovhe, ~90s
+./production-environment/scripts/ship.sh --to ovh     # any other box, same command
+./production-environment/scripts/ship.sh --status     # what is each box running?
+```
+
+Never hand-run rsync / docker build / compose up to deploy the engine again. `ship.sh` does the
+whole sequence and verifies the result, including that no operator setting moved. `deploy-vps.sh`
+is only for turning an empty VPS into a shop.
+
 **Wiping a VPS and standing both shops up again? Read
 [`docs/REBUILD-FROM-SCRATCH.md`](docs/REBUILD-FROM-SCRATCH.md) first.** It carries the settled
 hostnames and operator usernames, the exact command order, and the traps that turned the first
@@ -71,10 +83,15 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
    direction, and no banner may claim a box is safe.
 7. **Client-facing behaviour has a human doc.** Keep [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md)
    matching the live UI and shop rules in the same change.
-8. **Hub images are built and pushed on ovhe.** That host is `docker login` as `unseencurtain`.
-   Do not build Hub images in a cloud-agent VM or copy Docker Hub credentials off the VPS.
-   See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**. Empty VPS: `bootstrap-host.sh` then
-   `deploy-vps.sh` (core + WordPress). Wholesale is [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+8. **Hub images are built and pushed on ovhe.** That host is `docker login` as `unseencurtain`,
+   and it is what `ship.sh --builder` defaults to. Do not build Hub images in a cloud-agent VM or
+   copy Docker Hub credentials off the VPS. See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**.
+   Empty VPS: `bootstrap-host.sh` then `deploy-vps.sh` (core + WordPress). Wholesale is
+   [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+9. **Automate the second time.** If a task takes more than one hand-run command and will happen
+   again, it becomes a script in `production-environment/scripts/` with a doc line, in the same
+   change. Shipping code is `ship.sh`; building a box is `deploy-vps.sh`; moving a box is
+   `pack-box.sh` + `adopt-box.sh`. Nothing that a person has to remember in order.
 
 ## Commands
 
