@@ -21,11 +21,13 @@ Read this checklist and execute it in order. Do not skip an item because a later
    WordPress is **pinned** in `wordpress-image/Dockerfile` (`wordpress:7.1-php8.3-apache`). Do
    not float `wordpress:latest`. First boot runs `scripts/wp-fresh-install.php` (EUR, Blocksy,
    WooCommerce, HPOS on, Coming soon off, permalinks).
-2. **Docker Hub builds always happen on a VPS that is already `docker login` as
-   `unseencurtain` — today the development box, `ovhe`.** Production does not build; it pulls a
-   tag. Copy this **retail** tree to `~/sillage/`, then on **that
-   VPS** run `~/sillage/scripts/build-push-images.sh` (default: core + WordPress). Then point
-   `SILLAGE_CORE_IMAGE` / `WORDPRESS_IMAGE` at the new tags and `docker compose --env-file .env up -d`.
+2. **Engine changes ship with one command: `scripts/ship.sh` ([`SHIP.md`](SHIP.md)).** It runs the
+   gates, builds and pushes on the box that holds the Hub login (`ovhe`), pins the tag on each
+   target, restarts, waits for `/health`, rolls back if it does not answer, and proves no operator
+   setting moved. About ninety seconds. Never hand-run rsync / `docker build` / `compose up` to
+   deploy the engine, and never edit `SILLAGE_CORE_IMAGE` by hand. `build-push-images.sh` remains
+   only for the **WordPress** image, which `deploy-vps.sh` handles when a box is built.
+   Docker Hub builds always happen on a VPS that is already `docker login` as `unseencurtain`.
    - Do **not** install Docker in a cloud-agent pod.
    - Do **not** copy `~/.docker/config.json` off the VPS.
    - Do **not** build Hub images on a laptop or agent “because the VPS has only 4 GB”.
@@ -41,17 +43,16 @@ Read this checklist and execute it in order. Do not skip an item because a later
    bootstrapped from sillage-b2b alone — it must not look at this repo.
 4. **Retail MariaDB is `ecom-db` only** (`earth` / `sillage`). Do not put `earth_wpf` / `sillage_wpf`
    on this database. Wholesale’s database lives in the sillage-b2b stack (`wholesale-db`).
-5. **`ovh` is production and `ovhe` is development. This swapped on 2026-09-08 — older text
-   below and in other docs may still say the opposite, and this item wins.** Both boxes run both
-   shops, from `~/sillage/` and `~/sillage-wholesale/`, with the same compose files and the same
-   image tags. They differ only in their `.env`: hostnames, and `SILLAGE_ROLE`. That role is a
-   label the deploy script reads so it will not push the wrong stack over a live shop; the engine
-   ignores it. Both boxes hold the same vendor credentials against APIs with no sandbox, so a Live
-   dispatch is a real order on either one and the Orders page dry-run setting is the only gate.
-   **The role is per stack, not per machine** — `scripts/set-role.sh` relabels one instantly. `ovhe` is disposable and is not held at parity with production; so is `ovh`. Copy a
-   box with `~/pack.sh` on it, and download the result — nothing backs itself up on a timer.
-   Rules: [`ENVIRONMENTS.md`](ENVIRONMENTS.md). Each stack
-   owns one file under `/etc/caddy/sites/`, so the two never fight over a shared Caddyfile.
+5. **Both boxes are production. There is no development tier and no role flag.** `ovh`
+   (`51.79.255.226`) and `ovhe` (`139.99.61.71`) each run both shops from `~/sillage/` and
+   `~/sillage-wholesale/`, on the same compose files and the same image tags, differing only in
+   their hostnames. Both hold the same vendor credentials against APIs that have never offered a
+   sandbox, so a Live dispatch is a real order on either one and the Orders page dry-run setting
+   is the only gate. **Each box's settings are its own** — one may be syncing while the other is
+   off; never reconcile them ([`SYNC-RULES.md`](SYNC-RULES.md)). Work on `ovhe` and ship to
+   whatever else exists. Copy a box with `~/pack.sh` on it and download the result — nothing backs
+   itself up on a timer. Rules: [`ENVIRONMENTS.md`](ENVIRONMENTS.md). Each stack owns one file
+   under `/etc/caddy/sites/`, so the two never fight over a shared Caddyfile.
 6. **Bind mounts only. Never a Docker named volume for WordPress or MariaDB.** Both boxes keep
    WordPress core and the database files under `<stack>/data/wp/` and `<stack>/data/wp-db/`, so a
    `tar` of the home folder is a complete, restorable backup. Volumes live under
@@ -94,6 +95,51 @@ Read this checklist and execute it in order. Do not skip an item because a later
 | **Deploy recipe** | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
 | **Crawler shield** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — copy the Caddy `@heavybot` 403 onto every client VPS |
 | **Google / sitemaps** | [`SEO.md`](SEO.md) — static XML, Caddy, not Minutes between syncs |
+
+---
+
+## Right now (2026-09-09) — start here
+
+Two boxes, both production, both running both shops. Work on `ovhe`; ship to whatever else exists.
+**`ovh` is not to be touched by hand** — it receives code only through `ship.sh`.
+
+| | `ovhe` (`139.99.61.71`) | `ovh` (`51.79.255.226`) |
+|---|---|---|
+| Retail shop / dashboard | `prinscosmetic.eu` / `sillage.prinscosmetic.eu` | `codeinmoon.xyz` / `sillage.codeinmoon.xyz` |
+| Retail media | `images.prinscosmetic.eu` | `images.codeinmoon.xyz` |
+| Wholesale shop / dashboard | `wholesale.mirainikki.xyz` / `sillage-wholesale.mirainikki.xyz` | `wholesale.codeinmoon.xyz` / `sillage-wholesale.codeinmoon.xyz` |
+| Layout | `~/sillage`, `~/sillage-wholesale`, bind mounts only | same |
+| Settings | the operator's, on this box | the operator's, on this box — **never reconciled** |
+
+Each box hosts its own copy of the 4,228 product JPEGs (388 MB) and points `image_cdn_base_url` at
+its own hostname, so neither depends on the other being alive.
+
+### The loop
+
+```bash
+# edit code, then:
+./production-environment/scripts/ship.sh              # gates → build → push → ovhe (~90s)
+./production-environment/scripts/ship.sh --to ovh     # same build, other box
+./production-environment/scripts/ship.sh --status
+```
+
+[`SHIP.md`](SHIP.md) is the whole story. `deploy-vps.sh` is only for turning an empty VPS into a
+shop; `pack-box.sh` + `adopt-box.sh` move a box; `~/pack.sh` on a box makes the download-me
+tarball. Nothing else should ever be hand-run to deploy.
+
+### Next work, in order
+
+1. **WordPress image is ~1.1 GB**, nearly all of it `wordpress:7.1-php8.3-apache`. Moving to an
+   fpm-alpine base would roughly halve it, but it changes how the shop is served (php-fpm behind
+   nginx or Caddy instead of Apache), so it is its own change with its own deploy — not something
+   to fold into a code ship. Until then `ship.sh --prune` keeps disk in check.
+2. **The bridge plugin and WordPress still ride `deploy-vps.sh`.** A `--plugin-only` path through
+   `ship.sh` would close the last gap where a change needs a full box deploy.
+3. **Photo coverage.** ~675 retail products are hidden for a missing or weak image; the CSV export
+   (`scripts/export-missing-images.py`) lists them with EAN, brand, price and stock so they can be
+   sourced in bulk. Wholesale hotlinks vendor URLs and needs none of this.
+4. **Order dispatch has never run Live on either box.** When it does, it spends real money on the
+   first press — there is no sandbox at either wholesaler.
 
 ---
 

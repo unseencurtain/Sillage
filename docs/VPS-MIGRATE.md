@@ -80,11 +80,10 @@ cd ~/sillage-wholesale && bash scripts/adopt-box.sh \
 | `sil_settings.image_cdn_base_url` | Bare filenames in the overrides resolve nowhere |
 | `wp_postmeta._external_thumbnail_url` | Pages render with every photo broken |
 
-**`--role` is required and has no default,** but it is only a label: it tells a later
-`deploy-vps.sh` which stack this is so it will not push the other role over it. A restored copy
-carries production's vendor credentials against APIs with no sandbox, so it can place a real order
-whatever you label it — the Orders page dry-run setting is the gate, on every stack.
-[`ENVIRONMENTS.md`](ENVIRONMENTS.md) has the rules; `set-role.sh` relabels without re-adopting.
+A restored copy carries the original's vendor credentials against APIs with no sandbox, so it can
+place a real order the moment it boots — the Orders page dry-run setting is the gate, on every
+box. There is no role or label that makes a copy safe. [`ENVIRONMENTS.md`](ENVIRONMENTS.md) has
+the rules; the adopted box's settings are then its own, independent of where it came from.
 
 Wholesale takes no `--images`: it hotlinks catalog `flask_front` URLs and hosts no photos.
 
