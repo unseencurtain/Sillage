@@ -13,12 +13,12 @@
 #       [--dns] [--ip 51.79.255.226] \
 #       [--skip-build] [--fresh] [--core-only]
 #
-# --role is required and has no default. It says what the stack is for, not which machine it is
-# on: `development` makes the engine refuse a live vendor order and print a banner, `production`
-# lets the Orders page decide. Domains have no default either. Both used to be inferred, and both
-# inferences eventually pointed a deploy at the wrong shop. Deploying a role a box does not
-# already hold is refused unless you pass --switch-role; to change only the role, run
-# scripts/set-role.sh on the box.
+# --role is required and has no default. It labels what the stack is for, not which machine it is
+# on, and it changes no behaviour: both roles run the same image against the same live vendor APIs,
+# and the Orders page decides dry-run versus Live on either. What it buys is this script refusing
+# to deploy a role a box does not already hold unless you pass --switch-role, so a development
+# deploy cannot quietly land on the live shop. To relabel only, run scripts/set-role.sh on the box.
+# Domains have no default either — every default we set was correct until the shop moved.
 #
 #   [--overlay]  layer compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite dashboard,
 #                bridge plugin editable in place. A way of working, refused on production. Without
@@ -66,7 +66,6 @@ FINISH=0
 ROLE=""
 SWITCH_ROLE=0
 OVERLAY=0
-DEV=0
 
 usage() {
   sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
@@ -130,7 +129,6 @@ case "$ROLE" in
   "") echo "need --role production or --role development" >&2; exit 1 ;;
   *) echo "--role must be production or development, not \"$ROLE\"" >&2; exit 1 ;;
 esac
-[[ "$ROLE" == "development" ]] && DEV=1 || DEV=0
 
 # --overlay layers compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite instead of the
 # prebuilt bundle. It is a way of working, not a role. A development stack without it is byte-for-
@@ -682,7 +680,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' DEV='$DEV' ROLE='$ROLE' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' ROLE='$ROLE' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 # This stack's .env. Hardcoding "sillage" here made every update write production's file.
 p = pathlib.Path.home() / os.environ["STACK"] / ".env"
@@ -747,7 +745,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' DEV='$DEV' OVERLAY='$OVERLAY' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' OVERLAY='$OVERLAY' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
