@@ -1,23 +1,22 @@
-# Which box is what — the rules
+# Every box — the rules
 
 Read this before deploying anything. It is short on purpose. If some other doc disagrees with it,
 this one wins and the other one is stale.
 
 ## The rules
 
-1. **A role is a label, not a machine and not a mode.** Every stack declares
-   `SILLAGE_ROLE=production` or `SILLAGE_ROLE=development` in its own `.env`. Nothing infers it
-   from a hostname. It exists so `deploy-vps.sh` can tell that `~/sillage` on a box is the live
-   shop and refuse to push the other role over it; the engine never reads it.
-2. **No stack is a sandbox.** Neither BeautyFort nor BTS has one, and there is a single account per
-   vendor, so a development stack talks to the same live APIs on the same credentials as the shop.
-   Dispatch is decided by the Orders page Dry-run / Live choice, everywhere, and that setting is
-   the only thing between a rehearsal and a real purchase. The dashboard prints no banner claiming
-   otherwise, because there is nothing true it could say.
-3. **Every stack runs identically.** Same compose file, same image tag, same bind mounts, same
-   install procedure, same scripts, same behaviour. A development stack that is built or behaves
-   differently from production is not testing production. The one exception is `--overlay`, below,
-   which is a way of working and is refused on production.
+1. **Every box is production.** There is no development tier and never was: neither BeautyFort nor
+   BTS offers a test API, and there is one account per vendor. A second box is a second production
+   shop on its own hostnames — not a sandbox, not a mirror to keep in step.
+2. **A box's settings are its own.** `sil_settings` belongs to the operator, per box. One box may
+   be syncing while the other is switched off; that is a decision, not drift. Nothing automated
+   changes a setting that is already there — see [`SYNC-RULES.md`](SYNC-RULES.md), which is the
+   authority on sync, the cadence and the Rebuild button.
+3. **Every box runs identically.** Same compose file, same image tag, same bind mounts, same
+   install procedure, same scripts, same behaviour, same live vendor APIs. Dispatch is decided by
+   the Orders page Dry-run / Live choice everywhere, and nothing overrules it in either direction.
+   The one exception to identical is `--overlay`, below, which is a way of working while you edit
+   code on a box, not a kind of box.
 4. **Bind mounts only. No Docker named volumes**, ever, for WordPress or MariaDB. Each stack keeps
    all of its state under its own `data/`, so `tar` of the home folder is a real backup. See
    [`VPS-MIGRATE.md`](VPS-MIGRATE.md) for the incident that made this a rule.
@@ -36,49 +35,32 @@ this one wins and the other one is stale.
    the whole box; both shops stay up while it runs. **Download it.** A backup living only on the
    machine it backs up is a backup of nothing, which is what an `rm -rf` in `$HOME` proved here on
    2026-09-08. Run it before anything risky, before wiping a box, and before handing one over.
-9. **A development stack does not spend production's vendor budget.** Both wholesalers rate-limit
-   per account and there is one account, so a test box syncing on a schedule takes requests the
-   shop needs. Leave `sync_enabled` off there and sync by hand when a test needs it.
+9. **Two boxes share one vendor budget.** Both wholesalers rate-limit per account and there is one
+   account each, so two boxes syncing on a schedule draw from the same allowance. Which box has
+   its schedule on is the operator's call, per box, and rule 2 applies — do not switch one off to
+   tidy the other up.
 
 ## Today
 
 | | `ovh` — `51.79.255.226` | `ovhe` — `139.99.61.71` |
 |---|---|---|
-| Role | production | development |
-| Status | the real shops; all work lands here | wiped and rebuilt on demand |
-| Retail | `codeinmoon.xyz`, dashboard `sillage.codeinmoon.xyz`, images `images.codeinmoon.xyz` | whatever it is rebuilt onto |
-| Wholesale | `wholesale.codeinmoon.xyz`, dashboard `sillage-wholesale.codeinmoon.xyz` | as above |
+| Retail | `codeinmoon.xyz`, dashboard `sillage.codeinmoon.xyz`, images `images.codeinmoon.xyz` | `prinscosmetic.eu`, dashboard `sillage.prinscosmetic.eu`, images `images.prinscosmetic.eu` |
+| Wholesale | `wholesale.codeinmoon.xyz`, dashboard `sillage-wholesale.codeinmoon.xyz` | `wholesale.mirainikki.xyz`, dashboard `sillage-wholesale.mirainikki.xyz` |
+| Settings | the operator's, on this box | the operator's, on this box |
 
-`ovhe` is not a mirror and is not held at parity — it exists to be destroyed and brought back.
-Neither is `ovh` a pet: it is disposable in exactly the same way, and the only thing that makes
-that safe is rule 8. The difference between the two boxes is which one customers reach.
+Neither box is a pet. Both are disposable in exactly the same way, and the only thing that makes
+that safe is rule 8. What differs between them is the hostnames they answer on, which shop's
+customers reach them, and whatever the operator has set on each.
 
 The intended end state is one shop per VPS — retail on its own box, wholesale on its own box —
 once the client buys them. Rule 5 is what makes that a move rather than a project.
 
-## Changing a role
-
-On the box, in the stack directory:
-
-```bash
-bash scripts/set-role.sh                     # what is this stack?
-bash scripts/set-role.sh development
-bash scripts/set-role.sh production
-```
-
-It rewrites one `.env` line and nothing restarts, because nothing in the running stack behaves
-differently. Relabelling a box does not make it safe to press Live on it, and never did.
-
-`deploy-vps.sh --role <role>` refuses to deploy a role that a box does not already hold unless you
-add `--switch-role`. Changing what a box is for should be a sentence you typed, not a side effect
-of a deploy.
-
-## Rebuilding the test box
+## Standing a box up, or replacing one
 
 Two ways, and they answer different questions.
 
-**From a production pack — minutes, with the real catalogue.** Use this when you want to test
-against real data or reproduce something production is doing:
+**From another box's pack — minutes, with the real catalogue.** Use this to replace a box, or to
+stand a second shop up carrying real data:
 
 ```bash
 ssh ovh 'bash ~/sillage/scripts/pack-box.sh --live'
@@ -88,8 +70,8 @@ ssh ovhe 'cd ~/sillage && bash scripts/adopt-box.sh --shop … --dash … --imag
 ssh ovhe 'cd ~/sillage-wholesale && bash scripts/adopt-box.sh --shop … --dash … --role development'
 ```
 
-The pack carries production's vendor credentials — as does every stack — so leave the Orders page
-on dry-run and `sync_enabled` off there unless a test needs otherwise.
+A pack carries the vendor credentials and the shop's settings with it. After adopting, check the
+Sync and Orders pages on the new box and set them the way you want *that* box to behave.
 
 **From nothing — a clean shop with an empty catalogue.** Use this to prove the from-scratch path
 still works, which is the thing that rots when nobody exercises it:
