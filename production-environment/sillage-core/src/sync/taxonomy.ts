@@ -141,7 +141,6 @@ export async function syncCategories(
   }
 
   const missing = [...needed].filter((k) => !map.has(k));
-  if (missing.length === 0) return { map, created: 0 };
 
   // Depth order guarantees a parent is resolved before its children. The live BTS tree is only
   // four deep and acyclic, but this is computed rather than assumed.
@@ -159,46 +158,73 @@ export async function syncCategories(
   };
   missing.sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b));
 
-  const takenSlugs = await loadTakenSlugs();
   let created = 0;
 
-  await transaction(async (conn) => {
-    const pending: Array<[string, TermRef, number, boolean]> = [];
+  if (missing.length > 0) {
+    const takenSlugs = await loadTakenSlugs();
+    await transaction(async (conn) => {
+      for (const key of missing) {
+        const node = byKey.get(key);
+        if (!node) continue;
 
-    for (const key of missing) {
-      const node = byKey.get(key);
-      if (!node) continue;
+        const parentTermId = node.parentKey ? (map.get(node.parentKey)?.termId ?? 0) : 0;
 
-      const parentTermId = node.parentKey ? (map.get(node.parentKey)?.termId ?? 0) : 0;
+        // A term with this slug may already exist from a previous vendor or a manual edit; reuse it
+        // rather than creating a near-duplicate category.
+        const baseSlug = slugify(node.name) || `cat-${key}`;
+        const adoptable = existingBySlug.get(baseSlug);
 
-      // A term with this slug may already exist from a previous vendor or a manual edit; reuse it
-      // rather than creating a near-duplicate category.
-      const baseSlug = slugify(node.name) || `cat-${key}`;
-      const adoptable = existingBySlug.get(baseSlug);
+        let ref: TermRef;
+        if (adoptable && adoptable.parent === parentTermId) {
+          ref = { termId: adoptable.term_id, ttId: adoptable.term_taxonomy_id };
+        } else {
+          const slug = uniqueTermSlug(node.name, takenSlugs, `cat-${key}`);
+          ref = await insertTerm(conn, node.name, slug, CATEGORY_TAXONOMY, parentTermId);
+          existingBySlug.set(slug, {
+            term_id: ref.termId,
+            term_taxonomy_id: ref.ttId,
+            slug,
+            name: node.name,
+            parent: parentTermId,
+          } as TermRow);
+          created++;
+        }
 
-      let ref: TermRef;
-      if (adoptable && adoptable.parent === parentTermId) {
-        ref = { termId: adoptable.term_id, ttId: adoptable.term_taxonomy_id };
-      } else {
-        const slug = uniqueTermSlug(node.name, takenSlugs, `cat-${key}`);
-        ref = await insertTerm(conn, node.name, slug, CATEGORY_TAXONOMY, parentTermId);
-        existingBySlug.set(slug, {
-          term_id: ref.termId,
-          term_taxonomy_id: ref.ttId,
-          slug,
-          name: node.name,
-          parent: parentTermId,
-        } as TermRow);
-        created++;
+        map.set(key, ref);
       }
+    });
+  }
 
-      map.set(key, ref);
-      const isLeaf = !nodes.some((n) => n.parentKey === key && needed.has(n.key));
-      pending.push([key, ref, depthOf(key), isLeaf]);
-    }
+  // Category keys are stable across feed refreshes, but their parent can change. Reconcile the
+  // mapped WordPress terms on every full feed so a moved vendor category cannot leave stale
+  // descendants in WooCommerce's lookup tables or WordPress's cached category tree.
+  const mappings = [...needed].flatMap((key) => {
+    const node = byKey.get(key);
+    const ref = map.get(key);
+    if (!node || !ref) return [];
+    const parentTermId = node.parentKey ? (map.get(node.parentKey)?.termId ?? 0) : 0;
+    const isLeaf = !nodes.some((candidate) => candidate.parentKey === key && needed.has(candidate.key));
+    return [{ key, ref, parentTermId, depth: depthOf(key), isLeaf }];
+  });
 
-    for (let i = 0; i < pending.length; i += 500) {
-      const slice = pending.slice(i, i + 500);
+  let reparented = 0;
+  await transaction(async (conn) => {
+    for (let i = 0; i < mappings.length; i += 250) {
+      const slice = mappings.slice(i, i + 250);
+      const taxonomyIds = slice.map(({ ref }) => ref.ttId);
+      const parentCases = slice.map(() => "WHEN ? THEN ?").join(" ");
+      const [parentResult] = await conn.query(
+        `UPDATE ${wp("term_taxonomy")}
+            SET parent = CASE term_taxonomy_id ${parentCases} ELSE parent END
+          WHERE taxonomy = ? AND term_taxonomy_id IN (${taxonomyIds.map(() => "?").join(",")})`,
+        [
+          ...slice.flatMap(({ ref, parentTermId }) => [ref.ttId, parentTermId]),
+          CATEGORY_TAXONOMY,
+          ...taxonomyIds,
+        ],
+      );
+      reparented += (parentResult as { affectedRows: number }).affectedRows;
+
       await conn.query(
         `INSERT INTO ${sil("sil_category_map")}
            (vendor_id, vendor_category_key, wp_term_id, wp_term_taxonomy_id, depth, is_leaf)
@@ -208,7 +234,7 @@ export async function syncCategories(
            wp_term_taxonomy_id = VALUES(wp_term_taxonomy_id),
            depth = VALUES(depth),
            is_leaf = VALUES(is_leaf)`,
-        slice.flatMap(([key, ref, depth, isLeaf]) => [
+        slice.flatMap(({ key, ref, depth, isLeaf }) => [
           vendorId,
           key,
           ref.termId,
@@ -220,7 +246,9 @@ export async function syncCategories(
     }
   });
 
-  log.info(`vendor ${vendorId}: ${created} product_cat terms created, ${map.size} mapped`);
+  log.info(
+    `vendor ${vendorId}: ${created} product_cat terms created, ${reparented} hierarchy rows updated, ${map.size} mapped`,
+  );
   return { map, created };
 }
 

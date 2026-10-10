@@ -127,7 +127,7 @@ if [[ "$RUN_TESTS" -eq 1 ]]; then
   [[ -d node_modules ]] || bun install
   bun run typecheck >/dev/null || die "typecheck failed"
   ok "typecheck"
-  bun test 2>&1 | tail -3
+  SILLAGE_DB_PASSWORD=test SILLAGE_SHARED_SECRET=test bun test 2>&1 | tail -3
   bun run web:build >/dev/null 2>&1 || die "dashboard build failed"
   ok "dashboard build"
   cd "$REPO_ROOT"
@@ -163,6 +163,8 @@ for host in "${TARGETS[@]}"; do
 
   if ! "${SSH[@]}" "$host" "set -e
     cd ~/${REMOTE_DIR} || { echo 'no ~/${REMOTE_DIR} on this box — run deploy-vps.sh first' >&2; exit 1; }
+    old_img=\$(sed -n 's/^SILLAGE_CORE_IMAGE=//p' .env | tail -1)
+    old_img=\${old_img:-${IMAGE_REPO}:latest}
     cp .env .env.ship-backup
     if grep -q '^SILLAGE_CORE_IMAGE=' .env; then
       sed -i 's|^SILLAGE_CORE_IMAGE=.*|SILLAGE_CORE_IMAGE=${IMAGE}|' .env
@@ -182,11 +184,14 @@ for host in "${TARGETS[@]}"; do
     docker compose exec -T \$core bun -e \"const r=await fetch('http://127.0.0.1:4000/health'); if(!r.ok) process.exit(1)\" \
       || { echo 'engine did not answer /health — rolling .env back' >&2; mv .env.ship-backup .env; docker compose up -d \$core \$cron >/dev/null 2>&1; exit 1; }
     rm -f .env.ship-backup
-    # Keep the running tag and the one before it — enough to roll back without a pull, while a box
-    # that has been shipped to fifty times does not carry fifty engine images.
-    docker image ls --format '{{.Repository}}:{{.Tag}} {{.CreatedAt}}' --filter reference='${IMAGE_REPO}' \
-      | sort -rk2 | tail -n +3 | cut -d' ' -f1 \
-      | xargs -r -n1 docker rmi >/dev/null 2>&1 || true
+    # Keep the new image and the exact tag that was configured before this deploy. Image listing
+    # dates are human-formatted and cannot safely identify the previous running tag.
+    docker image ls --format '{{.Repository}}:{{.Tag}}' --filter reference='${IMAGE_REPO}' | while IFS= read -r candidate; do
+      [ -n "\$candidate" ] || continue
+      if [ "\$candidate" != '${IMAGE}' ] && [ "\$candidate" != "\$old_img" ]; then
+        docker image rm "\$candidate" >/dev/null 2>&1 || true
+      fi
+    done
     docker image prune -f >/dev/null 2>&1 || true"
   then
     FAILED+=("$host"); printf '    \033[31m✗ %s\033[0m\n' "$host: deploy failed, .env restored"; continue

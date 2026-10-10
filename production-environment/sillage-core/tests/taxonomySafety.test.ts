@@ -54,4 +54,10 @@ describe("rewrite-only taxonomy safety", () => {
     expect(taxonomySrc).not.toContain('vendor: "pa_vendor"');
     expect(taxonomySrc).not.toContain("export async function ensureVendorShopCategories");
   });
+
+  test("full category sync reconciles parent changes for existing vendor category keys", () => {
+    expect(taxonomySrc).toContain("Category keys are stable across feed refreshes, but their parent can change");
+    expect(taxonomySrc).toContain("SET parent = CASE term_taxonomy_id");
+    expect(runSrc).toContain("await rebuildCategoryLookup();");
+  });
 });
