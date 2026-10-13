@@ -979,7 +979,7 @@ docker image prune -af
 echo "Images after prune:"
 docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot \
-  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; FLUSH PRIVILEGES;" || true
+  -e "GRANT SELECT ON sillage.sil_ean_index TO 'lime'@'%'; GRANT SELECT ON sillage.sil_settings TO 'lime'@'%'; GRANT SELECT ON sillage.sil_vendors TO 'lime'@'%'; GRANT SELECT ON sillage.sil_shipping_quotes TO 'lime'@'%'; FLUSH PRIVILEGES;" || true
 if [[ "${WP_ACTIVATE_PLUGINS:-0}" == "1" ]]; then
   docker exec ecom php -r 'require "/var/www/html/wp-load.php"; require_once ABSPATH."wp-admin/includes/plugin.php"; activate_plugin("sillage-bridge/sillage-bridge.php"); echo "plugin ok\n";' || true
 fi

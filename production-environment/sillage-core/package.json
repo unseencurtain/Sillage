@@ -12,6 +12,7 @@
     "sitemap": "bun run src/cli/sitemap.ts",
     "orders": "bun run src/cli/orders.ts",
     "doctor": "bun run src/cli/doctor.ts",
+    "identity": "bun run src/cli/identity.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "web:dev": "vite --config web/vite.config.ts",

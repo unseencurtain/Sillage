@@ -25,11 +25,21 @@
 set -euo pipefail
 
 SHOP=""; DASH=""; IMAGES=""
+# Store identity. Written into WordPress, WooCommerce and the mail sender by the identity step.
+# Values from the copied box are refused, so these must be this store's own addresses.
+STORE_NAME=""; LEGAL_NAME=""; SENDER_EMAIL=""; REPLY_TO=""; SMTP_USERNAME=""; SUPPORT_EMAIL=""; ADMIN_EMAIL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --shop) SHOP="${2:?}"; shift 2 ;;
     --dash) DASH="${2:?}"; shift 2 ;;
     --images) IMAGES="${2:?}"; shift 2 ;;
+    --store-name) STORE_NAME="${2:?}"; shift 2 ;;
+    --legal-name) LEGAL_NAME="${2:?}"; shift 2 ;;
+    --sender-email) SENDER_EMAIL="${2:?}"; shift 2 ;;
+    --reply-to) REPLY_TO="${2:?}"; shift 2 ;;
+    --smtp-username) SMTP_USERNAME="${2:?}"; shift 2 ;;
+    --support-email) SUPPORT_EMAIL="${2:?}"; shift 2 ;;
+    --admin-email) ADMIN_EMAIL="${2:?}"; shift 2 ;;
     # Retired: there is no development tier. Still swallowed so an old command line works.
     --role|--dev)
       shift
@@ -149,6 +159,42 @@ if [[ -n "$IMAGES" && -n "$OLD_IMAGES" && "$IMAGES" != "$OLD_IMAGES" ]]; then
 else
   echo "    nothing to repoint"
 fi
+
+echo "==> 6b/6 store identity"
+# The copied database still has the old box's names and addresses. Write this store's identity from
+# sillage-core's record (sil_settings), then refuse to finish while any old value remains.
+IDENTITY_SET=()
+for pair in "store_name=${STORE_NAME}" "legal_name=${LEGAL_NAME}" "sender_email=${SENDER_EMAIL}" \
+            "reply_to=${REPLY_TO}" "smtp_username=${SMTP_USERNAME}" "support_email=${SUPPORT_EMAIL}" \
+            "admin_email=${ADMIN_EMAIL}"; do
+  if [[ "${pair#*=}" != "" ]]; then IDENTITY_SET+=("$pair"); fi
+done
+ENGINE="$(docker ps --format '{{.Names}}' | grep -m1 '^sillage-core$' || true)"
+if [[ -z "$ENGINE" ]]; then
+  echo "    sillage-core container is not running; identity not checked" >&2
+  exit 1
+fi
+if [[ ${#IDENTITY_SET[@]} -gt 0 ]]; then
+  docker exec "$ENGINE" bun run src/cli/identity.ts set "${IDENTITY_SET[@]}"
+fi
+# Old values in the record itself are refused by the engine; the WordPress copy is checked below.
+if ! docker exec "$ENGINE" bun run src/cli/identity.ts show | grep -qv "(not set)"; then
+  echo "    no identity record: pass --store-name, --sender-email, --support-email and --admin-email" >&2
+  exit 1
+fi
+docker exec "$ENGINE" bun run src/cli/identity.ts push >/dev/null || {
+  echo "    could not write identity into WordPress (is the sillage-bridge plugin active?)" >&2; exit 1; }
+docker exec "$ENGINE" bun run src/cli/identity.ts check || {
+  echo "    identity still differs from the record; fix it and run adopt-box.sh again" >&2; exit 1; }
+# Any retired address left anywhere in WordPress options (not only the fields above) blocks the adopt.
+RETIRED_HITS=$(mysql -N -e "SELECT COUNT(*) FROM \`${WORDPRESS_DB}\`.wp_options
+  WHERE option_value LIKE '%codeinmoon%' AND option_name NOT LIKE '_transient%';")
+if [[ "${RETIRED_HITS:-0}" != "0" ]]; then
+  echo "    ${RETIRED_HITS} wp_options rows still mention a previous store's domain (codeinmoon)." >&2
+  echo "    Find them: SELECT option_name FROM wp_options WHERE option_value LIKE '%codeinmoon%';" >&2
+  exit 1
+fi
+echo "    identity matches the record; no retired addresses in wp_options"
 
 echo "==> flushing caches"
 docker exec "${VALKEY_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 valkey)}" \

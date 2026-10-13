@@ -1,9 +1,11 @@
 <?php
 /**
- * Single-vendor cart + ship-to country restriction.
+ * Cart + ship-to country restriction across two warehouses.
  *
- * BeautyFort and BTS cannot share a cart. Checkout only offers countries the cart's vendor
- * can actually deliver to (from `_sillage_ship_countries` meta written by sillage-core).
+ * Products from both warehouses may share a cart. Checkout offers the countries that at least one
+ * cart item can ship to (from `_sillage_ship_countries` meta written by sillage-core). Per-country
+ * warehouse rules (items the destination cannot receive) are enforced by the storefront EAN plugin.
+ * Customer-facing text never names a warehouse.
  *
  * @package Sillage_Bridge
  */
@@ -17,9 +19,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class Sillage_Cart {
 
 	public function register(): void {
-		add_filter( 'woocommerce_add_to_cart_validation', array( $this, 'validate_add' ), 20, 3 );
-		add_action( 'woocommerce_check_cart_items', array( $this, 'validate_cart' ) );
-		add_action( 'woocommerce_checkout_process', array( $this, 'validate_cart' ) );
 		add_action( 'woocommerce_product_meta_end', array( $this, 'render_ean' ) );
 		add_filter( 'woocommerce_countries_allowed_countries', array( $this, 'filter_countries' ) );
 		add_filter( 'woocommerce_countries_shipping_countries', array( $this, 'filter_countries' ) );
@@ -68,65 +67,15 @@ final class Sillage_Cart {
 	}
 
 	/**
-	 * @param bool $passed     Existing validation result.
-	 * @param int  $product_id Product being added.
-	 * @param int  $quantity   Quantity.
+	 * Union of the countries every cart item can ship to.
+	 *
+	 * @return list<string>
 	 */
-	public function validate_add( bool $passed, int $product_id, int $quantity ): bool {
-		unset( $quantity );
-		if ( ! $passed || ! function_exists( 'WC' ) || ! WC()->cart ) {
-			return $passed;
-		}
-
-		$incoming = $this->vendor_for_product( $product_id );
-		if ( $incoming === '' ) {
-			return $passed;
-		}
-
-		$cart_vendor = $this->cart_vendor();
-		if ( $cart_vendor !== '' && $cart_vendor !== $incoming ) {
-			wc_add_notice(
-				sprintf(
-					/* translators: 1: vendor already in cart, 2: vendor of new item */
-					__( 'This cart already contains products from %1$s. Please checkout separately — you cannot mix %1$s and %2$s in one order.', 'sillage-bridge' ),
-					$this->label( $cart_vendor ),
-					$this->label( $incoming )
-				),
-				'error'
-			);
-			return false;
-		}
-
-		return $passed;
-	}
-
-	public function validate_cart(): void {
-		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
-			return;
-		}
-
-		$vendors = array();
-		foreach ( WC()->cart->get_cart() as $item ) {
-			$pid = isset( $item['product_id'] ) ? (int) $item['product_id'] : 0;
-			$v   = $this->vendor_for_product( $pid );
-			if ( $v !== '' ) {
-				$vendors[ $v ] = true;
-			}
-		}
-
-		if ( count( $vendors ) > 1 ) {
-			wc_add_notice(
-				__( 'Your cart mixes products from different wholesalers. Remove one vendor\'s items before checking out.', 'sillage-bridge' ),
-				'error'
-			);
-		}
-	}
-
-	/** @return list<string> */
 	private function cart_ship_countries(): array {
 		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
 			return array();
 		}
+		$out = array();
 		foreach ( WC()->cart->get_cart() as $item ) {
 			$pid = isset( $item['product_id'] ) ? (int) $item['product_id'] : 0;
 			$raw = get_post_meta( $pid, '_sillage_ship_countries', true );
@@ -137,41 +86,12 @@ final class Sillage_Cart {
 			if ( ! is_array( $decoded ) ) {
 				continue;
 			}
-			$out = array();
 			foreach ( $decoded as $code ) {
 				if ( is_string( $code ) && $code !== '' ) {
-					$out[] = strtoupper( $code );
+					$out[ strtoupper( $code ) ] = true;
 				}
 			}
-			return $out;
 		}
-		return array();
-	}
-
-	private function vendor_for_product( int $product_id ): string {
-		$meta = get_post_meta( $product_id, '_sillage_vendor', true );
-		return is_string( $meta ) ? strtolower( $meta ) : '';
-	}
-
-	private function cart_vendor(): string {
-		if ( ! WC()->cart ) {
-			return '';
-		}
-		foreach ( WC()->cart->get_cart() as $item ) {
-			$pid = isset( $item['product_id'] ) ? (int) $item['product_id'] : 0;
-			$v   = $this->vendor_for_product( $pid );
-			if ( $v !== '' ) {
-				return $v;
-			}
-		}
-		return '';
-	}
-
-	private function label( string $slug ): string {
-		$map = array(
-			'bts'        => 'BTS Wholesaler',
-			'beautyfort' => 'BeautyFort',
-		);
-		return $map[ $slug ] ?? $slug;
+		return array_keys( $out );
 	}
 }

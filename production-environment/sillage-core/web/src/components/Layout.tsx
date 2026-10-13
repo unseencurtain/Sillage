@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Settings,
   Store,
+  Truck,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,7 @@ const nav = [
   { to: "/products", label: "Products", icon: Package },
   { to: "/vendors", label: "Vendors", icon: Store },
   { to: "/orders", label: "Orders", icon: Boxes },
+  { to: "/shipping", label: "Shipping", icon: Truck },
   { to: "/secrets", label: "Secrets", icon: KeyRound },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/logs", label: "Logs", icon: ClipboardList },

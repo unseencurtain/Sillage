@@ -7,6 +7,7 @@ import { applyRuntimeUrls } from "../../config/env.ts";
 import { clearSecret, listSecretStatus, loadSecretsOverlay, setSecret } from "../../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
+import { listCachedQuotes, loadShippingRules, SHIPPING_SETTING_KEYS, refreshAllQuotes } from "../../shipping/quotes.ts";
 import { logger } from "../../lib/log.ts";
 import { resolveTimeZone } from "../../lib/timezone.ts";
 import { displayedShopImage, isUnusableImage, shopVisibility } from "../../sync/imageRules.ts";
@@ -37,6 +38,7 @@ import { getStorefrontLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
 import { isParkedVendor, storefrontVendorSlugs } from "../../vendors/registry.ts";
 import { requireSession, type AuthEnv } from "../auth.ts";
+import { IDENTITY_KEYS, loadIdentity, pushIdentity, saveIdentity, validateIdentity, type IdentityField } from "../../identity/identity.ts";
 
 const log = logger("api");
 
@@ -1082,6 +1084,24 @@ api.post("/orders/:id/dispatch", async (c) => {
   return c.json(result);
 });
 
+/** Shipping: vendor cost cache per country plus the operator rules. Read only. */
+api.get("/shipping", async (c) => {
+  const [rules, quotes, vendors] = await Promise.all([loadShippingRules(), listCachedQuotes(), loadVendors()]);
+  return c.json({
+    rules,
+    vendors: vendors
+      .filter((v) => v.active)
+      .map((v) => ({ slug: v.slug, name: v.name, countries: v.serviceableCountries.length })),
+    quotes,
+  });
+});
+
+/** Refresh the vendor quote cache now, instead of waiting for the next due tick. */
+api.post("/shipping/refresh", async (c) => {
+  const results = await refreshAllQuotes();
+  return c.json({ ok: true, results });
+});
+
 api.get("/settings", async (c) => {
   const s = await loadSettings();
   const [bfBilling, btsBilling] = await Promise.all([
@@ -1118,15 +1138,52 @@ api.get("/settings", async (c) => {
     description_mode: s.descriptionMode,
     volume_filter_mode: s.volumeFilterMode,
     live_feed_min_minutes: String(s.liveFeedMinMinutes),
+    ...(await shippingSettingsForDashboard()),
     pending_catalogue_rebuild: (await isCatalogueRebuildPending()) ? "1" : "0",
+    ...identityForDashboard(await loadIdentity()),
     company_billing_beautyfort: JSON.stringify(bfBilling),
     company_billing_bts: JSON.stringify(btsBilling),
   });
 });
 
+/** Identity fields as the dashboard form names them (identity_<field>, the sil_settings keys). */
+function identityForDashboard(identity: Record<IdentityField, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const field of Object.keys(IDENTITY_KEYS) as IdentityField[]) {
+    out[IDENTITY_KEYS[field]] = identity[field];
+  }
+  return out;
+}
+
+async function shippingSettingsForDashboard(): Promise<Record<string, string>> {
+  const r = await loadShippingRules();
+  return {
+    shipping_markup_percent: String(r.markupPercent),
+    shipping_markup_fixed_eur: String(r.markupFixedEur),
+    shipping_free_over_eur: String(r.freeOverEur),
+    shipping_display_mode: r.displayMode,
+    shipping_quote_refresh_hours: String(r.refreshHours),
+  };
+}
+
 api.put("/settings", async (c) => {
   const body = await c.req.json<Record<string, string>>();
+
+  // Identity is validated first so a bad address refuses the whole save instead of half of it.
+  const identityPatch: Partial<Record<IdentityField, string>> = {};
+  for (const field of Object.keys(IDENTITY_KEYS) as IdentityField[]) {
+    const key = IDENTITY_KEYS[field];
+    if (typeof body[key] === "string") identityPatch[field] = body[key];
+  }
+  const identityProblems = validateIdentity(identityPatch);
+  if (identityProblems.length > 0) {
+    return c.json(
+      { ok: false, error: identityProblems.map((p) => `${p.field}: ${p.message}`).join("; ") },
+      400,
+    );
+  }
   const allowed = new Set([
+    ...SHIPPING_SETTING_KEYS,
     "sync_enabled",
     "fast_sync_minutes",
     "full_sync_enabled",
@@ -1210,6 +1267,21 @@ api.put("/settings", async (c) => {
       const m = Math.max(MIN_SYNC_MINUTES, Math.trunc(Number(value)) || 60);
       persist = String(m);
     }
+    if (key.startsWith("shipping_")) {
+      const n = Number(value);
+      if (key === "shipping_display_mode") {
+        if (value !== "total" && value !== "per_location") continue;
+        persist = value;
+      } else if (!Number.isFinite(n)) {
+        continue;
+      } else if (key === "shipping_markup_percent") {
+        persist = String(Math.min(100, Math.max(0, n)));
+      } else if (key === "shipping_quote_refresh_hours") {
+        persist = String(Math.max(1, Math.trunc(n)));
+      } else {
+        persist = String(Math.max(0, n));
+      }
+    }
     const changed = prior.get(key) !== persist;
     if (!changed) continue;
     await setSetting(key, persist);
@@ -1227,6 +1299,19 @@ api.put("/settings", async (c) => {
     // Turning sync back on clears a previous Stop.
     if (key === "sync_enabled" && (value === "1" || value === "true")) {
       await clearSyncAbort();
+    }
+  }
+
+  // Identity is saved, then written into WordPress. A failed push does not undo the save; it is
+  // reported so the operator knows WordPress still has the old values.
+  let identityPush: { ok: boolean; error?: string; changed?: Record<string, { from: string; to: string }> } | null = null;
+  if (Object.keys(identityPatch).length > 0) {
+    await saveIdentity(identityPatch);
+    try {
+      const pushed = await pushIdentity(await loadIdentity());
+      identityPush = { ok: pushed.ok, error: pushed.error, changed: pushed.changed };
+    } catch (err) {
+      identityPush = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1251,6 +1336,7 @@ api.put("/settings", async (c) => {
     syncStarted: syncStatus === "started",
     syncQueued: syncStatus === "queued",
     syncKind: syncStatus ? (touchContent ? "full/cache" : "fast/rewrite-only") : null,
+    identityPush,
     detail:
       syncStatus === "queued"
         ? "Sync already running — new prices will apply when it finishes (rewrite-only follow-up queued)."

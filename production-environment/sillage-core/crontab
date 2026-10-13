@@ -8,3 +8,6 @@
 # Times are in the container's TZ, which the Dockerfile pins to UTC.
 
 */5 * * * * cd /app && bun run src/cli/schedule.ts
+
+# Vendor shipping quote cache. Does nothing until shipping_quote_refresh_hours has passed.
+*/5 * * * * cd /app && bun run src/cli/shipping-quotes.ts

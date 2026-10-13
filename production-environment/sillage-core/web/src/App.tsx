@@ -12,6 +12,7 @@ import { Vendors } from "@/pages/Vendors";
 import { Orders } from "@/pages/Orders";
 import { Secrets } from "@/pages/Secrets";
 import { Settings } from "@/pages/Settings";
+import { Shipping } from "@/pages/Shipping";
 import { Logs } from "@/pages/Logs";
 import { ToastProvider } from "@/components/Toast";
 
@@ -50,6 +51,7 @@ export function App() {
               <Route path="products" element={<Products />} />
               <Route path="vendors" element={<Vendors />} />
               <Route path="orders" element={<Orders />} />
+              <Route path="shipping" element={<Shipping />} />
               <Route path="secrets" element={<Secrets />} />
               <Route path="settings" element={<Settings />} />
               <Route path="logs" element={<Logs />} />

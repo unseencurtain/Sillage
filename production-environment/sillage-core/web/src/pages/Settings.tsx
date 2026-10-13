@@ -143,6 +143,10 @@ export function Settings() {
       qc.invalidateQueries({ queryKey: ["overview"] });
       qc.invalidateQueries({ queryKey: ["sync-runs"] });
       toast("Settings saved", "ok");
+      const push = (res as { identityPush?: { ok: boolean; error?: string } | null }).identityPush;
+      if (push && !push.ok) {
+        toast(`Store identity was saved here but not written to WordPress: ${push.error ?? "unknown error"}`, "error");
+      }
       if (res.syncStarted || res.syncQueued) {
         toast(
           res.syncQueued
@@ -233,6 +237,35 @@ export function Settings() {
           {autoOn ? " Auto-dispatch is also ON — cron will submit without a click." : null}
         </div>
       ) : null}
+
+      <Section
+        title="Store identity"
+        help="The store name and the addresses customers and staff see. Saving writes them to WordPress, WooCommerce and the outgoing mail sender. Use this, not the WordPress screens, when you change them."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Store name" help="Shown as the site title, the email sender name and in the storefront.">
+            <input className={inputClass} value={form.identity_store_name ?? ""} disabled={busy} onChange={(e) => set("identity_store_name", e.target.value)} />
+          </Field>
+          <Field label="Legal name" help="Used in the legal footer line only.">
+            <input className={inputClass} value={form.identity_legal_name ?? ""} disabled={busy} onChange={(e) => set("identity_legal_name", e.target.value)} />
+          </Field>
+          <Field label="Sender address (From)" help="Address on customer emails, such as order and shipping emails.">
+            <input type="email" className={inputClass} value={form.identity_sender_email ?? ""} disabled={busy} onChange={(e) => set("identity_sender_email", e.target.value)} />
+          </Field>
+          <Field label="Reply-to address" help="Where customer replies go. Leave empty to use the sender address.">
+            <input type="email" className={inputClass} value={form.identity_reply_to ?? ""} disabled={busy} onChange={(e) => set("identity_reply_to", e.target.value)} />
+          </Field>
+          <Field label="Mail login (SMTP username)" help="The mailbox the sender logs in with. The password stays in the Purelymail plugin and is not changed here.">
+            <input type="email" className={inputClass} value={form.identity_smtp_username ?? ""} disabled={busy} onChange={(e) => set("identity_smtp_username", e.target.value)} />
+          </Field>
+          <Field label="Admin and support address" help="Receives WordPress admin mail, stock alerts and POS notices.">
+            <input type="email" className={inputClass} value={form.identity_support_email ?? ""} disabled={busy} onChange={(e) => set("identity_support_email", e.target.value)} />
+          </Field>
+          <Field label="WordPress admin address" help="The address WordPress uses for admin notices and password resets.">
+            <input type="email" className={inputClass} value={form.identity_admin_email ?? ""} disabled={busy} onChange={(e) => set("identity_admin_email", e.target.value)} />
+          </Field>
+        </div>
+      </Section>
 
       <Section
         title="Shop URLs"

@@ -22,6 +22,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class Sillage_Cart_Fee {
 
+	/** Warehouse slug => customer-facing location letter. Keep in step with the storefront EAN plugin. */
+	private const LOCATION_LETTERS = array(
+		'bts'        => 'A',
+		'beautyfort' => 'B',
+	);
+
 	private const CACHE_GROUP = 'sillage';
 	private const CACHE_KEY   = 'cart_min_config';
 	private const CACHE_TTL   = 60;
@@ -116,7 +122,8 @@ final class Sillage_Cart_Fee {
 			if ( $shortfall <= 0 ) {
 				continue;
 			}
-			$label = $labels[ $slug ] ?? $slug;
+			// Customers see the warehouse location ("Location A" / "Location B"), never a supplier name.
+			$label = isset( self::LOCATION_LETTERS[ $slug ] ) ? 'Location ' . self::LOCATION_LETTERS[ $slug ] : 'Location';
 			$is_wholesale = defined( 'SILLAGE_STOREFRONT_PROFILE' ) && 'wholesale' === SILLAGE_STOREFRONT_PROFILE;
 			if ( $is_wholesale ) {
 				$min = ( is_array( $config ) && isset( $config['vendor_mins'][ $slug ] ) )
@@ -357,10 +364,9 @@ final class Sillage_Cart_Fee {
 				}
 				$slug = strtolower( (string) $vrow['slug'] );
 
-				// Customers see the shop section label (LPS01 / LPS02 / LPS03), never a supplier name.
-				$label = isset( $vrow['storefront_label'] ) ? trim( (string) $vrow['storefront_label'] ) : '';
-				if ( '' !== $label ) {
-					$vendor_labels[ $slug ] = $label;
+				// Customers see the warehouse location, never a supplier name or a vendor label.
+				if ( isset( self::LOCATION_LETTERS[ $slug ] ) ) {
+					$vendor_labels[ $slug ] = 'Location ' . self::LOCATION_LETTERS[ $slug ];
 				}
 
 				$raw = $vrow['order_config'] ?? null;

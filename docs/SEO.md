@@ -21,8 +21,9 @@ Host dir: `~/ecom_sites/data/sitemaps/`
 | URL | File |
 |---|---|
 | `/robots.txt` | `robots.txt` (points at the index) |
+| `/sitemap.xml` | alias of `/wp-sitemap.xml`, index of product sitemap pages (linked from robots.txt) |
 | `/wp-sitemap.xml` | index of product sitemap pages |
-| `/wp-sitemap-posts-product-N.xml` | 2000 shop-visible product URLs each |
+| `/wp-sitemap-posts-product-N.xml` | 2000 published product URLs each (all products) |
 
 Rebuild:
 
@@ -59,7 +60,7 @@ Do not add Googlebot to the Caddy AI-crawler block ([`CRAWLER-SHIELD.md`](CRAWLE
 | Googlebot → `/` and `/product/…` | **HTTP 200** (not blocked) |
 | Caddy `@heavybot` vs Googlebot | **Does not match** — only ClaudeBot / GPTBot / CCBot / Bytespider / Amazonbot / meta-externalagent |
 | Product sitemap | Static files from Bun/Caddy; **not** PHP |
-| Hidden products in sitemap | **Omitted** (same `exclude-from-catalog` / `exclude-from-search` as the shop) |
+| Hidden products in sitemap | **Included** (owner request: all published products) |
 | Price / stock in sitemap | **None** |
 
 After Caddy is serving the files (Caddy user must be able to traverse

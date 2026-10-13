@@ -1,8 +1,8 @@
 /**
  * Static product sitemaps — written by Bun, served by Caddy as files.
  *
- * Google only needs URLs of shop-visible products. It does not need live prices
- * or stock. Fast sync (dashboard **Minutes between syncs**) must not rebuild
+ * Lists every published product, including catalog-hidden ones (the owner
+ * asked for all products). It does not include live prices or stock. Fast sync (dashboard **Minutes between syncs**) must not rebuild
  * these files: that would make Google recrawl the catalogue through PHP.
  *
  * Rebuild on full / content rewrite (and when new posts were created). A few
@@ -46,7 +46,7 @@ interface ProductRow extends RowDataPacket {
   post_modified_gmt: string;
 }
 
-/** Shop-visible published products. Hidden (no image / stock / pin) stay out. */
+/** Every published product (catalog-hidden included), in ID order. */
 export async function loadVisibleProducts(): Promise<SitemapProduct[]> {
   const rows = await query<ProductRow>(
     `SELECT p.post_name, p.post_modified_gmt
@@ -54,14 +54,6 @@ export async function loadVisibleProducts(): Promise<SitemapProduct[]> {
       WHERE p.post_type = 'product'
         AND p.post_status = 'publish'
         AND p.post_name <> ''
-        AND p.ID NOT IN (
-          SELECT tr.object_id
-            FROM ${wp("term_relationships")} tr
-            JOIN ${wp("term_taxonomy")} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-            JOIN ${wp("terms")} t ON t.term_id = tt.term_id
-           WHERE tt.taxonomy = 'product_visibility'
-             AND t.slug IN ('exclude-from-catalog', 'exclude-from-search')
-        )
       ORDER BY p.ID`,
   );
   return rows.map((r) => ({

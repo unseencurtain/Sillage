@@ -270,6 +270,7 @@ order dry-run is off.
 | **Shop URLs** | Public shop and image CDN addresses. Saving the image CDN does **not** by itself rewrite every product photo URL |
 | **Pricing & catalogue** | **Price multiplier**, optional **price tiers** (cost bands), **stock threshold**, **Hide products without image** (leave **on**) |
 | **Cart minimum (storefront fee)** | Optional small-order fee (off by default). Independent of per-vendor minimum order value |
+| **Shipping** (own page) | Markup (% and EUR, all countries), free shipping above a bag subtotal (0 = off), one shipping line or one per parcel, and the vendor costs read-only. Markup defaults to 0 |
 | **Schedule** | **Sync enabled**, timezone, **Minutes between syncs** (a *check interval*, not “minutes a day”), **Daily full catalogue rebuild** + hour |
 | **Order safety** | Dry-run, auto-dispatch, max order value, daily spend cap, tracking poll minutes, customer email on tracking |
 | **Advanced** | Volume filter (ranges vs exact ml), description mode, **company billing** (fill BeautyFort **before** the first live BeautyFort order; BTS invoices from their portal) |

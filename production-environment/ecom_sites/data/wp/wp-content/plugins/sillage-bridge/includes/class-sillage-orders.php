@@ -140,10 +140,9 @@ final class Sillage_Orders {
 		$applied = array();
 
 		if ( ! empty( $body['note'] ) && is_string( $body['note'] ) ) {
-			$order->add_order_note(
-				sanitize_textarea_field( $body['note'] ),
-				! empty( $body['notify_customer'] ) ? 1 : 0
-			);
+			// Generic notes are internal only. Customer emails for shipping come from the
+			// tracking branch and the WooCommerce "Completed order" email, never a raw note.
+			$order->add_order_note( sanitize_textarea_field( $body['note'] ), 0 );
 			$applied[] = 'note';
 		}
 

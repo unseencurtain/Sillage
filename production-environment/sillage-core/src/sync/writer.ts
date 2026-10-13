@@ -6,6 +6,7 @@ import type { GlobalSettings, Vendor } from "../db/settings.ts";
 import { contentHash, priceHash } from "../lib/checksum.ts";
 import { logger } from "../lib/log.ts";
 import { foldKey, productSlug } from "../lib/slugify.ts";
+import { cleanProductTitle } from "../lib/productTitle.ts";
 import { throwIfSyncAborted } from "./abort.ts";
 import {
   buildImageLookup,
@@ -497,9 +498,12 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   }
 
   const brandTerm = row.brand ? ctx.brandMap.get(foldKey(row.brand)) : undefined;
+  // The slug stays on the stored name so existing product URLs do not change. Only the title shown
+  // to shoppers is cleaned of vendor-feed repeats.
   const slug = productSlug(row.name, row.sku);
+  const title = cleanProductTitle(row.name);
   const description = buildDescription({
-    name: row.name,
+    name: title,
     brand: row.brand,
     attributes,
     extra,
@@ -508,7 +512,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
   });
 
   const cHash = contentHash({
-    name: row.name,
+    name: title,
     description,
     slug,
     brand: row.brand,
@@ -522,7 +526,7 @@ function prepare(row: PendingRow, ctx: WriteContext, mode: WriteMode): PreparedP
 
   return {
     ...base,
-    name: row.name,
+    name: title,
     description,
     slug,
     eans,

@@ -209,8 +209,22 @@ watermarked files outside `data/wp/`:
    - Host scripts (`host_override_images.py`, Brasty `build-overrides`) write absolute URLs like
      `https://images.prinscosmetic.eu/<EAN>.jpg`
    - Changing the base does **not** rewrite WooCommerce rows by itself: update
-     `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
-     `bun run sync -- --rewrite-all`
+      `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
+      `bun run sync -- --rewrite-all`
+
+### Headless storefront rule: resolve first-party media on the same VPS
+
+The React storefront must not depend on a hardcoded first-party CDN hostname. WooCommerce may
+still return a legacy absolute URL such as `https://images.prinscosmetic.eu/<EAN>.jpg`; if that
+URL has a root-level EAN filename, the storefront requests `/lps-media/<EAN>.jpg` on the
+**current page origin** instead. Caddy routes that path to the local `lps-media` container and
+its `~/sillage/data/media/` bind mount. A version query bypasses the image host's immutable
+browser cache. Thus the shop URL/domain being used selects the VPS serving the image; do not
+rewrite these URLs to another box's image hostname.
+
+For a product detail with no usable supplier image URL, the storefront may try the product's
+EAN filename through the same-origin `/lps-media/` route before showing its no-image state.
+Non-EAN supplier hotlinks are not rewritten.
 
 Drop new files onto the host `data/media/` path; nginx serves them immediately (read-only mount).
 

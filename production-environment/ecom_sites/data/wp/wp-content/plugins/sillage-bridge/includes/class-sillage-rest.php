@@ -55,6 +55,30 @@ final class Sillage_Rest {
 
 		register_rest_route(
 			'sillage/v1',
+			'/identity',
+			array_merge(
+				$args,
+				array(
+					'methods'  => 'GET',
+					'callback' => array( $this, 'identity_get' ),
+				)
+			)
+		);
+
+		register_rest_route(
+			'sillage/v1',
+			'/identity',
+			array_merge(
+				$args,
+				array(
+					'methods'  => 'POST',
+					'callback' => array( $this, 'identity_post' ),
+				)
+			)
+		);
+
+		register_rest_route(
+			'sillage/v1',
 			'/order-update',
 			array_merge(
 				$args,
@@ -64,6 +88,21 @@ final class Sillage_Rest {
 				)
 			)
 		);
+	}
+
+	/** Current store identity as WordPress holds it. Read-only. */
+	public function identity_get(): WP_REST_Response {
+		return new WP_REST_Response( Sillage_Identity::current(), 200 );
+	}
+
+	/** Write the store identity sent by sillage-core. The body is the identity record. */
+	public function identity_post( WP_REST_Request $request ): WP_REST_Response {
+		$body = json_decode( (string) $request->get_body(), true );
+		if ( ! is_array( $body ) ) {
+			return new WP_REST_Response( array( 'ok' => false, 'error' => 'body must be a JSON object' ), 400 );
+		}
+		$result = Sillage_Identity::apply( $body );
+		return new WP_REST_Response( $result, $result['ok'] ? 200 : 422 );
 	}
 
 	/**
@@ -154,8 +193,12 @@ final class Sillage_Rest {
 		 */
 		do_action( 'sillage_finalize', $done );
 
-		// Object cache last, so nothing above repopulates a stale entry.
-		wp_cache_flush();
+		// Object cache last, so nothing above repopulates a stale entry. Only the groups a raw SQL
+		// import changes are flushed. A full wp_cache_flush() also drops options, sessions and
+		// every storefront cache, which turned each sync into a cold start for every visitor.
+		foreach ( array( 'posts', 'post_meta', 'terms', 'term_meta' ) as $group ) {
+			wp_cache_flush_group( $group );
+		}
 		$done[] = 'object_cache';
 
 		return new WP_REST_Response(

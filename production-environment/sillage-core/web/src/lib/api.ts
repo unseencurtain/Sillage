@@ -158,6 +158,12 @@ export const api = {
       body: JSON.stringify({ live }),
     }),
   settings: () => request<Record<string, string>>("/api/settings"),
+  shipping: () => request<ShippingOverview>("/api/shipping"),
+  refreshShipping: () =>
+    request<{ ok: boolean; results: Array<{ vendor: string; ok: number; none: number; error: number }> }>(
+      "/api/shipping/refresh",
+      { method: "POST" },
+    ),
   saveSettings: (body: Record<string, string>) =>
     request<{
       ok: boolean;
@@ -436,4 +442,26 @@ export interface LogEvent {
   context: unknown;
   run_id: number | null;
   created_at: string;
+}
+
+export interface ShippingQuoteRow {
+  vendorSlug: string;
+  country: string;
+  costEur: number;
+  carrier: string | null;
+  deliveryDays: number | null;
+  status: string;
+  quotedAt: string;
+}
+
+export interface ShippingOverview {
+  rules: {
+    markupPercent: number;
+    markupFixedEur: number;
+    freeOverEur: number;
+    displayMode: "total" | "per_location";
+    refreshHours: number;
+  };
+  vendors: Array<{ slug: string; name: string; countries: number }>;
+  quotes: ShippingQuoteRow[];
 }

@@ -42,6 +42,15 @@ URLs come from tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default
 hot-applied into Bun runtime via `applyRuntimeUrls`; it does **not** by itself rewrite URLs
 already written on products — use overrides + a content rewrite.
 
+**Headless React image rule:** root-level EAN image URLs are requested through the current
+storefront origin's `/lps-media/<EAN>.<ext>` route, with a cache-version query. Caddy sends that
+path to the same box's `lps-media` container and `data/media/`; the active storefront URL therefore
+selects which VPS serves the file. Never hardcode another VPS's `images.*` hostname in React
+storefront code. Product-detail pages also try the product EAN in this same local media directory
+when the supplier image URL is missing or fails. Bump the frontend's `LOCAL_MEDIA_VERSION` when
+replacing files. Non-EAN supplier hotlinks remain external. A hostname must resolve to the intended
+VPS and its Caddy site must route `/lps-media/*` to that VPS's `lps-media` container.
+
 ```bash
 docker network create ecom_network
 docker network create redis_network

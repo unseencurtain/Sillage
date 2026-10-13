@@ -58,6 +58,7 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 | Products | `/products` | Catalogue search; Shop dropdown can pin **Keep hidden** |
 | Vendors | `/vendors` | BeautyFort + BTS editors; WPF parked notice |
 | Orders | `/orders` | Per-vendor order dispatch |
+| Shipping | `/shipping` | Vendor cost cache per country, markup, free-shipping threshold, total-or-per-parcel display |
 | Secrets | `/secrets` | Vendor API credentials (set / clear; never echoed) |
 | Settings | `/settings` | Schedule, pricing, cart fee, order rails, billing |
 | Logs | `/logs` | Event log |
@@ -342,6 +343,20 @@ Read by PHP bridge from `sil_settings` (fail-open). Independent of per-vendor MO
 | BTS form | `company_billing_bts` | Ops / dry-run payload (BTS invoice is portal-side) |
 
 ---
+
+### Shipping (`/shipping`)
+
+- Data: `sil_shipping_quotes` (vendor cost per vendor and country, cheapest option), refreshed by
+  `src/shipping/quotes.ts` through `src/cli/shipping-quotes.ts` (cron every 5 min; runs only when
+  `shipping_quote_refresh_hours` has passed). BTS quotes use one representative postcode and one
+  in-stock EAN per country (`QUOTE_POSTCODE`). BeautyFort uses its account delivery options.
+- Rules: `shipping_markup_percent`, `shipping_markup_fixed_eur`, `shipping_free_over_eur` (whole-bag
+  subtotal, 0 = off), `shipping_display_mode` (`total` or `per_location`). Defaults change nothing.
+- WordPress side: `plugins/sillage-warehouses/sillage-shipping.php` reads both tables directly. It
+  merges the per-location parcels into one charge in `total` mode, prices each parcel from the
+  cache, and keeps a `Sillage shipping` zone that covers all served countries.
+- Fail-closed: a location with no `ok` quote for a country gives no rate there.
+- Endpoints: `GET /api/shipping`, `POST /api/shipping/refresh`. Saving uses `PUT /api/settings`.
 
 ## Logs
 

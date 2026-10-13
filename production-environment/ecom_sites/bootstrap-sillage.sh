@@ -80,7 +80,7 @@ if (is_plugin_active($plugin)) {
 }'
 
 echo "==> Granting WordPress read access to sillage tables the plugin needs"
-for tbl in sil_ean_index sil_settings sil_vendors; do
+for tbl in sil_ean_index sil_settings sil_vendors sil_shipping_quotes; do
   if run_sql -e "SELECT 1 FROM information_schema.tables
                  WHERE table_schema='sillage' AND table_name='${tbl}';" | grep -q 1; then
     run_sql -e "GRANT SELECT ON sillage.${tbl} TO '${MYSQL_USER}'@'%'; FLUSH PRIVILEGES;"

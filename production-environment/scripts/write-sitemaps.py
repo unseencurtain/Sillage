@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Write static product sitemaps on the VPS host (no PHP, no Hub image required).
 
-Same rules as sillage-core/src/sync/sitemaps.ts: shop-visible products only,
-URL + lastmod date, no prices, no stock. Caddy serves the files.
+Every published product (including catalog-hidden ones), URL + lastmod date, no prices,
+no stock. Caddy serves the files at /sitemap.xml and /wp-sitemap*.xml.
+
+Configuration comes only from the stack's .env (WP_BASE_URL), so changing the public domain means
+editing one file. Environment variables of the same name override it.
 """
 from __future__ import annotations
 
@@ -32,11 +35,26 @@ DEST = Path(os.environ["SITEMAP_HOST_DIR"]) if os.environ.get("SITEMAP_HOST_DIR"
 # No default. The old one was another shop's domain, and getting this wrong is silent in the worst
 # way: robots.txt and every <loc> advertise that shop, so Google is handed a sitemap of URLs which
 # do not belong to the site serving it. The deploy and the cron both pass it explicitly.
-BASE = os.environ.get("WP_BASE_URL", "").rstrip("/")
-
 # Retail's stack. Wholesale runs a different database in a different container, so nothing here is
 # safe to hardcode on a box that hosts both.
 STACK = os.environ.get("STACK_DIR", "sillage")
+
+
+def _env_file_value(path: Path, key: str) -> str:
+    """Read KEY=value from a dotenv file (no quoting or expansion needed for these keys)."""
+    if not path.is_file():
+        return ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+BASE = (
+    os.environ.get("WP_BASE_URL")
+    or _env_file_value(Path(os.path.expanduser(f"~/{STACK}/.env")), "WP_BASE_URL")
+).rstrip("/")
 WPDB = os.environ.get("WORDPRESS_DB", "earth")
 DB_CONTAINER = os.environ.get("DB_CONTAINER", "ecom-db")
 
@@ -46,14 +64,6 @@ SELECT p.post_name, p.post_modified_gmt
  WHERE p.post_type = 'product'
    AND p.post_status = 'publish'
    AND p.post_name <> ''
-   AND p.ID NOT IN (
-     SELECT tr.object_id
-       FROM {WPDB}.wp_term_relationships tr
-       JOIN {WPDB}.wp_term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-       JOIN {WPDB}.wp_terms t ON t.term_id = tt.term_id
-      WHERE tt.taxonomy = 'product_visibility'
-        AND t.slug IN ('exclude-from-catalog', 'exclude-from-search')
-   )
  ORDER BY p.ID
 """
 
@@ -87,7 +97,7 @@ def lastmod(raw: str) -> str:
 
 def main() -> int:
     if not BASE:
-        print("WP_BASE_URL is required (e.g. https://codeinmoon.xyz)", file=sys.stderr)
+        print(f"WP_BASE_URL is required: set it in ~/{STACK}/.env", file=sys.stderr)
         return 2
     rows: list[tuple[str, str]] = []
     for line in mysql_tsv(SQL).splitlines():
@@ -107,7 +117,7 @@ def main() -> int:
     tmp.mkdir(parents=True)
     robots = (
         "User-agent: *\nDisallow: /wp-admin/\nAllow: /wp-admin/admin-ajax.php\n\n"
-        f"Sitemap: {BASE}/wp-sitemap.xml\n"
+        f"Sitemap: {BASE}/sitemap.xml\n"
     )
     (tmp / "robots.txt").write_text(robots, encoding="utf-8")
     index_items = []

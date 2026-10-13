@@ -45,6 +45,7 @@ require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-images.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-catalog.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-seo.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-search.php';
+require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-identity.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-rest.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-orders.php';
 require_once SILLAGE_BRIDGE_PATH . 'includes/class-sillage-cart.php';
