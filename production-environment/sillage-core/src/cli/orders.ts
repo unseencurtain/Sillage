@@ -13,6 +13,7 @@
  * `--live` is required to honour a live setting / spend money.
  */
 import { env, sil } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, query, waitForDatabase } from "../db/pool.ts";
 import { logger, setLogLevel } from "../lib/log.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../orders/dispatch.ts";
@@ -20,6 +21,9 @@ import { ingestOrder, readWooOrder, sweepDispatchableOrders } from "../orders/in
 import { pollDueOrders, pollVendorOrder } from "../orders/tracking.ts";
 
 setLogLevel(env.logLevel);
+// Vendor order dispatch authenticates with the same dashboard-managed secrets as the server, so a
+// silent CLI run must load the overlay too. Mirrors src/sync/run.ts and the other CLIs.
+loadSecretsOverlay();
 const log = logger("cli");
 
 const args = process.argv.slice(2);

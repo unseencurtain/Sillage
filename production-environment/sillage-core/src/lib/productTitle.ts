@@ -42,7 +42,7 @@ function collapseRepeats(raw: string): string {
       }
     }
     if (!collapsed) {
-      out.push(words[i]);
+      out.push(words[i]!);
       i++;
     }
   }

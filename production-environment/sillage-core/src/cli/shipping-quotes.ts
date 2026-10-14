@@ -6,11 +6,15 @@
  *   bun run src/cli/shipping-quotes.ts -- --force   # refresh now
  */
 import { env } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { closePool, waitForDatabase } from "../db/pool.ts";
 import { logger, setLogLevel } from "../lib/log.ts";
 import { refreshAllQuotes, refreshDue } from "../shipping/quotes.ts";
 
 setLogLevel(env.logLevel);
+// Cron runs this without the server, so apply the dashboard Secrets overlay here too; otherwise the
+// BTS token is empty and every quote fails. Mirrors src/sync/run.ts and the other CLIs.
+loadSecretsOverlay();
 const log = logger("cli");
 const force = process.argv.includes("--force");
 
