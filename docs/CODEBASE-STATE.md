@@ -63,7 +63,7 @@ Safety defaults on a fresh box: `orders_dry_run=1`, `orders_auto_dispatch=0`, `s
 | `sillage-bridge` | **LIVE** (the WooCommerce bridge) | Source under `ecom_sites/data/wp/wp-content/plugins/sillage-bridge/`. Closed job list. |
 | `sillage-warehouses/` | **LIVE** | 2 files: `sillage-warehouses.php` (841 lines) + `sillage-shipping.php`. Deployed by the **storefront** repo's `tools/sillage-deploy.ts` (`SILLAGE_PLUGINS=sillage-warehouses`), **not** by this repo's `ship.sh`/`deploy-vps.sh`. |
 | `sillage-storefront/` | referenced by the storefront deploy tool | No refs inside this repo (cross-repo). |
-| `headless-core/`, `headless-woocommerce/` | **legacy** (superseded by `sillage-bridge`) — referenced only by docs/README | *(uncertain: confirm before deleting)* |
+| `headless-core/`, `headless-woocommerce/` | **LIVE — verified installed on the `ecom` box (2026-10-14).** Also copied/activated by the `ops/test/` harness. **NOT dead weight.** | `plugins/README.md` says "Not installed" — that line is stale. |
 | `storefront-ean/` | references exist | |
 | `purelymail-smtp/` | references exist | SMTP integration. |
 | `plugins/README.md` line 11 says `sillage-warehouses` is **"Not installed"** — **STALE.** It is live on the retail box. |
@@ -168,7 +168,7 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 | **Hub image builds** | Must happen on the **explicitly selected builder VPS**; never in a cloud-agent VM; never copy Hub creds off the VPS. |
 | **Replacing a VPS** | **Never restore a DB into a fresh replacement.** Provision from source with `replicate-headless-vps.sh`. |
 | **`assets/` stray PNG** | Was dead weight; removed in this cleanup (see §9). |
-| **`docs/CLIENT_*` / binary client deliverables in the frontend repo** | One client `.docx` is committed against an explicit "do not commit" instruction — see the frontend `CODEBASE-STATE.md`. |
+| **`docs/CLIENT_*` / binary client deliverables in the frontend repo** | One client `.docx` had been committed against an explicit "do not commit" instruction; it was untracked and gitignored on 2026-10-14 — see the frontend `CODEBASE-STATE.md`. |
 
 ---
 
@@ -190,8 +190,9 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 
 ### ⚠️ Grey — decide, do not assume
 - `assets/645e08fa-*.png` — **unreferenced**, verified dead; deleted 2026-10-14.
-- `plugins/headless-core`, `plugins/headless-woocommerce` — look superseded by `sillage-bridge`;
-  still referenced by docs. **Confirm with the owner before deleting.**
+- ~~`plugins/headless-core`, `plugins/headless-woocommerce`~~ — **NOT dead.** Verified live on the
+  `ecom` box and used by the `ops/test/` harness. Do not delete. (An earlier guess called them
+  legacy; that was wrong.)
 - `product/` and `product-dropshipping/` — reference material, not build inputs. Keep unless the
   owner says otherwise.
 
@@ -285,4 +286,5 @@ ssh <alias> 'docker exec -i ecom php -l' < plugins/sillage-warehouses/sillage-wa
 - Full internals of `deploy-vps.sh` (52 KB) and `ship.sh`.
 - `python-analysis`, `product-dropshipping`, `tools/images/brasty`, `ops/test` internals.
 - Which override file is authoritative (`data/` vs `output/`).
-- Whether `headless-core` / `headless-woocommerce` plugins are truly dead.
+- ~~Whether `headless-core` / `headless-woocommerce` plugins are truly dead.~~ Resolved 2026-10-14:
+  they are live on the box. Not dead.
