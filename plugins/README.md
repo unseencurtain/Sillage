@@ -7,9 +7,10 @@ named the stale domain `dash.mirainikki.xyz`.)
 |---|---|---|
 | `headless-core` | API hardening, CORS allowlist, optional redirect | Installed on the `ecom` box (verified 2026-10-14) |
 | `headless-woocommerce` | Store API rate limit, admin API block, frontend cart links | Installed on the `ecom` box (verified 2026-10-14) |
-| `purelymail-smtp` | Encrypted SMTP for WordPress/WooCommerce mail | Installed on the `ecom` box (verified 2026-10-14); needs credentials |
-| `storefront-ean` | EAN lookup and catalogue endpoints for the storefront | Source retained; the retail box currently runs `sillage-storefront` instead — confirm before removing |
-| `sillage-storefront` | Storefront catalogue/EAN endpoints | Installed on the `ecom` box (verified 2026-10-14) |
+| `purelymail-smtp` | Encrypted SMTP for WordPress/WooCommerce mail. **Portable and store-agnostic** — no branding, notices or hostnames | Active on the `ecom` box; **fails closed** — no saved SMTP connection blocks all WordPress email |
+| `storefront-legal-notice` | Adds the EU legal-guarantee notice to customer order emails | Active on the `ecom` box. Separate from the SMTP plugin so the SMTP plugin can be reused without it |
+| `storefront-ean` | EAN (barcode) lookup only: `/cereve/v1/ean/{ean}` + `/cereve/v1/products/{id}/ean` | **Live** on the `ecom` box. EAN-only by design — catalogue/counts/delivery stay in `sillage-warehouses` |
+| `sillage-storefront` | Storefront image proxy: `GET /sillage/v1/img?src=&w=` | Installed on the `ecom` box (verified 2026-10-14) |
 | `sillage-warehouses` | Location A/B rules: country scope, shipping per location, order line meta | Live on the `ecom` box (verified 2026-10-14) |
 
 **None of these are dead weight** — `headless-core` and `headless-woocommerce` are also copied and

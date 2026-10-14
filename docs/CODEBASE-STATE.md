@@ -64,8 +64,9 @@ Safety defaults on a fresh box: `orders_dry_run=1`, `orders_auto_dispatch=0`, `s
 | `sillage-warehouses/` | **LIVE** | 2 files: `sillage-warehouses.php` (841 lines) + `sillage-shipping.php`. Deployed by the **storefront** repo's `tools/sillage-deploy.ts` (`SILLAGE_PLUGINS=sillage-warehouses`), **not** by this repo's `ship.sh`/`deploy-vps.sh`. |
 | `sillage-storefront/` | referenced by the storefront deploy tool | No refs inside this repo (cross-repo). |
 | `headless-core/`, `headless-woocommerce/` | **LIVE — verified installed on the `ecom` box (2026-10-14).** Also copied/activated by the `ops/test/` harness. **NOT dead weight.** | `plugins/README.md` says "Not installed" — that line is stale. |
-| `storefront-ean/` | references exist | |
-| `purelymail-smtp/` | references exist | SMTP integration. |
+| `storefront-ean/` | **LIVE** (EAN-only) | Serves `/cereve/v1/ean/{ean}` + `/cereve/v1/products/{id}/ean` via `sillage.sil_ean_index`, with `wc_get_product_id_by_global_unique_id` fallback. Deployed by the **storefront** repo's `tools/sillage-deploy.ts` (`storefront-ean`, active). |
+| `purelymail-smtp/` | **LIVE** (SMTP only) | Portable, store-agnostic encrypted SMTP transport; no order-email notices or branding. Deployed active by `tools/sillage-deploy.ts`. Fails closed: no saved connection blocks WordPress email. |
+| `storefront-legal-notice/` | **LIVE** | `storefront_legal_notice_email` on `woocommerce_email_after_order_table` adds the EU legal-guarantee notice to customer order emails. Kept separate from `purelymail-smtp` so the SMTP plugin stays reusable without it. |
 | `plugins/README.md` line 11 says `sillage-warehouses` is **"Not installed"** — **STALE.** It is live on the retail box. |
 
 ### `sillage-warehouses` facts (verified)
