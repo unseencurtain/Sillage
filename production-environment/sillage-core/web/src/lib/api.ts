@@ -8,15 +8,19 @@ export class ApiError extends Error {
   }
 }
 
+const BASE_PATH = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${BASE_PATH}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
   });
-  if (res.status === 401 && !path.startsWith("/api/auth/login")) {
-    if (!window.location.pathname.startsWith("/login")) {
-      window.location.href = "/login";
+  // `/me` is the auth guard's probe. Let RequireAuth handle it with an in-app navigation;
+  // reloading the whole document here left guests on a blank loading screen while it restarted.
+  if (res.status === 401 && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/me")) {
+    if (!window.location.pathname.startsWith(`${BASE_PATH}/login`)) {
+      window.location.href = `${BASE_PATH}/login`;
     }
     throw new ApiError("unauthorized", 401);
   }

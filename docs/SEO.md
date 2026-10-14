@@ -16,7 +16,7 @@ is a normal page view. We do not put price/stock JSON-LD on those pages on purpo
 
 ## Files Caddy serves (no PHP)
 
-Host dir: `~/ecom_sites/data/sitemaps/`
+Host dir: `~/sillage/data/sitemaps/`
 
 | URL | File |
 |---|---|
@@ -39,7 +39,7 @@ Full sync in Bun calls `writeProductSitemaps()` at the end. Fast ticks do not,
 unless they created brand-new Woo posts.
 
 **Live image `sillage-core:a0f03e1` does not include that Bun writer yet.** Until the
-next Hub deploy, ovhe writes the same XML with
+next Hub deploy, the selected deployment target writes the same XML with
 `python3 ~/sillage/scripts/write-sitemaps.py` (host cron `0 19 * * *` UTC, after the
 Dhaka 23:00 full rebuild). Caddy still serves the files either way.
 
@@ -64,7 +64,7 @@ Do not add Googlebot to the Caddy AI-crawler block ([`CRAWLER-SHIELD.md`](CRAWLE
 | Price / stock in sitemap | **None** |
 
 After Caddy is serving the files (Caddy user must be able to traverse
-`~/ecom_sites/data/sitemaps` — `write-sitemaps.py` sets the execute bit on parent dirs):
+`~/sillage/data/sitemaps` — `write-sitemaps.py` sets the execute bit on parent dirs):
 
 ```bash
 curl -sI https://prinscosmetic.eu/wp-sitemap.xml | head -5

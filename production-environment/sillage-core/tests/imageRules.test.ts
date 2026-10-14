@@ -95,12 +95,12 @@ describe("imageRules weak BeautyFort thumbs", () => {
 });
 
 describe("absolutizeImageUrl", () => {
-  const cdn = "https://images.codeinmoon.xyz";
+  const cdn = "https://images.example.org";
 
   test("gives a self-hosted filename this deployment's origin", () => {
-    expect(absolutizeImageUrl("9424115.jpg", cdn)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
-    expect(absolutizeImageUrl("/9424115.jpg", cdn)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
-    expect(absolutizeImageUrl("9424115.jpg", `${cdn}/`)).toBe("https://images.codeinmoon.xyz/9424115.jpg");
+    expect(absolutizeImageUrl("9424115.jpg", cdn)).toBe("https://images.example.org/9424115.jpg");
+    expect(absolutizeImageUrl("/9424115.jpg", cdn)).toBe("https://images.example.org/9424115.jpg");
+    expect(absolutizeImageUrl("9424115.jpg", `${cdn}/`)).toBe("https://images.example.org/9424115.jpg");
   });
 
   test("the same file follows the box it is deployed on", () => {

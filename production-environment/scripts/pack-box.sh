@@ -74,9 +74,8 @@ else
   done
 fi
 
-# Caddy's config is the one thing that matters and does not live in $HOME: without it a restored
-# box serves nothing on any hostname, and the crawler shield and TLS settings would have to be
-# reconstructed from memory. It rides along under _etc/ and adopt-box.sh rewrites the hostnames.
+# Caddy's config is included for disaster recovery. This pack is a full-stack backup, not a source
+# for new VPS provisioning; use replicate-headless-vps.sh for a fresh independent installation.
 if [[ -d /etc/caddy ]]; then
   echo "==> including /etc/caddy"
   sudo rm -rf "$HOME/_etc"
@@ -131,6 +130,6 @@ if [[ "$KEEP" -gt 0 ]]; then
 fi
 
 echo
-echo "Restore on another box: put this file in ~, then"
+echo "Disaster recovery only (not new VPS setup): put this file in ~, then"
 echo "  sudo tar --numeric-owner -C \$HOME -xzf $(basename "$OUT")"
 echo "  cd ~/<stack> && bash scripts/adopt-box.sh   # rewrites the hostnames for that box"

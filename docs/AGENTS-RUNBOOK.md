@@ -10,11 +10,10 @@ only the one deep doc you need. Do not wander the tree.
 | **Wholesale shop** (`wholesale.mirainikki.xyz`) | [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — separate repo, empty-VPS deploy of its own |
 | Schema, containers, what PHP may write | [`CONTEXT.md`](CONTEXT.md) |
 | Dashboard knobs (engineers) | [`OPERATOR-DASHBOARD.md`](OPERATOR-DASHBOARD.md) |
-| Fresh VPS from zero | [`VPS-DEPLOY.md`](VPS-DEPLOY.md) |
+| Fresh VPS from zero | [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md) |
 | **AI crawler / ecom 150% CPU** | [`CRAWLER-SHIELD.md`](CRAWLER-SHIELD.md) — Caddy `@heavybot` 403, copy onto every client VPS |
 | **Google / sitemaps / SEO** | [`SEO.md`](SEO.md) — Bun writes static sitemaps; Caddy serves them; PHP does not |
-| Move shop + photos to a **new** VPS | [`VPS-MIGRATE.md`](VPS-MIGRATE.md) |
-| Change shop / dash / image hosts | [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md) |
+| Change shop / dashboard / image host | [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md) |
 | What lives where (repo + VPS) | [`FOLDER-STRUCTURE.md`](FOLDER-STRUCTURE.md) |
 | Photos, Brasty, overrides | [`specs/S3-images.md`](specs/S3-images.md) |
 | Missing photos by **EAN** | [`EAN-IMAGE-SCRAPE.md`](EAN-IMAGE-SCRAPE.md) |
@@ -23,20 +22,18 @@ only the one deep doc you need. Do not wander the tree.
 | Hard rules (no PHP product SQL, dry-run) | [`../AGENTS.md`](../AGENTS.md) |
 
 GitHub: [unseencurtain/Sillage](https://github.com/unseencurtain/Sillage) (`main`).
-Live SSH: `ovhe` (`ubuntu@139.99.61.71`). App `~/sillage/`, data `~/ecom_sites/data/`.
+The SSH alias is environment-specific. App and bind-mounted data are under `~/sillage/`.
 
-**Hub images:** build and push **on ovhe** (`docker login` as `unseencurtain` lives there).
-Copy `sillage-core` (keep `data/` / `logs/`) and `wordpress-image` to `~/sillage/`, then
-`~/sillage/scripts/build-push-images.sh`. Pass `--core-only` only on a live shop engine bump.
-Do not install Docker in an agent VM and do not copy Hub credentials off the VPS. Canonical
-wording: [`HANDOFF.md`](HANDOFF.md) Memory. Empty VPS recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md).
+**New VPS:** follow [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md). For later code changes, follow
+[`SHIP.md`](SHIP.md); it requires a clean committed revision. Keep changes local until the owner
+decides the feature set is ready to commit and replicate.
 
 ---
 
 ## What this system is
 
 BeautyFort + BTS catalogues → WooCommerce shop `https://prinscosmetic.eu`,
-ops dashboard `https://sillage.prinscosmetic.eu`, image CDN `https://images.prinscosmetic.eu`.
+ops dashboard `https://prinscosmetic.eu/sillagedash`, image CDN `https://images.prinscosmetic.eu`.
 
 Bun (`sillage-core`) writes products into MariaDB. The WordPress plugin is a thin bridge
 (REST, cart rules, tracking notes). **PHP must not grow product-write paths.**
@@ -44,7 +41,7 @@ Bun (`sillage-core`) writes products into MariaDB. The WordPress plugin is a thi
 wholesale-perfumes is the **wholesale** shop only (`wholesale.mirainikki.xyz`). On retail it stays
 parked. Ocean = `oceanfragrances.csv` images only.
 Brasty = optional Playwright tool in git (`tools/images/brasty/`). The VPS dump
-`~/brasty/` was deleted 2026-09-03; needed hits live in `~/ecom_sites/data/media/`.
+`~/brasty/` was deleted 2026-09-03; needed hits live in `~/sillage/data/media/`.
 Not a vendor.
 
 ---
@@ -54,8 +51,8 @@ Not a vendor.
 - Hide-without-image stays **on**. Do not unhide the shop because one SKU lacks a photo.
 - Orders stay **dry-run** (`orders_dry_run=1`) and **manual dispatch** unless someone is
   intentionally spending money. Neither vendor has a sandbox.
-- BTS incremental stays at whatever **Minutes between syncs** is on the dashboard
-  (`fast_sync_minutes`). Daily full catalogue rebuild stays on (hour 23, `Asia/Dhaka`).
+- Incremental and daily full sync are paused on the current test VPS. Start sync manually for
+  verification; enable schedules only after the first full run and catalogue review.
   The 25%/7-day BTS stale recovery is emergency only.
 - Never commit `.env`, `secrets.overlay.env`, `*.pem`, WordPress/MariaDB datadirs, or the
   Brasty JPEG dump.
@@ -67,19 +64,21 @@ Not a vendor.
 | In git | Not in git (restore separately) |
 |---|---|
 | App, plugin, compose, docs | `~/sillage/.env`, `secrets.overlay.env` |
-| `sillage-core/data/image_overrides.json` (~11k EAN → URL) | `~/ecom_sites/data/media/` (CDN JPEGs) |
+| `production-environment/python-analysis/beautyfort-enriched/data/image_overrides.json` (EAN → URL) | `~/sillage/data/media/` (CDN JPEGs) |
 | `found-images-manifest.json` (CDN filenames) | Unreviewed scrape `~/sillage/ean-image-scrape/scraped/` (not shop until inspected) |
 | Matcher + `restore_found_images.py` | MariaDB (`earth` + `sillage`) |
 
 Shopify / BTS / oceanfragrances URLs in the override map are **hotlinks**. Only
-`images.prinscosmetic.eu/<file>` bytes must sit in `ecom_sites/data/media/`.
+`images.prinscosmetic.eu/<file>` bytes must sit in `~/sillage/data/media/`. Public image URLs are
+at the image hostname root; never append `/images/`.
 
 ---
 
 ## Day-2 loop (catalogue)
 
-1. Dashboard **Sync** → **Update prices & stock** (fast, live) or wait for the 30-min cron.
-2. **Rebuild catalogue** for new SKUs / taxonomy (or let the nightly full run).
+1. Dashboard **Sync** → **Update prices & stock** (fast, live). A scheduled run occurs only when
+   the operator has enabled that schedule.
+2. **Rebuild catalogue** for new SKUs / taxonomy. Scheduled full runs are currently paused.
 3. After changing `image_overrides.json`: copy onto the VPS bind-mount, **recreate**
    `sillage-core` and `sillage-cron` (in-process cache), then
 
@@ -89,10 +88,8 @@ Shopify / BTS / oceanfragrances URLs in the override map are **hotlinks**. Only
 
    Fast rewrite-only only selects `needs_price_write` and will skip image-only dirty rows.
 
-4. Deploy a code change: build `unseencurtain/sillage-core:<git-sha>` from `sillage-core/`
-   (exclude `node_modules`, `web/dist`, `.env`, logs), set `SILLAGE_CORE_IMAGE` in
-   `~/sillage/.env`, `docker compose up -d sillage-core sillage-cron`. Recipe:
-   [`VPS-DEPLOY.md`](VPS-DEPLOY.md).
+4. Deploy a code change with [`SHIP.md`](SHIP.md), selecting the target explicitly. For a new
+   host, use [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md).
 
 ---
 
@@ -124,7 +121,8 @@ verdict after `isUnusableImage`, so the row count equals the `hiddenNoImage` a s
 re-derive the rule from `sil_offers.image_url` in a query, which is what made the dashboard
 undercount retail by 11,328.
 
-Restore onto a new VPS: [`VPS-MIGRATE.md`](VPS-MIGRATE.md).
+New VPS setup is a clean deployment; do not restore a whole runtime folder or database. See
+[`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md).
 
 ---
 
@@ -141,10 +139,10 @@ BeautyFort test refs that the vendor no longer has are parked `needs_attention` 
 
 ---
 
-## Quick health (on `ovhe`)
+## Quick health (on the selected VPS)
 
 ```bash
-ssh ovhe
+ssh "$SSH_ALIAS"
 grep ^SILLAGE_CORE_IMAGE= ~/sillage/.env
 cd ~/sillage && docker compose --env-file .env ps
 # settings + last runs + open vendor orders
@@ -156,9 +154,9 @@ docker exec -e MYSQL_PWD="$(grep ^MYSQL_ROOT_PWD= ~/sillage/.env | cut -d= -f2-)
     SELECT id, status, dry_run, our_reference, vendor_order_number, last_error
       FROM sillage.sil_vendor_orders;
   '
-curl -sI https://prinscosmetic.eu/ | head -5
-curl -sI https://sillage.prinscosmetic.eu/login | head -5
-curl -sI https://images.prinscosmetic.eu/0000030160668.jpg | head -5
+curl -sI https://shop.example.com/ | head -5
+curl -sI https://shop.example.com/sillagedash/login | head -5
+curl -sI 'https://images.example.com/example.jpg' | head -5
 ```
 
 Shop writes on the Sync table should read `New n · Updated n · Prices n`, not `+ ~ $`.

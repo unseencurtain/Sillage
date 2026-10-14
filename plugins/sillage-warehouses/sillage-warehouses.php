@@ -30,6 +30,58 @@ const SILLAGE_WH_NAMES = array(
 );
 
 const SILLAGE_WH_CACHE_GROUP = 'sillage_warehouses';
+const SILLAGE_WH_META_INDEX  = 'sillage_wh_meta_key_post_id';
+const SILLAGE_WH_QUERY_GUARD_OPTION = 'sillage_wh_catalog_query_guard';
+
+/** Protect the database from duplicate cold catalogue reads unless an operator opts out. */
+function sillage_wh_catalog_query_guard_enabled(): bool {
+	return '0' !== (string) get_option( SILLAGE_WH_QUERY_GUARD_OPTION, '1' );
+}
+
+/** Clear the derived delivery-country map in both persistent and request-level caches. */
+function sillage_wh_invalidate_country_cache(): void {
+	delete_transient( SILLAGE_WH_TRANSIENT );
+	wp_cache_delete( 'vendor_countries', SILLAGE_WH_CACHE_GROUP );
+}
+
+/**
+ * Add the composite index used by the catalogue and delivery-country metadata joins.
+ *
+ * WordPress only indexes `post_id` and `meta_key` separately by default. After a large import,
+ * joins on both fields can scan every metadata row belonging to each product and keep MariaDB busy
+ * for minutes. This index is additive and safe to keep alongside WordPress's standard indexes.
+ */
+function sillage_wh_ensure_postmeta_index(): bool {
+	global $wpdb;
+	$known = get_option( 'sillage_wh_postmeta_index_version', 0 );
+	if ( 1 === (int) $known ) {
+		return true;
+	}
+
+	$table = '`' . str_replace( '`', '``', $wpdb->postmeta ) . '`';
+	$exists = $wpdb->get_var(
+		$wpdb->prepare(
+			'SELECT COUNT(*) FROM information_schema.statistics
+			 WHERE table_schema = DATABASE() AND table_name = %s AND index_name = %s',
+			$wpdb->postmeta,
+			SILLAGE_WH_META_INDEX
+		)
+	);
+	if ( 0 === (int) $exists ) {
+		$result = $wpdb->query(
+			"ALTER TABLE {$table} ADD INDEX `" . SILLAGE_WH_META_INDEX . "` (`meta_key`(191), `post_id`), ALGORITHM=INPLACE, LOCK=NONE" // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange
+		);
+		if ( false === $result ) {
+			error_log( 'Sillage Warehouses could not create the wp_postmeta lookup index: ' . $wpdb->last_error );
+			return false;
+		}
+	}
+
+	update_option( 'sillage_wh_postmeta_index_version', 1, false );
+	return true;
+}
+
+register_activation_hook( __FILE__, 'sillage_wh_ensure_postmeta_index' );
 
 /* Shipping prices, markup, threshold and the total-or-per-location display (sillage-shipping.php). */
 require_once __DIR__ . '/sillage-shipping.php';
@@ -95,15 +147,17 @@ function sillage_wh_cache_version(): string {
 	return $version;
 }
 
-/** Fresh entries live this long. The stale copy stays for an hour so a refresh never leaves a gap. */
-const SILLAGE_WH_FRESH_TTL = 300;
+/** Product price/stock follows hourly sync; taxonomy changes far less often. */
+const SILLAGE_WH_FRESH_TTL = 3600;
 const SILLAGE_WH_STALE_TTL = 3600;
+const SILLAGE_WH_TAXONOMY_TTL = 86400;
 const SILLAGE_WH_LOCK_TTL  = 30;
 
 /**
  * Read a cached catalogue entry. When the fresh copy has expired and another request is already
- * rebuilding it, the stale copy is served instead. A busy moment then costs one heavy query, not
- * one per visitor. Returns array( 'serve' => bool, 'value' => mixed ).
+ * rebuilding it, the stale copy is served instead; when there is no stale copy the request simply
+ * builds the response itself. Catalogue reads never block and never fail — throttling must never
+ * surface to a shopper as a "warming up" error. Returns array( 'serve' => bool, 'value' => mixed ).
  */
 function sillage_wh_cache_read( string $base ): array {
 	$fresh = wp_cache_get( $base . '_' . sillage_wh_cache_version(), SILLAGE_WH_CACHE_GROUP );
@@ -113,8 +167,16 @@ function sillage_wh_cache_read( string $base ): array {
 			'value' => $fresh,
 		);
 	}
+	if ( ! sillage_wh_catalog_query_guard_enabled() ) {
+		return array(
+			'serve' => false,
+			'value' => null,
+		);
+	}
 	$stale = wp_cache_get( $base . '_stale', SILLAGE_WH_CACHE_GROUP );
-	if ( is_array( $stale ) && ! wp_cache_add( $base . '_lock', 1, SILLAGE_WH_CACHE_GROUP, SILLAGE_WH_LOCK_TTL ) ) {
+	if ( ! wp_cache_add( $base . '_lock', 1, SILLAGE_WH_CACHE_GROUP, SILLAGE_WH_LOCK_TTL ) && is_array( $stale ) ) {
+		// Another request is rebuilding this key. Serve the stale copy so the page stays instant.
+		// A follower never waits and never errors; with no stale copy it builds the response too.
 		return array(
 			'serve' => true,
 			'value' => $stale,
@@ -127,9 +189,9 @@ function sillage_wh_cache_read( string $base ): array {
 }
 
 /** Store a freshly built catalogue entry and release the rebuild lock. */
-function sillage_wh_cache_write( string $base, $value ): void {
-	wp_cache_set( $base . '_' . sillage_wh_cache_version(), $value, SILLAGE_WH_CACHE_GROUP, SILLAGE_WH_FRESH_TTL );
-	wp_cache_set( $base . '_stale', $value, SILLAGE_WH_CACHE_GROUP, SILLAGE_WH_STALE_TTL );
+function sillage_wh_cache_write( string $base, $value, int $fresh_ttl = SILLAGE_WH_FRESH_TTL, int $stale_ttl = SILLAGE_WH_STALE_TTL ): void {
+	wp_cache_set( $base . '_' . sillage_wh_cache_version(), $value, SILLAGE_WH_CACHE_GROUP, $fresh_ttl );
+	wp_cache_set( $base . '_stale', $value, SILLAGE_WH_CACHE_GROUP, $stale_ttl );
 	wp_cache_delete( $base . '_lock', SILLAGE_WH_CACHE_GROUP );
 }
 
@@ -138,7 +200,7 @@ function sillage_wh_cache_write( string $base, $value ): void {
  * Invalidate catalogue caches after a product write. Debounced to one bump per minute: a sync writes
  * many products, and one bump per product would make every visitor rebuild every catalogue key.
  * Entries also expire on their own within SILLAGE_WH_FRESH_TTL, so a skipped bump only delays a
- * change by minutes.
+ * product change by at most an hour.
  */
 function sillage_wh_flush_cache(): void {
 	if ( ! wp_cache_add( 'bump_gate', 1, SILLAGE_WH_CACHE_GROUP, 60 ) ) {
@@ -151,13 +213,24 @@ function sillage_wh_bump_cache_version(): void {
 	wp_cache_set( 'cache_version', (string) round( microtime( true ) * 1000 ), SILLAGE_WH_CACHE_GROUP, 0 );
 }
 
+/** Return a retryable response while another request fills a cold catalogue cache. */
+function sillage_wh_catalog_busy_error(): WP_Error {
+	return new WP_Error(
+		'sillage_catalog_busy',
+		__( 'The catalogue is warming up. Please retry shortly.', 'sillage-warehouses' ),
+		array(
+			'status'      => 503,
+			'retry_after' => 1,
+		)
+	);
+}
+
 /**
  * Runs once per sync, from finalize. Rebuilds the country sets here, on the sync request, so the
  * heavy join never runs on a visitor's page load (the delivery endpoint reads them on every load).
  */
 function sillage_wh_on_sync_finished(): void {
-	delete_transient( SILLAGE_WH_TRANSIENT );
-	wp_cache_delete( 'vendor_countries', SILLAGE_WH_CACHE_GROUP );
+	sillage_wh_invalidate_country_cache();
 	sillage_wh_vendor_countries();
 	sillage_wh_bump_cache_version();
 	sillage_wh_sync_wc_countries();
@@ -446,7 +519,11 @@ add_action(
  * Public GET responses are kept in the persistent object cache, keyed by route, query, and
  * warehouse scope. Carts and checkout are never cached.
  * ----------------------------------------------------------------*/
-const SILLAGE_WH_STORE_CACHE_ROUTES = array( '/wc/store/v1/products', '/wc/store/v1/products/categories' );
+const SILLAGE_WH_STORE_CACHE_ROUTES = array(
+	'/wc/store/v1/products',
+	'/wc/store/v1/products/categories',
+	'/wc/store/v1/products/brands',
+);
 
 /** Cache base key for a cacheable catalogue request, or null when the request must not be cached. */
 function sillage_wh_store_cache_base( WP_REST_Request $request ): ?string {
@@ -503,12 +580,17 @@ add_filter(
 			wp_cache_delete( $base . '_lock', SILLAGE_WH_CACHE_GROUP );
 			return $response;
 		}
+		$route = untrailingslashit( $request->get_route() );
+		$taxonomy_ttl = in_array( $route, array( '/wc/store/v1/products/categories', '/wc/store/v1/products/brands' ), true );
+		$ttl = $taxonomy_ttl ? SILLAGE_WH_TAXONOMY_TTL : SILLAGE_WH_FRESH_TTL;
 		sillage_wh_cache_write(
 			$base,
 			array(
 				'data'    => $response->get_data(),
 				'headers' => $response->get_headers(),
-			)
+			),
+			$ttl,
+			$ttl
 		);
 		return $response;
 	},
@@ -673,8 +755,23 @@ add_action(
 			wp_die( esc_html__( 'Not allowed.', 'sillage-warehouses' ), 403 );
 		}
 		check_admin_referer( 'sillage_wh_flush' );
-		sillage_wh_flush_cache();
+		sillage_wh_invalidate_country_cache();
+		sillage_wh_bump_cache_version();
 		wp_safe_redirect( add_query_arg( 'flushed', '1', admin_url( 'admin.php?page=sillage-warehouses' ) ) );
+		exit;
+	}
+);
+
+add_action(
+	'admin_post_sillage_wh_save_performance',
+	static function () {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'sillage-warehouses' ), 403 );
+		}
+		check_admin_referer( 'sillage_wh_save_performance' );
+		$enabled = isset( $_POST['catalog_query_guard'] ) && '1' === (string) wp_unslash( $_POST['catalog_query_guard'] );
+		update_option( SILLAGE_WH_QUERY_GUARD_OPTION, $enabled ? '1' : '0', false );
+		wp_safe_redirect( add_query_arg( 'performance_saved', '1', admin_url( 'admin.php?page=sillage-warehouses' ) ) );
 		exit;
 	}
 );
@@ -685,11 +782,15 @@ function sillage_wh_render_settings(): void {
 	}
 	$sets  = sillage_wh_vendor_countries();
 	$names = function_exists( 'WC' ) && WC()->countries ? WC()->countries->get_countries() : array();
+	$query_guard = sillage_wh_catalog_query_guard_enabled();
 	?>
 	<div class="wrap">
 		<h1><?php esc_html_e( 'Warehouses', 'sillage-warehouses' ); ?></h1>
 		<?php if ( isset( $_GET['flushed'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
 			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Country cache cleared.', 'sillage-warehouses' ); ?></p></div>
+		<?php endif; ?>
+		<?php if ( isset( $_GET['performance_saved'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Storefront query guard setting saved.', 'sillage-warehouses' ); ?></p></div>
 		<?php endif; ?>
 
 		<p><?php esc_html_e( 'Country sets are read from each product (_sillage_ship_countries). Warehouses appear to customers as Location A and Location B only.', 'sillage-warehouses' ); ?></p>
@@ -721,6 +822,20 @@ function sillage_wh_render_settings(): void {
 				<?php esc_html_e( 'Clear country cache', 'sillage-warehouses' ); ?>
 			</a>
 		</p>
+
+		<hr>
+		<h2><?php esc_html_e( 'Storefront query guard', 'sillage-warehouses' ); ?></h2>
+		<p><?php esc_html_e( 'When enabled, one request rebuilds a cold catalogue response while simultaneous visitors wait briefly or receive a retryable response. This protects smaller VPS boxes from duplicate WooCommerce queries. Turn it off only for controlled capacity comparisons on a stronger VPS; the response cache remains enabled.', 'sillage-warehouses' ); ?></p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<input type="hidden" name="action" value="sillage_wh_save_performance">
+			<?php wp_nonce_field( 'sillage_wh_save_performance' ); ?>
+			<label for="sillage-catalog-query-guard"><?php esc_html_e( 'Cold-query coalescing', 'sillage-warehouses' ); ?></label>
+			<select id="sillage-catalog-query-guard" name="catalog_query_guard">
+				<option value="1" <?php selected( $query_guard ); ?>><?php esc_html_e( 'On — balanced (recommended)', 'sillage-warehouses' ); ?></option>
+				<option value="0" <?php selected( ! $query_guard ); ?>><?php esc_html_e( 'Off — capacity test', 'sillage-warehouses' ); ?></option>
+			</select>
+			<?php submit_button( __( 'Save performance mode', 'sillage-warehouses' ), 'secondary', 'submit', false ); ?>
+		</form>
 	</div>
 	<?php
 }

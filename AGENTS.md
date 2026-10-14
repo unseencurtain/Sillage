@@ -4,25 +4,27 @@ Multi-vendor dropshipping sync between two wholesale APIs and a WooCommerce stor
 (**BeautyFort + BTS** retail). Wholesale-perfumes is a **separate product** in
 [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
+**New here or handing off? Read [`docs/CODEBASE-STATE.md`](docs/CODEBASE-STATE.md) first** — it maps
+what exists, what is done, what is safe vs dangerous, where secrets live, and what may / may not be
+committed. Do not assume; it lists the traps.
+
 **Changed code? Ship it with one command: [`docs/SHIP.md`](docs/SHIP.md).**
 
 ```bash
-./production-environment/scripts/ship.sh              # gates → build → push → ovhe, ~90s
-./production-environment/scripts/ship.sh --to ovh     # any other box, same command
-./production-environment/scripts/ship.sh --status     # what is each box running?
+./production-environment/scripts/ship.sh --to <ssh-alias>  # gates → build → push → selected box
+./production-environment/scripts/ship.sh --status --to <ssh-alias>
 ```
 
 Never hand-run rsync / docker build / compose up to deploy the engine again. `ship.sh` does the
 whole sequence and verifies the result, including that no operator setting moved. `deploy-vps.sh`
 is only for turning an empty VPS into a shop.
 
-**Wiping a VPS and standing both shops up again? Read
-[`docs/REBUILD-FROM-SCRATCH.md`](docs/REBUILD-FROM-SCRATCH.md) first.** It carries the settled
-hostnames and operator usernames, the exact command order, and the traps that turned the first
-rebuild into an all-day job. Do not re-derive any of it and do not ask for those details again.
+**Building a new VPS from scratch? Read [`docs/NEW-VPS-PLAN.md`](docs/NEW-VPS-PLAN.md) first.**
+It is the current ordered process. Historical trial-and-error notes are archived and are not a
+setup recipe.
 
 **Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first — including the Memory section.** Hub images are
-built on ovhe (`docker login` lives there). This repo is the **retail** shop only. Wholesale-perfumes
+built on the explicitly selected builder host (`docker login` lives there). This repo is the **retail** shop only. Wholesale-perfumes
 is [unseencurtain/sillage-b2b](https://github.com/unseencurtain/sillage-b2b) — do not add it here.
 
 **Read [`docs/AGENTS-RUNBOOK.md`](docs/AGENTS-RUNBOOK.md)** for the whole-project loop (sync, photos,
@@ -83,15 +85,15 @@ What lives where: [`docs/FOLDER-STRUCTURE.md`](docs/FOLDER-STRUCTURE.md).
    direction, and no banner may claim a box is safe.
 7. **Client-facing behaviour has a human doc.** Keep [`docs/CLIENT-GUIDE.md`](docs/CLIENT-GUIDE.md)
    matching the live UI and shop rules in the same change.
-8. **Hub images are built and pushed on ovhe.** That host is `docker login` as `unseencurtain`,
-   and it is what `ship.sh --builder` defaults to. Do not build Hub images in a cloud-agent VM or
-   copy Docker Hub credentials off the VPS. See [`docs/HANDOFF.md`](docs/HANDOFF.md) **Memory**.
+8. **Hub images are built and pushed on the explicitly selected builder VPS.** Do not build Hub
+   images in a cloud-agent VM or copy Docker Hub credentials off the VPS. See [`docs/SHIP.md`](docs/SHIP.md).
    Empty VPS: `bootstrap-host.sh` then `deploy-vps.sh` (core + WordPress). Wholesale is
    [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 9. **Automate the second time.** If a task takes more than one hand-run command and will happen
    again, it becomes a script in `production-environment/scripts/` with a doc line, in the same
    change. Shipping code is `ship.sh`; building a box is `deploy-vps.sh`; moving a box is
-   `pack-box.sh` + `adopt-box.sh`. Nothing that a person has to remember in order.
+   `pack-box.sh` is for disaster-recovery archives only. A new host is provisioned from source with
+   `replicate-headless-vps.sh`; never restore a database into a fresh replacement VPS.
 
 ## Commands
 
@@ -114,14 +116,13 @@ Compose: `production-environment/compose.yaml` only (legacy
 Hub images: `unseencurtain/sillage-core:<sha>`, `unseencurtain/sillage-wordpress:<sha>`.
 
 ```bash
-cp production-environment/.env.example production-environment/.env   # fill vendors
-./production-environment/scripts/deploy-vps.sh \
-  --host ovhe --shop … --dash … --images … --skip-build   # or omit --skip-build to push
+bash production-environment/scripts/replicate-headless-vps.sh \
+  --host <ssh-alias> --shop shop.example.com --images images.example.com \
+  --dashboard-path /sillagedash
 ```
 
-Full recipe: `docs/VPS-DEPLOY.md`. **Rules that apply to every box:
-[`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) — read it before deploying.** Short version: SSH
-`ovh` (`51.79.255.226`) and SSH `ovhe` (`139.99.61.71`) are both production boxes running both
-shops, on their own hostnames and their own settings. There is no development tier, because
-neither wholesaler offers one. Bind mounts only; pack and move a box with `docs/VPS-MIGRATE.md`.
+Full recipe: `docs/NEW-VPS-PLAN.md`; script reference: `docs/VPS-DEPLOY.md`. **Rules that apply to every box:
+[`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) — read it before deploying.** SSH aliases and
+public domains are inputs for each run; do not assume or hard-code a particular VPS. New VPS setup
+is a clean deploy; never copy a runtime folder or database. Copy product photos only when requested.
 Split `ecom_sites/.env` / `sillage-core/.env` are local-dev / migration leftovers only.

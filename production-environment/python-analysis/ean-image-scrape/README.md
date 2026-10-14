@@ -14,7 +14,7 @@ A photo is always saved as `{ean}.jpg`. Rows with no EAN are skipped.
   reports/
 ```
 
-## Run on `ovhe`
+## Run on the selected target VPS
 
 ```bash
 DIR=~/sillage/ean-image-scrape

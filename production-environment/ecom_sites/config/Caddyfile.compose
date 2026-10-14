@@ -1,11 +1,11 @@
-# Local edge: keep public URLs at /lps-media/* while ecom never serves binaries.
+# Local development edge only. Production uses https://images.<domain>/<file> at host root.
 :80 {
 	header {
 		-Server
 		-Via
 		-X-Powered-By
 	}
-	handle_path /lps-media/* {
+	handle_path /images/* {
 		header {
 			-Server
 			-Via

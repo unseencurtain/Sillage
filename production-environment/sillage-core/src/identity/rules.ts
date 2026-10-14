@@ -35,12 +35,6 @@ export const EMAIL_FIELDS: IdentityField[] = [
   "support_email",
 ];
 
-/**
- * Values from the box this one was copied from. Refused on save, and adopt fails while any of them
- * is still in WordPress. Add a value here when a store leaves a domain or address behind.
- */
-export const RETIRED_IDENTITY = ["codeinmoon"];
-
 export interface IdentityProblem {
   field: string;
   message: string;
@@ -59,9 +53,6 @@ export function validateIdentity(values: Partial<Record<IdentityField, string>>)
     if (value === "") continue;
     if (value.length > 120) problems.push({ field, message: "too long" });
     if (/[<>"]/.test(value)) problems.push({ field, message: "contains < > or quotes" });
-    if (RETIRED_IDENTITY.some((r) => value.toLowerCase().includes(r))) {
-      problems.push({ field, message: "uses an address from a previous store; enter this store's address" });
-    }
     if (EMAIL_FIELDS.includes(field) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       problems.push({ field, message: "not a valid email address" });
     }

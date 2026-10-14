@@ -84,7 +84,7 @@ A human checks the BTS portal. Decision 20 in [`DECISIONS.md`](DECISIONS.md).
 
 ## How to verify (read-only)
 
-On `ovhe`, inside `sillage-core` (uses the container JWT; prints **no** address fields):
+On the selected target, inside `sillage-core` (uses the container JWT; prints **no** address fields):
 
 ```bash
 docker exec sillage-core bun -e '

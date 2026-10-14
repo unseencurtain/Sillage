@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live photo inventory. Run on ovhe only. Does not change the shop.
+# Live photo inventory. Run on the selected target only. Does not change the shop.
 set -euo pipefail
 HOME_U="${HOME:-/home/ubuntu}"
 OUT="${HOME_U}/photo-inventory"

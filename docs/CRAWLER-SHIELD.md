@@ -14,13 +14,14 @@ and not polite enough for prefork PHP.
 block on the **shop** host only, images CDN left open. `deploy-vps.sh` writes it
 automatically. On an already-running host, paste the snippet below and reload Caddy.
 
-Deep recipe: [`VPS-DEPLOY.md`](VPS-DEPLOY.md). Domain moves: [`DOMAIN-MIGRATION.md`](DOMAIN-MIGRATION.md).
+Deployment recipe: [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md). Domains are changed through the deploy flags.
 
 ---
 
 ## What we put on the edge
 
-Live file: `/etc/caddy/Caddyfile` (host Caddy, **not** inside `~/sillage`).
+Editable Sillage site: `~/sillage/ops/caddy/sillage.caddy`, linked into
+`/etc/caddy/sites/sillage.caddy`. The main `/etc/caddy/Caddyfile` imports site files.
 
 Canonical snippet in git:
 [`production-environment/ecom_sites/config/caddy-heavybot.snippet`](../production-environment/ecom_sites/config/caddy-heavybot.snippet)
@@ -58,22 +59,21 @@ image host unless you have a reason.
 
 ### New host (automatic)
 
-`./production-environment/scripts/deploy-vps.sh` writes the shop block into
-`/etc/caddy/Caddyfile`. No extra step.
-
-**Caveat:** that script **replaces** the whole Caddyfile. Re-add any old-domain
-`redir` blocks after a deploy (live still has `*.slilverbelt.xyz` → new hosts).
+`replicate-headless-vps.sh` calls `deploy-vps.sh`, which writes the Sillage site file,
+validates the imported Caddy config, and reloads Caddy. It does not replace the main
+Caddyfile or other site files. Change the hostnames through the script flags, then rerun
+the deployment to update the managed site.
 
 ### Already-running host (2 minutes)
 
-1. `sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%s)`
+1. Back up `~/sillage/ops/caddy/sillage.caddy`.
 2. Inside the **shop** `{ … }` block, add the `@heavybot` handle as the **first**
    handler (before `reverse_proxy`).
 3. Validate and reload — do not skip validate:
 
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+sudo ~/sillage/scripts/reload-caddy.sh
 ```
 
 4. Check:

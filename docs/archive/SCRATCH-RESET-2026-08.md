@@ -1,4 +1,7 @@
-# Scratch reset — restore path
+# Archived scratch reset — restore path
+
+Historical restore instructions for a specific 2026-08 deployment and backups. Do not use these
+commands for a new VPS; current setup is in [`../NEW-VPS-PLAN.md`](../NEW-VPS-PLAN.md).
 
 Baseline taken before wiping the ovhe shop catalogue and splitting B2B into its own repo.
 

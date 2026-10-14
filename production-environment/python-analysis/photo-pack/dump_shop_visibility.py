@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dump published Woo products + visibility + thumbs from the LIVE MariaDB.
 
-Must run on ovhe (uses docker exec ecom-db). Output is tab-separated, 16 columns,
+Must run on the selected target (uses docker exec ecom-db). Output is tab-separated, 16 columns,
 consumed by build_inventory.py.
 """
 from __future__ import annotations

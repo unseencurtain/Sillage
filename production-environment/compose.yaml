@@ -51,6 +51,8 @@ x-sillage-common: &sillage-common
     - ${SILLAGE_SECRETS_FILE:-./sillage-core/data/secrets.overlay.env}:/app/data/secrets.overlay.env
     # Host path Caddy serves as /wp-sitemap*.xml. Inside the container always /app/data/sitemaps.
     - ${SITEMAP_HOST_DIR:-./ecom_sites/data/sitemaps}:/app/data/sitemaps
+    # Dashboard assets are built on the deployment laptop and synced to this bind mount.
+    - ${SILLAGE_WEB_DIST_DIR:-./sillage-core/web/dist}:/app/web/dist:ro
 
 
 services:
@@ -64,10 +66,8 @@ services:
     ports:
       - "${DB_BIND:-127.0.0.1}:${DB_HOST_PORT:-3307}:3306"
     volumes:
-      # Raw InnoDB files. Nothing on the host may read or write them, so they live in a Docker
-      # volume rather than a host directory. Set WP_DB_DATA to a path to bind-mount for
-      # development.
-      - ${WP_DB_DATA:-wp_db}:/var/lib/mysql
+      # Keep raw InnoDB files under this stack so a home-folder archive is restorable.
+      - ${WP_DB_DATA:-./ecom_sites/data/wp-db}:/var/lib/mysql
       - ${MARIADB_CNF:-./ecom_sites/config/mariadb.cnf}:/etc/mysql/conf.d/sillage.cnf:ro
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PWD}
@@ -118,11 +118,9 @@ services:
       ecom-db:
         condition: service_healthy
     volumes:
-      # WordPress core comes from the image, and wp-content (the operator's uploaded plugins,
-      # themes and any media WordPress writes) persists in the volume. Keeping core on the host
-      # is what let a datadir drift to a newer WordPress than the image it ran from. Set
-      # WP_DATA to a path to bind-mount for development.
-      - ${WP_DATA:-wp_html}:/var/www/html
+      # The whole WordPress tree is bind-mounted under the stack for backup and direct plugin
+      # management. Updating WordPress means updating the pinned image, not editing core here.
+      - ${WP_DATA:-./ecom_sites/data/wp}:/var/www/html
       - ${PHP_INI:-./ecom_sites/config/php.ini}:/usr/local/etc/php/conf.d/conf.ini:ro
       - ${APACHE_HIDE_CONF:-./ecom_sites/config/apache-hide-version.conf}:/etc/apache2/conf-enabled/z-hide-version.conf:ro
     environment:
@@ -192,8 +190,3 @@ networks:
 # Only state that no host tool may touch. Product photos, sitemaps and the config files stay on
 # the host, because host processes genuinely take part: the photo scrapers write the media
 # directory and the host's Caddy serves the sitemaps.
-volumes:
-  wp_db:
-    name: ${WP_DB_VOLUME:-sillage_wp_db}
-  wp_html:
-    name: ${WP_VOLUME:-sillage_wp_html}

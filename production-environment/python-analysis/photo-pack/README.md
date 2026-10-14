@@ -1,9 +1,10 @@
-# Photo inventory (ovhe)
+# Photo inventory (selected target VPS)
 
 Live lists are built **on the VPS**, not on a laptop agent VM:
 
 ```bash
-ssh ovhe
+SSH_ALIAS="your-configured-ssh-alias"
+ssh "$SSH_ALIAS"
 bash ~/sillage/python-analysis/photo-pack/run_on_vps.sh
 # writes ~/photo-inventory/ (CSVs + COUNTS.json)
 ```

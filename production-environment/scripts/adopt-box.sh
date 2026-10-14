@@ -3,9 +3,10 @@
 # Make a restored stack answer on *this* box's hostnames.
 #
 #   cd ~/sillage && bash scripts/adopt-box.sh \
-#       --shop prinscosmetic.eu --dash sillage.prinscosmetic.eu --images images.prinscosmetic.eu \
+#       --shop shop.example.com --dash shop.example.com --images images.example.com \
 #       --role development
 #
+# Recovery-only: restore a full backup to recover an existing deployment. Do not use this for new VPS setup; use replicate-headless-vps.sh.
 # Run after unpacking a pack-box.sh tarball. A restored stack is a byte-for-byte copy of another
 # box, which means every hostname in it still names that box. There are six places holding one, and
 # missing any single one gives you a shop that half-works — pages render and every image is broken,
@@ -186,15 +187,7 @@ docker exec "$ENGINE" bun run src/cli/identity.ts push >/dev/null || {
   echo "    could not write identity into WordPress (is the sillage-bridge plugin active?)" >&2; exit 1; }
 docker exec "$ENGINE" bun run src/cli/identity.ts check || {
   echo "    identity still differs from the record; fix it and run adopt-box.sh again" >&2; exit 1; }
-# Any retired address left anywhere in WordPress options (not only the fields above) blocks the adopt.
-RETIRED_HITS=$(mysql -N -e "SELECT COUNT(*) FROM \`${WORDPRESS_DB}\`.wp_options
-  WHERE option_value LIKE '%codeinmoon%' AND option_name NOT LIKE '_transient%';")
-if [[ "${RETIRED_HITS:-0}" != "0" ]]; then
-  echo "    ${RETIRED_HITS} wp_options rows still mention a previous store's domain (codeinmoon)." >&2
-  echo "    Find them: SELECT option_name FROM wp_options WHERE option_value LIKE '%codeinmoon%';" >&2
-  exit 1
-fi
-echo "    identity matches the record; no retired addresses in wp_options"
+echo "    identity matches the editable record"
 
 echo "==> flushing caches"
 docker exec "${VALKEY_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 valkey)}" \

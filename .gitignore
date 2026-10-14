@@ -31,6 +31,8 @@ production-environment/ecom_sites/data/wp/wp-content/**
 production-environment/ecom_sites/data/wp/wp-content/plugins/**
 !production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/
 !production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/**
+!production-environment/ecom_sites/data/wp/wp-content/mu-plugins/
+!production-environment/ecom_sites/data/wp/wp-content/mu-plugins/sillage-disable-wc-admin.php
 
 production-environment/ecom_sites/snapshots/
 

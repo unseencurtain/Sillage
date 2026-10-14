@@ -10,7 +10,7 @@ Order: Open Facts / Go-UPC **by EAN** → Open Facts search by **brand + name**
 
 ## Live VPS work dir
 
-`~/sillage/ean-image-scrape/` on `ovhe`.
+`~/sillage/ean-image-scrape/` on the selected target VPS.
 
 `scraped/{ean}.jpg` is **not** a quality guarantee. A live size pass (2026-09-03):
 **13,204** files, **~1,943 under 8 KB** (likely icons / generic marks / empty).

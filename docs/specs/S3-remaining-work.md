@@ -28,19 +28,10 @@ vendor row, connector, or SKU prefix for an image source. The full table is in `
 wholesaler `ocean`; that was wrong and was corrected in `568eb38`. Surviving `ocean` strings in the
 tree are deliberate image-source references — leave them.
 
-**Two VPS hosts exist and they are not interchangeable.**
-
-| SSH host | Hostname | Role | What you may do |
-|---|---|---|---|
-| `ovhe` | `ovh-experi` | **Live** retail shop | Deploy, migrate, sync, restart |
-| `ovh` | `ovh` | Unused (empty) | Do not deploy unless repurposed |
-
-Test on `ovhe` once local `bun test` / `bun run typecheck` are green. Regardless of host: never run
-`--source=live` against the wholesaler, and never dispatch a real vendor order — that spends real
-money and neither API has a sandbox.
-
-Applied-migration state, verified 7 Aug: local `007`, `ovhe` `008`, `ovh` `009`. Migrations `010`
-onward are unapplied everywhere, and `sil_vendors` holds only `beautyfort` and `bts`.
+**VPS names and aliases are not project constants.** Supply the SSH alias, shop hostname, image
+hostname, and dashboard path explicitly for every new target. Never run `--source=live` against
+an unintended vendor account, and never dispatch a real vendor order without explicit operator
+intent; neither API has a sandbox. For current test state, see [`../HANDOFF.md`](../HANDOFF.md).
 
 ---
 
@@ -163,9 +154,10 @@ Files land as `EAN.jpg`. Three steps turn them into storefront images:
 2. The images need a public URL, because this store never creates WordPress attachments — every
    product image is an external URL rendered by a plugin filter. Host directory
    `production-environment/ecom_sites/data/media/` is bind-mounted read-only into the dedicated
-   `lps-media` nginx container (not a named volume; not under `data/wp/`). Edge proxy keeps the
-   public path at `/lps-media/` (`shop-gateway` locally, host Caddy on VPS → port 105). Set
-   `LPS_MEDIA_BASE_URL` in `tools/images/brasty/.env` to `https://images.prinscosmetic.eu` (or
+   `lps-media` nginx container (not a named volume; not under `data/wp/`). The public URL is the
+   image hostname root, e.g. `https://images.prinscosmetic.eu/<EAN>.jpg`; do not append `/images/`
+   or expose the internal service name. Set `LPS_MEDIA_BASE_URL` in `tools/images/brasty/.env` to
+   `https://images.prinscosmetic.eu` (or
    `http://localhost/lps-media` locally).
 3. The merge script writes an EAN → URL map into `production-environment/sillage-core/data/image_overrides.json`,
    merging rather than overwriting, because the Python enricher already owns thousands of keys there

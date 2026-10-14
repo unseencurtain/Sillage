@@ -3,16 +3,16 @@
 **This is the human guide.** It is written for the people who run the shop and the operations
 dashboard — not for developers. Button names and page titles match what you see on screen.
 
-**Live sites (September 2026)**
+**Private preview sites (October 2026)**
 
 | What | Address |
 |---|---|
-| Customer shop | https://codeinmoon.xyz |
-| Operations dashboard | https://sillage.codeinmoon.xyz |
-| Track an order | https://codeinmoon.xyz/track-order/ |
+| Customer shop / WordPress Admin | https://prinscosmetic.eu |
+| Operations dashboard | https://prinscosmetic.eu/sillagedash |
+| Track an order | https://prinscosmetic.eu/track-order/ |
 
 A separate wholesale-perfumes shop (different repo, different catalogue, €300 minimum) lives at
-https://wholesale.codeinmoon.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
+https://wholesale.mirainikki.xyz — see [sillage-b2b](https://github.com/unseencurtain/sillage-b2b).
 This Sillage dashboard is **BeautyFort + BTS only**.
 
 Ask the operator who deployed the shop for the **username and password**. They are **not** in this repository.
@@ -98,7 +98,7 @@ The dashboard shows a red banner when dry-run is off.
 
 ## 4. Sign in
 
-1. Open https://sillage.codeinmoon.xyz
+1. Open https://prinscosmetic.eu/sillagedash
 2. **User** is the operator name you were given (it is not `admin`)
 3. Enter the password you were given → **Sign in**
 4. Use **Sign out** at the bottom of the left menu when you are done
@@ -294,7 +294,7 @@ These rules are on purpose. They match how dropship dispatch works.
 **Photos.** Listings without a real photo stay **out of the shop** while **Hide products without
 image** is on. Weak BeautyFort `/pic/` thumbs count as “no photo”. **BTS does not send product
 photos**, so some bottle JPEGs live on this shop’s image host
-(`https://images.codeinmoon.xyz`, files in `~/sillage/data/media` on the VPS). That folder
+(`https://images.prinscosmetic.eu`, files in `~/sillage/data/media` on the VPS). That folder
 is this retail shop, not wholesale. Extra files sitting in the EAN scrape folder are **not**
 shop photos until someone inspects them — many are tiny or generic.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
@@ -315,7 +315,7 @@ BeautyFort is a smaller EU set; BTS is broader.
 
 **EAN.** The barcode appears on the product page. Shop search understands barcodes.
 
-**Track order.** Customers open https://codeinmoon.xyz/track-order/ and enter order
+**Track order.** Customers open https://prinscosmetic.eu/track-order/ and enter order
 number + checkout email.
 
 **Vendor names.** LPS01 / LPS02 are operations labels. They must not appear as shop categories or
@@ -347,14 +347,17 @@ while one at zero stock stays hidden on the stock rule regardless. Send the phot
 **EAN** and the next catalogue update publishes them.
 
 **A brand-new shop was just handed to me**  
-It arrives deliberately bare: WordPress is installed and the plugins and theme are uploaded but
-**switched off**, and there are **no products**. Do it in this order. In WordPress → Plugins,
-activate WooCommerce, Sillage Bridge and Redis Object Cache; upload and activate the Blocksy
-companion; in Appearance, activate the theme. Then set your homepage, menus and shipping — the
-shop is far easier to style while it is empty. Tell your engineer when you are done, so they can
-run the readiness check. Only then, on the dashboard, press **Rebuild catalogue**. Products
-appear in roughly two to three minutes. Activating WooCommerce **before** that first rebuild is
-not optional: it is what creates the tables the products go into.
+The public shop is the React storefront. WordPress is its headless commerce backend; use
+`/wp-admin/` to manage WooCommerce and plugins. The base WooCommerce, Sillage Bridge, and cache
+plugins are installed by deployment. No Blocksy theme or WordPress storefront is required. Add
+vendor credentials under the Sillage dashboard’s Secrets page, confirm shop settings, then start
+the catalogue sync from the dashboard when ready. New VPS installs begin with scheduled sync
+disabled and order dispatch in dry-run.
+
+If the storefront says it does not deliver to a country that should be covered, open WordPress →
+WooCommerce → Warehouses and use **Clear country cache**. The shop derives delivery coverage from
+product data after imports; it should not be manually expanded to countries the suppliers do not
+serve. The **Storefront query guard** should stay **On — balanced** on ordinary VPS boxes.
 
 **I rebuilt the catalogue and the shop is still empty**  
 If the dashboard says the catalogue was built but WooCommerce shows **no products at all**, the
@@ -409,9 +412,9 @@ Dashboard Orders → that row → Tracking, and/or the shop track-order page.
 
 | Surface | URL |
 |---|---|
-| Dashboard | https://sillage.codeinmoon.xyz |
-| Shop | https://codeinmoon.xyz |
-| Customer tracking | https://codeinmoon.xyz/track-order/ |
+| Dashboard | https://prinscosmetic.eu/sillagedash |
+| Shop | https://prinscosmetic.eu |
+| Customer tracking | https://prinscosmetic.eu/track-order/ |
 
 Use the dashboard username and password from the operator password file. Keep them off GitHub
 and out of chat logs. The username is never `admin`.

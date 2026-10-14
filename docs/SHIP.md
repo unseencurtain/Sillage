@@ -3,9 +3,9 @@
 One command, about ninety seconds, from an edited file to a running shop.
 
 ```bash
-./production-environment/scripts/ship.sh                    # → ovhe (default)
-./production-environment/scripts/ship.sh --to ovhe --to ovh # → several boxes
-./production-environment/scripts/ship.sh --status           # what is each box running?
+./production-environment/scripts/ship.sh --to <ssh-alias>  # select target explicitly
+./production-environment/scripts/ship.sh --to <alias-1> --to <alias-2> # several targets
+./production-environment/scripts/ship.sh --status --to <ssh-alias>
 ./production-environment/scripts/ship.sh --rollback 82bd81e # back to a known tag
 ```
 
@@ -20,8 +20,8 @@ box's `~/sillage-wholesale` and the `sillage-b2b` image.
 2. **Runs the gates locally** — typecheck, `bun test`, dashboard build. A failure stops the run
    before anything leaves the laptop.
 3. **Builds and pushes**, but only if that tag is not already on Hub. Re-shipping an unchanged
-   commit skips straight to the deploy. Building happens on the builder box (`ovhe` by default,
-   `--builder <host>`), which is where the Hub credentials live.
+   commit skips straight to the deploy. Building happens on the target VPS by default, or on the
+   explicitly selected `--builder <host>` when deploying to multiple targets.
 4. **Deploys to each target**: pins `SILLAGE_CORE_IMAGE` in that box's `.env`, pulls, restarts the
    engine and the scheduler, waits for `/health`.
 5. **Verifies.** If `/health` does not answer, the old `.env` is restored and the previous image

@@ -1,6 +1,6 @@
 # Photo pack — snapshot 2026-09-03T19:57:42Z
 
-Live shop `https://prinscosmetic.eu` · CDN `https://images.prinscosmetic.eu` · host `ovhe (ovh-experi / 139.99.61.71)`
+Live shop `https://prinscosmetic.eu` · CDN `https://images.prinscosmetic.eu` · host `selected target VPS`
 
 ## How many photos are still missing?
 

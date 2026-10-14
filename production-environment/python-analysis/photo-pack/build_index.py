@@ -385,7 +385,7 @@ def main() -> int:
     captured = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     state = {
         "captured_at": captured,
-        "live_host": "ovhe (ovh-experi / 139.99.61.71)",
+        "live_host": "selected target VPS",
         "shop": "https://prinscosmetic.eu",
         "images_cdn": "https://images.prinscosmetic.eu",
         "do_not_apply_scraped_to_shop": True,

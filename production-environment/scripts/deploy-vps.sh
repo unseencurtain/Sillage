@@ -2,21 +2,20 @@
 # Deploy / update Sillage on a Ubuntu VPS from one compose + one .env.
 #
 # Usage (from repo root):
-#   ./production-environment/scripts/deploy-vps.sh --host ovh \
-#       --shop … --dash … --images …
+#   ./production-environment/scripts/deploy-vps.sh --host <ssh-alias> \
+#       --shop <domain> --dash <domain> [--images <domain>]
 #   ./production-environment/scripts/deploy-vps.sh \
-#       --host ovh \
+#       --host <ssh-alias> \
 #       [--shop …] [--dash …] [--images …] \
-#       [--dash-user europa] [--wp-user cherry] \
-#       [--media-from ovh] [--skip-dns-check] \
-#       --finish   # after the operator has activated plugins and customised
-#       [--dns] [--ip 51.79.255.226] \
-#       [--skip-build] [--fresh] [--core-only]
+#       [--dash-user <name>] [--wp-user <name>] \
+#       [--dashboard-path /sillagedash] \
+#       [--media-from <photo-source-alias>] [--skip-dns-check] \
+#       --finish   # verify after operator customisation
+#       [--dns] [--ip <vps-ip>] \
+#       [--skip-build] [--push-images] [--fresh] [--core-only]
 #
-# Every box is a production box: same image, same compose file, same live vendor APIs, same
-# credentials. There is no development tier here because neither wholesaler offers one. What
-# differs between two boxes is which hostnames they answer on and which one customers reach.
-# Domains have no default — every default we ever set was correct until the shop moved.
+# Fresh boxes receive new credentials, empty vendor-key settings, paused schedules and explicit
+# hostnames. Identity can be changed by redeploying with new flags or updating the remote .env.
 #
 #   [--overlay]  layer compose.dev.yaml: engine source bind-mounted, `bun --hot`, Vite dashboard,
 #                bridge plugin editable in place. A way of working while you edit code on a box,
@@ -26,15 +25,15 @@
 #
 # Flow (empty Ubuntu VPS — this is the default path):
 #   0) Once, as root: bootstrap-host.sh (Docker, Caddy, ubuntu, unzip)
-#   1) Hub images: rsync source onto the VPS and build+push THERE
-#      (docker login lives on the host). Never docker build on the laptop/agent.
-#      Default builds **core + WordPress** (Dockerfile pins WP 7.1 / PHP 8.3).
+#   1) rsync source onto the VPS and build THERE (images stay local by default).
+#      Never docker build on the laptop/agent. Add --push-images for registry publishing.
+#      Default builds **core + WordPress** (Dockerfile pins WP 7.1.3 / PHP 8.3).
 #      Pass --core-only only for a day-2 engine bump on an already-running shop.
 #   2) rsync compose/config/plugin/overrides only
-#   3) remote: docker compose pull && up -d && migrate + first-boot WordPress
-#      (shop options written; plugins and theme staged inactive for the operator).
-#      Caddy: this stack writes /etc/caddy/sites/retail.caddy and the main Caddyfile
-#      only imports sites/*.caddy, so retail and wholesale never overwrite each other.
+#   3) remote: compose up (pull only for registry-pinned images) + migrate + first-boot WordPress
+#      (headless WordPress options written; WooCommerce, Redis Cache and bridge activated).
+#      Caddy: this stack writes ~/sillage/ops/caddy/sillage.caddy and links it into
+#      /etc/caddy/sites/. The main Caddyfile only imports sites/*.caddy.
 #
 # Operator names: --dash-user / --wp-user pick the dashboard and WordPress logins.
 # Omit them and a random non-admin pair is generated. "admin" is refused either way.
@@ -49,12 +48,14 @@ HOST=""
 SHOP_DOMAIN=""
 DASH_DOMAIN=""
 IMAGES_DOMAIN=""
+IMAGES_EXPLICIT=0
 DO_DNS=0
 IP=""
 SKIP_BUILD=0
+PUSH_IMAGES=0
 FRESH=0
-CLONE_FROM=""
 WITH_WORDPRESS=1
+LOCAL_BUILD=0
 DASH_USER=""
 WP_USER=""
 WP_ADMIN_USER=""
@@ -62,6 +63,8 @@ SKIP_DNS_CHECK=0
 MEDIA_FROM=""
 FINISH=0
 OVERLAY=0
+DEV_ENV_BLOCK=""
+DASHBOARD_PATH=""
 
 usage() {
   sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
@@ -86,7 +89,8 @@ while [[ $# -gt 0 ]]; do
     --host) HOST="${2:?}"; shift 2 ;;
     --shop) SHOP_DOMAIN="${2:?}"; shift 2 ;;
     --dash) DASH_DOMAIN="${2:?}"; shift 2 ;;
-    --images) IMAGES_DOMAIN="${2:?}"; shift 2 ;;
+    --images) IMAGES_DOMAIN="${2-}"; IMAGES_EXPLICIT=1; shift 2 ;;
+    --dashboard-path) DASHBOARD_PATH="${2:?}"; shift 2 ;;
     --dash-user) DASH_USER="${2:?}"; check_operator --dash-user "$DASH_USER"; shift 2 ;;
     --wp-user) WP_USER="${2:?}"; check_operator --wp-user "$WP_USER"; shift 2 ;;
     --dns) DO_DNS=1; shift ;;
@@ -96,10 +100,10 @@ while [[ $# -gt 0 ]]; do
     --media-from) MEDIA_FROM="${2:?}"; shift 2 ;;
     --ip) IP="${2:?}"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
+    --push-images) PUSH_IMAGES=1; shift ;;
     --fresh) FRESH=1; shift ;;
     --core-only) WITH_WORDPRESS=0; shift ;;
     --with-wordpress) WITH_WORDPRESS=1; shift ;;
-    --clone-from) CLONE_FROM="${2:?}"; shift 2 ;;
     -h|--help) usage ;;
     *)
       if [[ -z "$HOST" ]]; then HOST="$1"
@@ -130,14 +134,21 @@ LOCAL_ENV=""
 for f in "${LOCAL_ENV_CANDIDATES[@]}"; do
   if [[ -f "$f" ]]; then LOCAL_ENV="$f"; break; fi
 done
+if [[ -z "$LOCAL_ENV" && -f "$PE/.env.example" ]]; then
+  LOCAL_ENV="$PE/.env.example"
+fi
 if [[ -z "$LOCAL_ENV" ]]; then
-  echo "Missing $PE/.env (or sillage-core/.env) — copy .env.example and fill passwords." >&2
+  echo "Missing $PE/.env.example — cannot load deploy defaults." >&2
   exit 1
 fi
 
-SSH=(ssh -F "${HOME}/.ssh/config" -o BatchMode=yes)
-SCP=(scp -F "${HOME}/.ssh/config" -o BatchMode=yes)
-RSYNC=(rsync -az -e "ssh -F ${HOME}/.ssh/config -o BatchMode=yes")
+SSH_ALIASES=("$HOST")
+[[ -n "$MEDIA_FROM" ]] && SSH_ALIASES+=("$MEDIA_FROM")
+SSH_CONFIG=$("$PE/scripts/ssh-config-for-aliases.py" "${SSH_ALIASES[@]}")
+trap 'rm -f "$SSH_CONFIG"' EXIT
+SSH=(ssh -F "$SSH_CONFIG" -o BatchMode=yes)
+SCP=(scp -F "$SSH_CONFIG" -o BatchMode=yes)
+RSYNC=(rsync -az -e "ssh -F $SSH_CONFIG -o BatchMode=yes")
 
 # Every box uses the same directory names: ~/sillage and ~/sillage-wholesale mean the same thing
 # everywhere, so every path in the runbook reads the same wherever you are standing.
@@ -181,10 +192,11 @@ log_step() {
   printf '| %s | %dm%02ds | %s |\n' "$now" $((elapsed/60)) $((elapsed%60)) "$msg" | tee -a "$CHRONO"
 }
 
-# Domain precedence: CLI flags > remote ~/sillage/.env > local .env (non-localhost) > live-shop defaults.
+# Identity precedence: CLI flags > target ~/sillage/.env > local .env > explicit defaults.
 CLI_SHOP="$SHOP_DOMAIN"
 CLI_DASH="$DASH_DOMAIN"
 CLI_IMAGES="$IMAGES_DOMAIN"
+CLI_DASHBOARD_PATH="$DASHBOARD_PATH"
 CLI_IP="$IP"
 
 # shellcheck disable=SC1090
@@ -192,6 +204,7 @@ set -a; source "$LOCAL_ENV"; set +a
 LOCAL_SHOP="${SHOP_DOMAIN:-}"
 LOCAL_DASH="${DASH_DOMAIN:-}"
 LOCAL_IMAGES="${IMAGES_DOMAIN:-}"
+LOCAL_DASHBOARD_PATH="${SILLAGE_DASHBOARD_PATH:-}"
 [[ -n "$CLI_IP" ]] && IP="$CLI_IP"
 
 is_placeholder_domain() {
@@ -201,12 +214,14 @@ is_placeholder_domain() {
   esac
 }
 
-# This stack's own .env, not whichever stack happens to be called "sillage". Reading a fixed path
-# is how the wholesale stack once inherited retail's data directory.
-REMOTE_DOMAINS=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && set -a && source ~/${REMOTE_DIR}/.env && set +a && printf '%s\t%s\t%s' \"\${SHOP_DOMAIN:-}\" \"\${DASH_DOMAIN:-}\" \"\${IMAGES_DOMAIN:-}\"" 2>/dev/null || true)
-_R_SHOP=""; _R_DASH=""; _R_IMAGES=""
+# Read only this stack's remote settings; do not inherit another stack's hostname or image tags.
+REMOTE_DOMAINS=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && set -a && source ~/${REMOTE_DIR}/.env && set +a && printf '%s|%s|%s|%s' \"\${SHOP_DOMAIN:-}\" \"\${DASH_DOMAIN:-}\" \"\${IMAGES_DOMAIN:-}\" \"\${SILLAGE_DASHBOARD_PATH:-}\"" 2>/dev/null || true)
+REMOTE_IMAGE_TAGS=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && set -a && source ~/${REMOTE_DIR}/.env && set +a && printf '%s\t%s' \"\${SILLAGE_CORE_IMAGE:-}\" \"\${WORDPRESS_IMAGE:-}\"" 2>/dev/null || true)
+_R_CORE_IMAGE=""; _R_WP_IMAGE=""
+if [[ -n "$REMOTE_IMAGE_TAGS" ]]; then IFS=$'\t' read -r _R_CORE_IMAGE _R_WP_IMAGE <<<"$REMOTE_IMAGE_TAGS"; fi
+_R_SHOP=""; _R_DASH=""; _R_IMAGES=""; _R_DASHBOARD_PATH=""
 if [[ -n "$REMOTE_DOMAINS" ]]; then
-  IFS=$'\t' read -r _R_SHOP _R_DASH _R_IMAGES <<<"$REMOTE_DOMAINS"
+  IFS='|' read -r _R_SHOP _R_DASH _R_IMAGES _R_DASHBOARD_PATH <<<"$REMOTE_DOMAINS"
 fi
 
 # What the stack already answers on outranks the checkout's .env, which is whichever config the
@@ -222,7 +237,18 @@ pick_domain() {
 
 SHOP_DOMAIN="$(pick_domain "$CLI_SHOP" "$_R_SHOP" "$LOCAL_SHOP" "$DEFAULT_SHOP_DOMAIN")"
 DASH_DOMAIN="$(pick_domain "$CLI_DASH" "$_R_DASH" "$LOCAL_DASH" "$DEFAULT_DASH_DOMAIN")"
-IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
+if [[ "$IMAGES_EXPLICIT" -eq 1 ]]; then
+  IMAGES_DOMAIN="$CLI_IMAGES"
+else
+  IMAGES_DOMAIN="$(pick_domain "$CLI_IMAGES" "$_R_IMAGES" "$LOCAL_IMAGES" "$DEFAULT_IMAGES_DOMAIN")"
+fi
+DASHBOARD_PATH="${CLI_DASHBOARD_PATH:-${_R_DASHBOARD_PATH:-${LOCAL_DASHBOARD_PATH:-/sillagedash}}}"
+DASHBOARD_PATH="/${DASHBOARD_PATH#/}"
+DASHBOARD_PATH="${DASHBOARD_PATH%/}"
+if [[ ! "$DASHBOARD_PATH" =~ ^/[a-zA-Z0-9/_-]+$ || "$DASHBOARD_PATH" == *".."* ]]; then
+  echo "Invalid --dashboard-path: $DASHBOARD_PATH" >&2
+  exit 2
+fi
 
 if [[ -z "$SHOP_DOMAIN" || -z "$DASH_DOMAIN" ]]; then
   echo "No shop/dashboard hostname for this stack. Pass --shop and --dash (and --images)," >&2
@@ -238,6 +264,9 @@ if [[ "$FINISH" -eq 1 ]]; then
   "${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
   "${RSYNC[@]}" "$PE/scripts/apply-grants.sh" "$HOST:~/${REMOTE_DIR}/scripts/apply-grants.sh"
   "${RSYNC[@]}" "$PE/scripts/wp-finalize.sh" "$HOST:~/${REMOTE_DIR}/scripts/wp-finalize.sh"
+"${RSYNC[@]}" "$PE/scripts/reload-caddy.sh" "$HOST:~/${REMOTE_DIR}/scripts/reload-caddy.sh"
+"${RSYNC[@]}" "$PE/scripts/copy-vendor-secrets.sh" "$HOST:~/${REMOTE_DIR}/scripts/copy-vendor-secrets.sh"
+"${RSYNC[@]}" "$PE/scripts/ssh-config-for-aliases.py" "$HOST:~/${REMOTE_DIR}/scripts/ssh-config-for-aliases.py"
   # Readiness first, grants second. Readiness is what asks WooCommerce to build the HPOS order
   # tables, and a table-level grant cannot be applied to a table that does not exist yet — run
   # them the other way round and --strict fails on the four order tables that readiness was
@@ -254,7 +283,7 @@ if [[ "$FINISH" -eq 1 ]]; then
   exit "$READY_RC"
 fi
 
-log_step "START host=${HOST} shop=${SHOP_DOMAIN} dash=${DASH_DOMAIN} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS}"
+log_step "START host=${HOST} shop=${SHOP_DOMAIN} dashboard=${SHOP_DOMAIN}${DASHBOARD_PATH} images=${IMAGES_DOMAIN:-none} skip_build=${SKIP_BUILD} wordpress=${WITH_WORDPRESS}"
 
 if [[ -z "$IP" ]]; then
   IP=$("${SSH[@]}" "$HOST" 'curl -4 -sS --max-time 5 ifconfig.me || curl -4 -sS --max-time 5 icanhazip.com' | tr -d '[:space:]')
@@ -317,6 +346,9 @@ if [[ "$SKIP_DNS_CHECK" -eq 0 ]]; then
 fi
 
 TAG="$(git -C "$ROOT" rev-parse --short HEAD)"
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all)" ]]; then
+  TAG="${TAG}-dirty-$(date -u +%Y%m%d%H%M%S)"
+fi
 NAMESPACE="${DOCKERHUB_NAMESPACE:-}"
 if [[ -z "$NAMESPACE" ]]; then
   NAMESPACE="$(docker info 2>/dev/null | sed -n 's/^ Username: //p' | head -1 || true)"
@@ -328,12 +360,13 @@ if [[ "$WITH_WORDPRESS" -eq 0 ]]; then
   WP_IMAGE="${NAMESPACE}/sillage-wordpress:latest"
 fi
 
-# When building, the tag is this commit — that is the point. When not building, deploy what .env
-# pins: a doc-only commit moves HEAD without changing any image, and deriving the tag from HEAD
-# regardless would demand a pointless rebuild for a tag that was never pushed.
+# New builds use the commit SHA. If the working tree is dirty, add a timestamp so uncommitted
+# deployment changes never reuse a tag that already names a different image.
 if [[ "$SKIP_BUILD" -eq 1 ]]; then
-  CORE_IMAGE="${SILLAGE_CORE_IMAGE:-$CORE_IMAGE}"
-  WP_IMAGE="${WORDPRESS_IMAGE:-$WP_IMAGE}"
+  CORE_IMAGE="${_R_CORE_IMAGE:-${SILLAGE_CORE_IMAGE:-$CORE_IMAGE}}"
+  WP_IMAGE="${_R_WP_IMAGE:-${WORDPRESS_IMAGE:-$WP_IMAGE}}"
+  # --skip-build is for resuming/rolling out on a VPS that already has the requested tags locally.
+  LOCAL_BUILD=1
 fi
 
 if [[ "$SKIP_BUILD" -eq 0 && "$WITH_WORDPRESS" -eq 0 ]]; then
@@ -341,14 +374,21 @@ if [[ "$SKIP_BUILD" -eq 0 && "$WITH_WORDPRESS" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  echo "==> Hub build on ${HOST} (docker login lives there; this machine does not docker build)"
+  echo "==> VPS image build on ${HOST} (this machine does not docker build)"
   "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/sillage-core ~/${REMOTE_DIR}/scripts ~/${REMOTE_DIR}/wordpress-image"
   "${RSYNC[@]}" --delete \
     --exclude data --exclude logs --exclude node_modules --exclude web/dist \
     --exclude .feedscratch \
     "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
+  # Dockerfile copies ./data into the image. Runtime data is bind-mounted and created later;
+  # stage only the tracked build-time defaults here, never local runtime secret files.
+  "${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/sillage-core/data"
+  "${RSYNC[@]}" --delete --exclude 'secrets.overlay.env' \
+    "$PE/sillage-core/data/" "$HOST:~/${REMOTE_DIR}/sillage-core/data/"
   "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
-  BUILD_FLAGS=(--namespace "$NAMESPACE" --tag "$TAG")
+  BUILD_FLAGS=(--namespace "$NAMESPACE" --tag "$TAG" --dashboard-path "$DASHBOARD_PATH" --no-push)
+  [[ "${PUSH_IMAGES:-0}" == "1" ]] && BUILD_FLAGS+=(--push)
+  LOCAL_BUILD=1
   if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
     "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
     BUILD_FLAGS+=(--with-wordpress)
@@ -358,7 +398,7 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     log_step "Building core-only ${CORE_IMAGE}"
   fi
   "${SSH[@]}" "$HOST" "bash ~/${REMOTE_DIR}/scripts/build-push-images.sh ${BUILD_FLAGS[*]}"
-  log_step "Pushed Hub images from ${HOST}"
+  log_step "Built images locally on ${HOST}"
 else
   log_step "Skipped image build; using ${CORE_IMAGE} ${WP_IMAGE}"
 fi
@@ -373,7 +413,7 @@ if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
     echo "Could not read the WordPress pin from wordpress-image/Dockerfile" >&2
     exit 1
   fi
-  IMAGE_WP="$("${SSH[@]}" "$HOST" "docker pull -q '$WP_IMAGE' >/dev/null 2>&1 && docker run --rm --entrypoint php '$WP_IMAGE' -r 'include \"/usr/src/wordpress/wp-includes/version.php\"; echo \$wp_version;'" 2>/dev/null || true)"
+  IMAGE_WP="$("${SSH[@]}" "$HOST" "[[ '$LOCAL_BUILD' == 1 ]] || docker pull -q '$WP_IMAGE' >/dev/null 2>&1; docker run --rm --entrypoint php '$WP_IMAGE' -r 'include \"/usr/src/wordpress/wp-includes/version.php\"; echo \$wp_version;'" 2>/dev/null || true)"
   if [[ -z "$IMAGE_WP" ]]; then
     echo "Could not read WordPress version from ${WP_IMAGE} (missing on Hub?)" >&2
     exit 1
@@ -402,7 +442,7 @@ elif [[ "$SKIP_BUILD" -eq 1 ]]; then
   # case-insensitively, which reorders VendorConnector.ts and changes the hash of identical trees.
   src_hash() { find . -type f -name '*.ts' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64; }
   LOCAL_SRC="$(cd "$PE/sillage-core/src" && src_hash)"
-  IMAGE_SRC="$("${SSH[@]}" "$HOST" "docker pull -q '$CORE_IMAGE' >/dev/null 2>&1; docker run --rm --entrypoint sh '$CORE_IMAGE' -c 'cd /app/src && find . -type f -name \"*.ts\" | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64'" 2>/dev/null | tr -d '[:space:]')"
+  IMAGE_SRC="$("${SSH[@]}" "$HOST" "[[ '$LOCAL_BUILD' == 1 ]] || docker pull -q '$CORE_IMAGE' >/dev/null 2>&1; docker run --rm --entrypoint sh '$CORE_IMAGE' -c 'cd /app/src && find . -type f -name \"*.ts\" | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-64'" 2>/dev/null | tr -d '[:space:]')"
   if [[ -z "$IMAGE_SRC" ]]; then
     echo "Could not read engine source from ${CORE_IMAGE} (missing on Hub?)" >&2
     exit 1
@@ -427,13 +467,11 @@ fi
 
 "${RSYNC[@]}" "$PE/compose.yaml" "$HOST:~/${REMOTE_DIR}/compose.yaml"
 "${RSYNC[@]}" "$PE/.env.example" "$HOST:~/${REMOTE_DIR}/.env.example"
-# Every box gets the engine source and the WordPress Dockerfile, whatever its role. Images are
-# built from a checkout sitting on a box that is `docker login`ed, and any box may end up being
-# that box — a boot-strapping step that only works on one machine is how "it runs over there"
-# starts. The overlay additionally runs this source instead of the image.
+# Sync the source/build context. Images are built locally on the target by default; optional
+# publishing requires registry write credentials. The overlay runs this source instead of the image.
 "${RSYNC[@]}" "$PE/compose.dev.yaml" "$HOST:~/${REMOTE_DIR}/compose.dev.yaml"
 "${RSYNC[@]}" --delete \
-  --exclude 'node_modules' --exclude 'logs' --exclude 'web/dist' --exclude '.env' \
+  --exclude 'node_modules' --exclude 'logs' --exclude '.env' \
   --exclude 'data/secrets.overlay.env' \
   "$PE/sillage-core/" "$HOST:~/${REMOTE_DIR}/sillage-core/"
 "${RSYNC[@]}" --delete "$PE/wordpress-image/" "$HOST:~/${REMOTE_DIR}/wordpress-image/"
@@ -442,15 +480,18 @@ fi
 "${RSYNC[@]}" "$PE/scripts/vps-bootstrap.sh" "$HOST:~/${REMOTE_DIR}/scripts/vps-bootstrap.sh"
 "${RSYNC[@]}" "$PE/scripts/ship.sh" "$HOST:~/${REMOTE_DIR}/scripts/ship.sh"
 "${RSYNC[@]}" "$PE/scripts/pack-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/pack-box.sh"
-"${RSYNC[@]}" "$PE/scripts/adopt-box.sh" "$HOST:~/${REMOTE_DIR}/scripts/adopt-box.sh"
 "${RSYNC[@]}" "$PE/scripts/to-bind-mounts.sh" "$HOST:~/${REMOTE_DIR}/scripts/to-bind-mounts.sh"
 "${RSYNC[@]}" "$PE/scripts/build-push-images.sh" "$HOST:~/${REMOTE_DIR}/scripts/build-push-images.sh"
 "${RSYNC[@]}" "$PE/scripts/fix-wp-content-perms.sh" "$HOST:~/${REMOTE_DIR}/scripts/fix-wp-content-perms.sh"
 "${RSYNC[@]}" "$PE/scripts/wp-fresh-install.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-fresh-install.php"
+"${RSYNC[@]}" "$PE/scripts/update-wordpress-core.sh" "$HOST:~/${REMOTE_DIR}/scripts/update-wordpress-core.sh"
 "${RSYNC[@]}" "$PE/scripts/wp-config-patch.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-config-patch.php"
 "${RSYNC[@]}" "$PE/scripts/wp-readiness.php" "$HOST:~/${REMOTE_DIR}/scripts/wp-readiness.php"
 "${RSYNC[@]}" "$PE/scripts/apply-grants.sh" "$HOST:~/${REMOTE_DIR}/scripts/apply-grants.sh"
 "${RSYNC[@]}" "$PE/scripts/wp-finalize.sh" "$HOST:~/${REMOTE_DIR}/scripts/wp-finalize.sh"
+"${RSYNC[@]}" "$PE/scripts/reload-caddy.sh" "$HOST:~/${REMOTE_DIR}/scripts/reload-caddy.sh"
+"${RSYNC[@]}" "$PE/scripts/copy-vendor-secrets.sh" "$HOST:~/${REMOTE_DIR}/scripts/copy-vendor-secrets.sh"
+"${RSYNC[@]}" "$PE/scripts/ssh-config-for-aliases.py" "$HOST:~/${REMOTE_DIR}/scripts/ssh-config-for-aliases.py"
 # The deploy installs a cron that runs this and then runs it once itself, but never copied it, so
 # the log was three lines of "No such file or directory" and the sitemap directory stayed empty.
 "${RSYNC[@]}" "$PE/scripts/write-sitemaps.py" "$HOST:~/${REMOTE_DIR}/scripts/write-sitemaps.py"
@@ -459,11 +500,11 @@ if [[ -f "$PE/sillage-core/data/image_overrides.json" ]]; then
   "${RSYNC[@]}" "$PE/sillage-core/data/image_overrides.json" \
     "$HOST:~/${REMOTE_DIR}/sillage-core/data/image_overrides.json"
 fi
-# WordPress lives in a Docker volume, so the plugin is staged on the host and copied into
-# the container during bring-up rather than written straight into a host wp-content.
+# Keep bridge source in the repository and stage it for the fresh bind-mounted WordPress tree.
 "${RSYNC[@]}" --delete \
   "$PE/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/" \
   "$HOST:~/${REMOTE_DIR}/wp-staging/sillage-bridge/"
+"${SSH[@]}" "$HOST" "mkdir -p ~/${REMOTE_DIR}/wp-staging/mu-plugins"
 # Keep a zero-byte php.ini if missing so the bind mount succeeds.
 "${SSH[@]}" "$HOST" "touch ~/${REMOTE_DIR}/ecom_sites/config/php.ini; mkdir -p ${REMOTE_DATA}/media ${REMOTE_DATA}/sitemaps; touch ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env; chmod 600 ~/${REMOTE_DIR}/sillage-core/data/secrets.overlay.env"
 log_step "Minimal rsync done"
@@ -480,9 +521,14 @@ if [[ -n "$MEDIA_FROM" ]]; then
   fi
   SRC_COUNT=$("${SSH[@]}" "$MEDIA_FROM" "sudo find '$SRC_MEDIA' -type f -name '*.jpg' | wc -l")
   echo "    ${SRC_MEDIA} on ${MEDIA_FROM} holds ${SRC_COUNT} JPEGs"
-  "${SSH[@]}" "$MEDIA_FROM" "sudo tar -C '$SRC_MEDIA' -cf - ." \
-    | "${SSH[@]}" "$HOST" "sudo tar -C '${REMOTE_DATA}/media' -xf - && sudo chown -R \$(id -u):\$(id -g) '${REMOTE_DATA}/media'"
   DST_COUNT=$("${SSH[@]}" "$HOST" "sudo find '${REMOTE_DATA}/media' -type f -name '*.jpg' | wc -l")
+  if [[ "$DST_COUNT" -lt "$SRC_COUNT" ]]; then
+    "${SSH[@]}" "$MEDIA_FROM" "sudo tar -C '$SRC_MEDIA' -cf - ." \
+      | "${SSH[@]}" "$HOST" "sudo tar -C '${REMOTE_DATA}/media' -xf - && sudo chown -R \$(id -u):\$(id -g) '${REMOTE_DATA}/media'"
+    DST_COUNT=$("${SSH[@]}" "$HOST" "sudo find '${REMOTE_DATA}/media' -type f -name '*.jpg' | wc -l")
+  else
+    echo "    destination already has ${DST_COUNT} JPEGs; skipping photo transfer"
+  fi
   echo "    ${HOST} now holds ${DST_COUNT} JPEGs"
   if [[ "$DST_COUNT" -lt "$SRC_COUNT" ]]; then
     echo "Photo copy came up short: ${DST_COUNT} of ${SRC_COUNT}" >&2
@@ -491,15 +537,12 @@ if [[ -n "$MEDIA_FROM" ]]; then
   log_step "Photos copied from ${MEDIA_FROM} (${DST_COUNT} JPEGs)"
 fi
 
-if [[ -n "$CLONE_FROM" ]]; then
-  echo "--clone-from is no longer supported: WordPress and MariaDB live in Docker volumes," >&2
-  echo "and cloning a live shop's datadir is what let core drift from its image." >&2
-  echo "Deploy a fresh install and let the operator set the theme up." >&2
-  exit 1
-fi
-
 echo "==> ensure remote .env"
 REMOTE_HAS_ENV=$("${SSH[@]}" "$HOST" "test -f ~/${REMOTE_DIR}/.env && echo yes || echo no")
+if [[ "$FRESH" -eq 1 && "$REMOTE_HAS_ENV" == "yes" ]]; then
+  echo "--fresh refuses an existing stack .env; use a blank stack directory after making a backup." >&2
+  exit 1
+fi
 if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
   SECRET=$(openssl rand -hex 32)
   SESSION=$(openssl rand -hex 32)
@@ -540,7 +583,7 @@ if [[ "$REMOTE_HAS_ENV" != "yes" || "$FRESH" -eq 1 ]]; then
   if [[ -n "$IMAGES_DOMAIN" ]]; then
     LPS_URL="https://${IMAGES_DOMAIN}"
   else
-    LPS_URL="${LPS_MEDIA_BASE_URL:-}"
+    LPS_URL="https://${SHOP_DOMAIN}/images"
   fi
 
   "${SSH[@]}" "$HOST" "cat > ~/${REMOTE_DIR}/.env" <<EOF
@@ -552,6 +595,8 @@ VALKEY_IMAGE=valkey/valkey:8-alpine
 LPS_MEDIA_IMAGE=nginx:alpine
 
 DATA_DIR=/home/ubuntu/${REMOTE_DIR}/data
+WP_DATA=/home/ubuntu/${REMOTE_DIR}/data/wp
+WP_DB_DATA=/home/ubuntu/${REMOTE_DIR}/data/wp-db
 FEEDSCRATCH_DIR=/home/ubuntu/${REMOTE_DIR}/.feedscratch
 SILLAGE_LOGS_DIR=/home/ubuntu/${REMOTE_DIR}/sillage-core/logs
 IMAGE_OVERRIDES_FILE=/home/ubuntu/${REMOTE_DIR}/sillage-core/data/image_overrides.json
@@ -561,6 +606,7 @@ LPS_MEDIA_NGINX_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/nginx-lps-medi
 PHP_INI=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/php.ini
 APACHE_HIDE_CONF=/home/ubuntu/${REMOTE_DIR}/ecom_sites/config/apache-hide-version.conf
 SITEMAP_HOST_DIR=/home/ubuntu/${REMOTE_DIR}/data/sitemaps
+SILLAGE_DASHBOARD_PATH=${DASHBOARD_PATH}
 
 DB_BIND=127.0.0.1
 DB_HOST_PORT=3307
@@ -575,7 +621,7 @@ SHOP_DOMAIN=${SHOP_DOMAIN}
 DASH_DOMAIN=${DASH_DOMAIN}
 IMAGES_DOMAIN=${IMAGES_DOMAIN}
 WP_BASE_URL=https://${SHOP_DOMAIN}
-SILLAGE_DASHBOARD_URL=https://${DASH_DOMAIN}
+SILLAGE_DASHBOARD_URL=https://${SHOP_DOMAIN}${DASHBOARD_PATH}
 LPS_MEDIA_BASE_URL=${LPS_URL}
 
 MYSQL_ROOT_PWD=${MYSQL_ROOT}
@@ -596,15 +642,16 @@ WP_TABLE_PREFIX=wp_
 DB_CONNECTION_LIMIT=10
 SILLAGE_SHARED_SECRET=${SECRET}
 
-BEAUTYFORT_USER=${BEAUTYFORT_USER:-}
-BEAUTYFORT_SECRET=${BEAUTYFORT_SECRET:-}
-BEAUTYFORT_ENDPOINT=${BEAUTYFORT_ENDPOINT:-https://www.beautyfort.com/api/soap/v4}
+# Fresh identity: vendor credentials are entered through the dashboard Secrets page.
+BEAUTYFORT_USER=
+BEAUTYFORT_SECRET=
+BEAUTYFORT_ENDPOINT=https://www.beautyfort.com/api/soap/v4
 BEAUTYFORT_TEST_MODE=false
-BTS_JWT_TOKEN=${BTS_JWT_TOKEN:-}
-BTS_BASE_URL=${BTS_BASE_URL:-https://api.btswholesaler.com/v1/api}
+BTS_JWT_TOKEN=
+BTS_BASE_URL=https://api.btswholesaler.com/v1/api
 BTS_LANGUAGE=en-US
-BRASTY_PRODUCT_FEED_URL=${BRASTY_PRODUCT_FEED_URL:-}
-BRASTY_AVAILABILITY_FEED_URL=${BRASTY_AVAILABILITY_FEED_URL:-}
+BRASTY_PRODUCT_FEED_URL=
+BRASTY_AVAILABILITY_FEED_URL=
 
 DASHBOARD_USER=${DASH_USER}
 DASHBOARD_PASSWORD=${PASS}
@@ -619,7 +666,7 @@ EOF
 
   cat > "$CREDS" <<EOF
 host=${HOST}
-url=https://${DASH_DOMAIN}
+url=https://${SHOP_DOMAIN}${DASHBOARD_PATH}
 user=${DASH_USER}
 password=${PASS}
 shop=https://${SHOP_DOMAIN}
@@ -633,7 +680,7 @@ EOF
 else
   # Update image tags + domains/vendor keys; keep DB/dashboard secrets.
   # Non-empty local values win; empty local values leave remote secrets untouched.
-  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
+  "${SSH[@]}" "$HOST" "STACK='${REMOTE_DIR}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' DASHBOARD_PATH='$DASHBOARD_PATH' IMAGES_DOMAIN='$IMAGES_DOMAIN' CORE_IMAGE='$CORE_IMAGE' WP_IMAGE='$WP_IMAGE' WITH_WORDPRESS='$WITH_WORDPRESS' LOCAL_BF_USER='${BEAUTYFORT_USER:-}' LOCAL_BF_SECRET='${BEAUTYFORT_SECRET:-}' LOCAL_BF_ENDPOINT='${BEAUTYFORT_ENDPOINT:-}' LOCAL_BTS_JWT='${BTS_JWT_TOKEN:-}' LOCAL_BTS_BASE='${BTS_BASE_URL:-}' LOCAL_BRASTY_PRODUCT='${BRASTY_PRODUCT_FEED_URL:-}' LOCAL_BRASTY_AVAIL='${BRASTY_AVAILABILITY_FEED_URL:-}' python3 -" <<'PY'
 import os, pathlib, re
 # This stack's .env. Hardcoding "sillage" here made every update write production's file.
 p = pathlib.Path.home() / os.environ["STACK"] / ".env"
@@ -649,11 +696,14 @@ def set_key(text, key, value):
 shop = os.environ["SHOP_DOMAIN"]
 dash = os.environ["DASH_DOMAIN"]
 images = os.environ.get("IMAGES_DOMAIN") or ""
-lps = f"https://{images}" if images else None
+lps = f"https://{images}" if images else f"https://{shop}/images"
+path = os.environ["DASHBOARD_PATH"]
 pairs = [
     ("SILLAGE_CORE_IMAGE", os.environ["CORE_IMAGE"]),
     ("SHOP_DOMAIN", shop),
     ("DASH_DOMAIN", dash),
+    ("SILLAGE_DASHBOARD_PATH", path),
+    ("SILLAGE_DASHBOARD_URL", f"https://{shop}{path}"),
     ("IMAGES_DOMAIN", images),
     ("WP_BASE_URL", f"https://{shop}"),
     ("LPS_MEDIA_BASE_URL", lps),
@@ -668,8 +718,10 @@ pairs = [
 if os.environ.get("WITH_WORDPRESS") == "1":
     pairs.insert(1, ("WORDPRESS_IMAGE", os.environ["WP_IMAGE"]))
 for k, v in pairs:
-    if v is not None and v != "":
+    if v is not None and (v != "" or k == "IMAGES_DOMAIN"):
         text = set_key(text, k, v)
+# Remove obsolete maintenance switches from earlier deployments.
+text = re.sub(r"^(?:SITE_MAINTENANCE|PRIVATE_SITE)=.*\n?", "", text, flags=re.M)
 p.write_text(text)
 print("ENV_UPDATED")
 PY
@@ -682,7 +734,7 @@ PY
   )"
   cat > "$CREDS" <<EOF
 host=${HOST}
-url=https://${DASH_DOMAIN}
+url=https://${SHOP_DOMAIN}${DASHBOARD_PATH}
 user=${REMOTE_USER}
 password=${REMOTE_PASS}
 shop=https://${SHOP_DOMAIN}
@@ -696,7 +748,7 @@ EOF
 fi
 
 echo "==> remote pull + up"
-"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' OVERLAY='$OVERLAY' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' IMAGES_DOMAIN='$IMAGES_DOMAIN' CLONE_MODE='${CLONE_FROM:+1}' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
+"${SSH[@]}" "$HOST" "APP_DIR=\$HOME/${REMOTE_DIR} STACK='${REMOTE_DIR}' OVERLAY='$OVERLAY' COMPOSE_ARGS='${COMPOSE_ARGS}' SHOP_DOMAIN='$SHOP_DOMAIN' DASH_DOMAIN='$DASH_DOMAIN' DASHBOARD_PATH='$DASHBOARD_PATH' IMAGES_DOMAIN='$IMAGES_DOMAIN' LOCAL_BUILD='$LOCAL_BUILD' FRESH='$FRESH' WP_ADMIN_USER='${WP_USER:-${WP_ADMIN_USER:-}}' WP_ADMIN_PASS='${WP_ADMIN_PASS:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -749,9 +801,13 @@ if [[ -f /etc/caddy/sites/legacy.caddy ]]; then
   grep -q '[^[:space:]]' /etc/caddy/sites/legacy.caddy || sudo rm -f /etc/caddy/sites/legacy.caddy
 fi
 
-# One file per stack, named after the stack directory, so retail / wholesale / dev on one box
-# never overwrite each other's site config.
-CADDY_SITE="/etc/caddy/sites/${STACK:-retail}.caddy"
+# One editable Caddy file per stack lives with the stack. /etc/caddy imports it through a link.
+CADDY_DIR="$APP_DIR/ops/caddy"
+mkdir -p "$CADDY_DIR"
+sudo chgrp caddy "$APP_DIR/ops" "$CADDY_DIR"
+sudo chmod 750 "$APP_DIR/ops" "$CADDY_DIR"
+CADDY_SITE="$CADDY_DIR/${STACK:-sillage}.caddy"
+CADDY_LINK="/etc/caddy/sites/${STACK:-sillage}.caddy"
 # Under the overlay the dashboard is Vite with hot reload, not the API serving a prebuilt bundle.
 # Websockets
 # need no special handling — Caddy upgrades them through reverse_proxy on its own.
@@ -759,24 +815,55 @@ DASH_UPSTREAM_PORT="${SILLAGE_PORT:-4000}"
 if [[ "${OVERLAY:-0}" == "1" ]]; then
   DASH_UPSTREAM_PORT="${WEB_PORT:-5174}"
 fi
+DASH_SITE_BLOCK=""
+if [[ "$DASH_DOMAIN" != "$SHOP_DOMAIN" ]]; then
+  DASH_SITE_BLOCK="${DASH_DOMAIN} {
+	header {
+		-Server
+		-Via
+	}
+	reverse_proxy localhost:${DASH_UPSTREAM_PORT} {
+		header_down -Server
+		header_down -Via
+	}
+}"
+fi
 sudo tee "$CADDY_SITE" >/dev/null <<EOF
 ${SHOP_DOMAIN} {
-	# AI training crawlers walk every /product and /brand page. Prefork PHP
-	# cannot survive that on a ~4 GB box. Images CDN stays open (cheap files).
-	# See docs/CRAWLER-SHIELD.md
+	# Keep WordPress headless: only admin, REST and static WordPress assets reach PHP.
+	# The public storefront is the React SPA in frontend/dist.
 	@heavybot header_regexp User-Agent (?i)(ClaudeBot|GPTBot|CCBot|Bytespider|Amazonbot|meta-externalagent)
 	handle @heavybot {
 		respond "Forbidden" 403
 	}
-	handle_path /lps-media/* {
-		header {
-			-Server
-			-Via
-		}
-		reverse_proxy localhost:${MEDIA_PORT} {
+	@dashboard_no_slash path ${DASHBOARD_PATH}
+	redir @dashboard_no_slash ${DASHBOARD_PATH}/ 308
+	handle_path ${DASHBOARD_PATH}/* {
+		reverse_proxy localhost:${DASH_UPSTREAM_PORT} {
 			header_down -Server
 			header_down -Via
 		}
+	}
+	handle /xmlrpc.php {
+		respond "Forbidden" 403
+	}
+	handle /wp-admin* {
+		reverse_proxy localhost:${WP_PORT}
+	}
+	handle /wp-login.php {
+		reverse_proxy localhost:${WP_PORT}
+	}
+	handle /wp-json* {
+		reverse_proxy localhost:${WP_PORT}
+	}
+	handle /wp-cron.php {
+		reverse_proxy localhost:${WP_PORT}
+	}
+	handle /wp-content* {
+		reverse_proxy localhost:${WP_PORT}
+	}
+	handle /wp-includes* {
+		reverse_proxy localhost:${WP_PORT}
 	}
 	# Product listing for Google: static files from Bun, not PHP.
 	# Fast price/stock sync does not rewrite these. See docs/SEO.md
@@ -797,27 +884,30 @@ ${SHOP_DOMAIN} {
 		-Via
 		-X-Powered-By
 	}
-	reverse_proxy localhost:${WP_PORT} {
-		header_down -Server
-		header_down -Via
-		header_down -X-Powered-By
+	@hashed path *.js *.css *.svg *.woff2 *.woff *.map
+	handle @hashed {
+		root * /home/ubuntu/${REMOTE_DIR}/frontend/dist
+		file_server
+		header Cache-Control "public, max-age=31536000, immutable"
+	}
+	handle {
+		root * /home/ubuntu/${REMOTE_DIR}/frontend/dist
+		encode gzip
+		try_files {path} /index.html
+		file_server
+		header Cache-Control "no-store"
 	}
 }
-${DASH_DOMAIN} {
-	header {
-		-Server
-		-Via
-	}
-	reverse_proxy localhost:${DASH_UPSTREAM_PORT} {
-		header_down -Server
-		header_down -Via
-	}
-}
+${DASH_SITE_BLOCK}
 ${IMAGES_SITE_BLOCK}
 EOF
 sudo caddy fmt --overwrite "$CADDY_SITE"
+sudo chown ubuntu:caddy "$CADDY_SITE"
+sudo chmod 640 "$CADDY_SITE"
+sudo ln -sfn "$CADDY_SITE" "$CADDY_LINK"
 [[ -f /etc/caddy/sites/legacy.caddy ]] && sudo caddy fmt --overwrite /etc/caddy/sites/legacy.caddy
 sudo caddy validate --config /etc/caddy/Caddyfile
+sudo -u caddy test -r "$CADDY_SITE"
 sudo caddy reload --config /etc/caddy/Caddyfile || sudo systemctl reload caddy
 echo "==> caddy sites: $(ls /etc/caddy/sites/*.caddy 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
 
@@ -832,7 +922,7 @@ if [[ -f "$HOME/ecom_sites/compose.yaml" ]]; then
   (cd "$HOME/ecom_sites" && docker compose down 2>/dev/null) || true
 fi
 
-mkdir -p "$DATA_DIR/media" "$DATA_DIR/sitemaps" \
+mkdir -p "$DATA_DIR/wp" "$DATA_DIR/wp-db" "$DATA_DIR/media" "$DATA_DIR/sitemaps" \
   "$APP_DIR/sillage-core/logs" "$APP_DIR/.feedscratch"
 # Ensure image overrides + secrets overlay files exist for bind mounts (file, not directory).
 [[ -f "$APP_DIR/sillage-core/data/image_overrides.json" ]] \
@@ -841,7 +931,9 @@ mkdir -p "$DATA_DIR/media" "$DATA_DIR/sitemaps" \
   || : > "$APP_DIR/sillage-core/data/secrets.overlay.env"
 chmod 600 "$APP_DIR/sillage-core/data/secrets.overlay.env" 2>/dev/null || true
 
-docker compose $COMPOSE_ARGS --env-file .env pull
+if [[ "${LOCAL_BUILD:-0}" != "1" ]]; then
+  docker compose $COMPOSE_ARGS --env-file .env pull
+fi
 docker compose $COMPOSE_ARGS --env-file .env up -d ecom-db valkey
 echo "Waiting for MariaDB..."
 for i in $(seq 1 60); do
@@ -852,16 +944,13 @@ for i in $(seq 1 60); do
 done
 
 if [[ -f /tmp/sillage-clone.sql ]]; then
-  echo "Importing cloned SQL..."
-  docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot < /tmp/sillage-clone.sql
-  rm -f /tmp/sillage-clone.sql
+  echo "Refusing to import a database dump during a fresh deployment" >&2
+  exit 1
 fi
 
 docker compose $COMPOSE_ARGS --env-file .env up -d
 
-# WordPress lives in a Docker volume, so every check and edit goes through the container. The
-# host has no business holding WordPress core: that is how a datadir drifted to a newer version
-# than the image it booted from, and it is why hard rule 1 exists at all.
+# WordPress is bind-mounted under data/wp, but use the container for runtime checks and ownership.
 wp_has_config() { docker exec ecom test -f /var/www/html/wp-config.php 2>/dev/null; }
 wp_chown() { docker exec ecom chown -R www-data:www-data /var/www/html/wp-content 2>/dev/null || true; }
 
@@ -871,7 +960,7 @@ for i in $(seq 1 90); do
   sleep 2
 done
 
-# The bridge plugin ships on every deploy, into the volume rather than a host wp-content.
+# The bridge plugin ships on every deploy into the bind-mounted WordPress tree.
 if [[ "${OVERLAY:-0}" == "1" ]]; then
   # The overlay bind-mounts the checkout's plugin over that path so it can be edited in place, and
   # a bind mount cannot be replaced from inside the container — the rm fails with "device or
@@ -881,13 +970,14 @@ elif [[ -d "$APP_DIR/wp-staging/sillage-bridge" ]]; then
   docker exec ecom rm -rf /var/www/html/wp-content/plugins/sillage-bridge
   docker cp "$APP_DIR/wp-staging/sillage-bridge" ecom:/var/www/html/wp-content/plugins/
   wp_chown
-  echo "sillage-bridge copied into the WordPress volume"
+  echo "sillage-bridge copied into the WordPress bind mount"
 fi
+
 
 # Whether WordPress needs installing is a question about the *database*, not about wp-config.php.
 # The official image's entrypoint writes wp-config.php on first boot, and the loop above waits for
 # exactly that, so a file test here is always false by the time it is read — which silently skipped
-# the whole install: no WooCommerce, no Blocksy, no admin user, and a shop that answered on :80
+# the whole install: no WooCommerce, no admin user, and WordPress answered on :80
 # with the WordPress five-minute install screen.
 wp_installed() {
   docker exec -e MYSQL_PWD="$MYSQL_ROOT_PWD" ecom-db mariadb -uroot -N \
@@ -898,17 +988,27 @@ wp_installed() {
 
 NEED_FRESH=0
 wp_installed || NEED_FRESH=1
-if [[ -z "${CLONE_MODE:-}" && ( "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ) ]]; then
-  echo "Fetching WooCommerce / redis-cache / Blocksy from wordpress.org..."
+if [[ "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ]]; then
+  echo "Fetching WooCommerce and redis-cache from wordpress.org..."
   STAGE="$(mktemp -d)"
-  for item in "plugin:woocommerce" "plugin:redis-cache" "theme:blocksy"; do
+  for item in "plugin:woocommerce" "plugin:redis-cache"; do
     kind=${item%%:*}; slug=${item##*:}
     if docker exec ecom test -d "/var/www/html/wp-content/${kind}s/${slug}"; then
       echo "  $slug already present"
       continue
     fi
     curl -fsSL -o "$STAGE/${slug}.zip" "https://downloads.wordpress.org/${kind}/${slug}.latest-stable.zip"
-    unzip -qo "$STAGE/${slug}.zip" -d "$STAGE"
+    python3 - "$STAGE/${slug}.zip" "$STAGE" <<'PY'
+import pathlib, sys, zipfile
+archive, destination = map(pathlib.Path, sys.argv[1:])
+root = destination.resolve()
+with zipfile.ZipFile(archive) as bundle:
+    for entry in bundle.infolist():
+        target = (root / entry.filename).resolve()
+        if target != root and root not in target.parents:
+            raise SystemExit(f"Unsafe archive path: {entry.filename}")
+    bundle.extractall(root)
+PY
     docker cp "$STAGE/${slug}" "ecom:/var/www/html/wp-content/${kind}s/"
     rm -rf "$STAGE/${slug}" "$STAGE/${slug}.zip"
     echo "  $slug installed"
@@ -941,13 +1041,14 @@ if [[ -z "${CLONE_MODE:-}" && ( "$NEED_FRESH" -eq 1 || "${FRESH:-0}" == "1" ) ]]
       -e WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}" \
       -e SHOP_TITLE="${SHOP_TITLE:-Cosmetic}" \
       -e SILLAGE_SHARED_SECRET="${SILLAGE_SHARED_SECRET:-}" \
-      -e SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}" \
+      -e SILLAGE_DASHBOARD_URL="https://${SHOP_DOMAIN}${DASHBOARD_PATH}" \
       -e SILLAGE_CORE_INTERNAL_URL="http://sillage-core:4000" \
+      -e WP_ACTIVATE_PLUGINS=1 \
       ecom php /tmp/wp-fresh-install.php
   fi
 fi
 
-export SILLAGE_DASHBOARD_URL="https://${DASH_DOMAIN}"
+export SILLAGE_DASHBOARD_URL="https://${SHOP_DOMAIN}${DASHBOARD_PATH}"
 wp_chown
 if wp_has_config; then
   # Creates the sillage DB user and grants, then patches wp-config inside the container:
@@ -955,15 +1056,9 @@ if wp_has_config; then
   bash "$APP_DIR/scripts/vps-bootstrap.sh"
 fi
 
-if [[ -n "${CLONE_MODE:-}" ]]; then
-  docker exec ecom php -r "
-    require '/var/www/html/wp-load.php';
-    \$url = 'https://${SHOP_DOMAIN}';
-    update_option('siteurl', \$url);
-    update_option('home', \$url);
-    echo \"urls=\$url\\n\";
-  " || true
-fi
+# The image contains the pinned WordPress core, while data/wp is a persistent bind mount. Sync
+# core files from the image on version bumps without replacing wp-content or wp-config.php.
+bash "$APP_DIR/scripts/update-wordpress-core.sh"
 
 cd "$APP_DIR"
 set -a; source .env; set +a
@@ -1023,7 +1118,7 @@ SITEMAP_HOST_DIR="${SITEMAP_HOST_DIR:-${DATA_DIR}/sitemaps}" WP_BASE_URL="https:
 curl -sS "http://127.0.0.1:${SILLAGE_PORT:-4000}/health" || true
 echo
 docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
-echo "Deploy finished. Open https://${DASH_DOMAIN}"
+echo "Deploy finished. Dashboard: https://${SHOP_DOMAIN}${DASHBOARD_PATH}"
 REMOTE
 
 log_step "Remote bring-up finished"
@@ -1033,7 +1128,7 @@ log_step "DONE total=${TOTAL}s (~$((TOTAL/60))m$((TOTAL%60))s)"
 echo
 echo "==> done"
 echo "Shop:      https://${SHOP_DOMAIN}"
-echo "Dashboard: https://${DASH_DOMAIN}"
+echo "Dashboard: https://${SHOP_DOMAIN}${DASHBOARD_PATH}"
 [[ -n "$IMAGES_DOMAIN" ]] && echo "Images:    https://${IMAGES_DOMAIN}"
 echo "Compose:   ${HOST}:~/${REMOTE_DIR}/compose.yaml"
 echo "Env:       ${HOST}:~/${REMOTE_DIR}/.env"

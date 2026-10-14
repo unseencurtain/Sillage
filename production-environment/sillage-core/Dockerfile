@@ -25,6 +25,8 @@ RUN apk add --no-cache curl \
 # --- dashboard build ----------------------------------------------------------------------------
 FROM oven/bun:1-alpine AS web
 WORKDIR /app
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY . .

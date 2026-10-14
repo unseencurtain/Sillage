@@ -1,3 +1,7 @@
+> **Archived and obsolete. Do not use this guide to create a new VPS.** Its old procedure copies
+> complete runtime folders and database state, contrary to the current clean-rebuild requirement.
+> Use [`../NEW-VPS-PLAN.md`](../NEW-VPS-PLAN.md). Only product photos may be copied to a new host.
+>
 # Back up a box, or move it to another one
 
 One box holds two stacks, `~/sillage/` (retail) and `~/sillage-wholesale/`. Each keeps

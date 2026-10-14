@@ -1,4 +1,7 @@
-# Health (2026-08-30) — suggestions
+# Archived health review (2026-08-30) — suggestions
+
+Snapshot of an older live deployment. Its host names, sync state, and recommendations are historical;
+use [`../HANDOFF.md`](../HANDOFF.md) for the current test state.
 
 Checked on live `ovhe` (`sillage-core:e706d10` at audit time) plus the BTS v2.1 order API.
 

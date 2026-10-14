@@ -4,10 +4,9 @@
 This file is the **engineering** map of every control (API routes, setting keys). When you rename
 a button or change shopper behaviour, update **both** this file and `CLIENT-GUIDE.md`.
 
-Live UI: `https://sillage.prinscosmetic.eu` (VPS `ovhe`). This retail shop syncs **BeautyFort**
-and **BTS** only. wholesale-perfumes is parked here and sold on
-[`wholesale.mirainikki.xyz`](WHOLESALE-SITE.md) (`SILLAGE_PROFILE=wholesale`, dashboard
-`https://sillage-wholesale.mirainikki.xyz`).
+Current test UI: `https://prinscosmetic.eu/sillagedash` (SSH alias is operator-configured). This retail shop syncs **BeautyFort**
+and **BTS** only. Wholesale is a separate product and repository; its settings do not belong to
+this retail dashboard.
 
 Source of truth for ops knobs: `sillage.sil_settings` / `sillage.sil_vendors`, edited through this
 dashboard (or SQL). Auth is HTTP session cookies against `DASHBOARD_USER` / `DASHBOARD_PASSWORD`
@@ -88,7 +87,7 @@ Polls `GET /api/overview` every 15s.
 | Sillage products | `COUNT(sil_products)` |
 | Sync on/off · orders dry-run/LIVE | Snapshot of rails (edit on Settings) |
 | Catalogue visibility stats | Exclusive hide reasons that **add** to Hidden: no photo, out of stock (has a photo), operator pin. Counted from `_external_thumbnail_url` — the photo the shop prints — not from the vendor's raw `image_url`, which is often a placeholder or a weak BeautyFort `/pic/` thumb the writer rejected. Out of stock card is the Woo `outofstock` term, so it also counts photo-less SKUs and the tile names that overlap. Visible + Hidden = Published |
-| `unattributed — please report this` | Hidden minus the three reasons. Should always be absent. If it shows, the hide-reason query has drifted from what the writer does — see the retrospective in `REBUILD-FROM-SCRATCH.md` |
+| `unattributed — please report this` | Hidden minus the three reasons. Should always be absent. If it shows, the hide-reason query has drifted from what the writer does — see the archived incident notes in `archive/REBUILD-HISTORY-2026-10.md` |
 | Last sync | Latest `sil_sync_runs` (+ link to Sync). Fetched is WPF SKUs on wholesale, not BF/BTS |
 | Vendor orders by status | Counts only |
 | Syncs · last 7 days | Activity chart |
@@ -283,6 +282,21 @@ If prices stay stale after a multiplier Save: check `IS_USED_LOCK('sillage:sync'
 [`HANDOFF.md`](HANDOFF.md) “If shop prices ≠ Settings multiplier”. Do not start a live vendor
 sync just to reprice — Save already queues a rewrite-only run.
 
+### WooCommerce → Warehouses: query guard and delivery-country cache
+
+This WordPress plugin page owns the derived country cache and public catalogue query guard. The
+country map is built from product metadata after sync; it is not a manually edited allowlist.
+
+| Control | Default | Effect |
+|---|---:|---|
+| **Clear country cache** | — | Deletes the transient and Redis copy, invalidates catalogue response keys, and lets the next request rebuild the country map. Use this if `/wp-json/sillage/v1/delivery` is empty or stale after a sync. |
+| **Cold-query coalescing: On — balanced** | On | One request rebuilds a cold public product/category/brand response. Other visitors use stale data where available; without stale data they wait briefly and receive a retryable 503 rather than starting the same expensive SQL query. The React client retries safe reads. |
+| **Cold-query coalescing: Off — capacity test** | Off | Turns off single-flight protection while leaving the 5-minute response cache enabled. Use only for controlled comparisons on a stronger VPS, then restore **On — balanced**. |
+
+The catalogue and category counts are country-scoped. React's bundled country list is only a fallback
+while the live map request is unavailable; a successful empty live map is not treated as proof that
+a country is served.
+
 ### Shop URLs (post-login)
 
 | UI label | Key | Effect |
@@ -297,7 +311,7 @@ sync just to reprice — Save already queues a rewrite-only run.
 | Sync enabled | `sync_enabled` | On → schedule owns price/stock. Stop turns it off. Manual Update does not turn it back on |
 | Operator timezone | `schedule_timezone` | IANA zone for dashboard clocks + optional nightly hour. MariaDB stays UTC |
 | Minutes between syncs | `live_feed_min_minutes` **and** `fast_sync_minutes` | One field; Save keeps both equal. Incremental check interval |
-| Daily full catalogue rebuild | `full_sync_enabled` | Routine once-per-day full import (new products + WP categories). Keep on. Incremental 30-min checks still run |
+| Daily full catalogue rebuild | `full_sync_enabled` | Fresh/test VPS default is off. Enable after a successful manual full sync and catalogue review; otherwise leave paused |
 | Daily rebuild hour | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not the minutes interval). One attempt after this hour |
 | Sync source | `sync_source` | Hidden from main UI; keep `live` in production (`local` = fixtures) |
 

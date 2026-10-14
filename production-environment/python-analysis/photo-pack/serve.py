@@ -94,7 +94,7 @@ def main() -> int:
     if args.bind in {"0.0.0.0", "::", "[::]"}:
         print(
             "REFUSING 0.0.0.0 / :: — that is how a pack stayed on the internet last time.\n"
-            "Bind 127.0.0.1 and SSH-tunnel: ssh -L 18765:127.0.0.1:18765 ovhe",
+            "Bind 127.0.0.1 and SSH-tunnel: ssh -L 18765:127.0.0.1:18765 "$SSH_ALIAS"",
             file=sys.stderr,
         )
         return 2

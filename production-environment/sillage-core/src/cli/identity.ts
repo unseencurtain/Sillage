@@ -49,12 +49,11 @@ async function main(): Promise<number> {
   }
 
   if (cmd === "check") {
-    const { mismatches, retired } = await checkIdentity();
-    for (const r of retired) console.log(`RETIRED  record field ${r} still holds a previous store's address`);
+    const { mismatches } = await checkIdentity();
     for (const m of mismatches) {
       console.log(`DIFFERS  ${m.field}: WordPress has "${m.wordpress}", record says "${m.record}"`);
     }
-    if (mismatches.length === 0 && retired.length === 0) {
+    if (mismatches.length === 0) {
       console.log("identity: WordPress matches the record");
       return 0;
     }

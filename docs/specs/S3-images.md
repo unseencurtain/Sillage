@@ -11,8 +11,8 @@ Everything else in this document is an *image source*: EAN → URL, no stock, no
 
 | SSH host | Role | What you may do |
 |---|---|---|
-| `ovhe` (`ovh-experi`) | **Live** retail shop | Deploy, migrate, sync, run image tools. Caddy owns `:80`; ecom is `127.0.0.1:104→80` |
-| `ovh` | Unused (empty) | Do not deploy unless repurposed |
+| Selected target | Fresh retail test shop | Deploy and run image tools. Caddy owns `:80`; WordPress is `127.0.0.1:104→80` |
+| Optional photo source | Existing host, when available | Copy product photos only when requested; never copy its database or WordPress tree |
 
 ---
 
@@ -24,13 +24,13 @@ JPEG/WebP bytes are **gitignored** (`ecom_sites/data/media/**`). Git carries:
 - `sillage-core/data/found-images-manifest.json` (CDN filenames that must exist on disk)
 - `python-analysis/beautyfort-enriched/restore_found_images.py`
 
-Full migrate (rsync vs rebuild): [`../VPS-MIGRATE.md`](../VPS-MIGRATE.md). Agent loop:
+Clean VPS setup: [`../NEW-VPS-PLAN.md`](../NEW-VPS-PLAN.md). Agent loop:
 [`../AGENTS-RUNBOOK.md`](../AGENTS-RUNBOOK.md).
 
 ```bash
 python3 production-environment/python-analysis/beautyfort-enriched/restore_found_images.py \
   --overrides production-environment/sillage-core/data/image_overrides.json \
-  --dest ~/ecom_sites/data/media \
+  --dest ~/sillage/data/media \
   --media-src /path/from/old-vps/media \   # optional
   --brasty-root /home/ubuntu/brasty \      # optional
   --from-cdn                               # while images.prinscosmetic.eu still serves
@@ -75,7 +75,7 @@ any EAN that appears in the feed.
 
 1. Fetch or replay the catalog (live token auth or local fixture — see vendor connector / `fetch_wholesale_perfumes.py`).
 2. Extract EAN → `flask_front` URL pairs (`enrich.py --fetch-wholesale-perfumes`).
-3. **Host on the images CDN** — `host_override_images.py --host images.elsvc.net` downloads override CDN URLs into `ecom_sites/data/media/` and rewrites keys to `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (see [Hosting](#hosting-lps-media--images-cdn)).
+3. **Host on the images CDN** — set `LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu` (or the current configured image hostname) and run `host_override_images.py`. It downloads override CDN URLs into `ecom_sites/data/media/` and writes public URLs at the image hostname root (see [Hosting](#hosting-lps-media--images-cdn)); do not append `/images/`.
 4. Merge EAN → public URL into `image_overrides.json` (do not overwrite existing keys).
 
 The Python enricher under `production-environment/python-analysis/` already owns much of this path
@@ -100,7 +100,7 @@ Image-only index: EAN → external image URL. Not a vendor, not wholesale-perfum
 Brasty is an **image source only** — no vendor row, no catalogue sync, no orders. Photos match
 products by **EAN alone**.
 
-Live dump on `ovhe`:
+Live dump on the selected target:
 
 | Path | Contents |
 |---|---|
@@ -117,11 +117,11 @@ key): existing `image_overrides.json` → Brasty EAN file → `oceanfragrances.c
 graphic (grey camera, “BRASTY / BRANDED STYLE”, green bar) saved as `EAN.jpg` (often WebP
 bytes). Example: `https://images.prinscosmetic.eu/8809598454323.jpg`. Matcher skips them by
 MD5 (`brasty_placeholders.py`). Never copy those onto the CDN. If one is already in
-`image_overrides.json` / `~/ecom_sites/data/media/`, delete the file, drop the override
+`image_overrides.json` / `~/sillage/data/media/`, delete the file, drop the override
 keys, recreate core/cron, and **full** rewrite-only so hide-without-image applies again.
 
 1. Export products that still lack a usable photo (dashboard Products JSON or SQL dump).
-2. Run the matcher; copy Brasty hits into `~/ecom_sites/data/media/` (CDN
+2. Run the matcher; copy Brasty hits into `~/sillage/data/media/` (CDN
    `https://images.prinscosmetic.eu/<original-stem>.jpg`).
 3. Merge the delta into `sillage-core/data/image_overrides.json` on the VPS **and** in git.
 4. Recreate core/cron, then **full** rewrite-only (see [After overrides change](#after-overrides-change)).
@@ -199,11 +199,8 @@ watermarked files outside `data/wp/`:
 3. **Preferred public URLs:** `https://images.<domain>/<file>` (root of the media container).
    - VPS: host Caddy site `images.prinscosmetic.eu` → `127.0.0.1:105` (`lps-media`)
    - Deploy with `--images images.example.com` (optional Porkbun A via `--dns`)
-4. **Fallback path** (unchanged): `https://<shop>/lps-media/<file>`
-   - Local compose: `shop-gateway` (Caddy) `handle_path /lps-media/*` → `lps-media`
-   - VPS: shop site still has `handle_path /lps-media/*` → `:105`
-5. `ecom` does **not** mount or Alias media — Apache never serves product images.
-6. **Configurable base URL** (no code change to flip hosts later):
+4. `ecom` does **not** mount or Alias media — Apache never serves product images.
+5. **Configurable base URL** (no code change to flip hosts later):
    - Dashboard / `sil_settings.image_cdn_base_url` (default `https://images.prinscosmetic.eu`)
    - Tool env (first match): `LPS_MEDIA_BASE_URL` → `IMAGE_HOST_BASE_URL` → `PUBLIC_URL_BASE`
    - Host scripts (`host_override_images.py`, Brasty `build-overrides`) write absolute URLs like
@@ -212,21 +209,15 @@ watermarked files outside `data/wp/`:
       `image_overrides.json` (re-run host tools or a bulk replace), set the setting/env, then
       `bun run sync -- --rewrite-all`
 
-### Headless storefront rule: resolve first-party media on the same VPS
+### Headless storefront image URLs
 
-The React storefront must not depend on a hardcoded first-party CDN hostname. WooCommerce may
-still return a legacy absolute URL such as `https://images.prinscosmetic.eu/<EAN>.jpg`; if that
-URL has a root-level EAN filename, the storefront requests `/lps-media/<EAN>.jpg` on the
-**current page origin** instead. Caddy routes that path to the local `lps-media` container and
-its `~/sillage/data/media/` bind mount. A version query bypasses the image host's immutable
-browser cache. Thus the shop URL/domain being used selects the VPS serving the image; do not
-rewrite these URLs to another box's image hostname.
+The public image base is the image hostname at its root, for example
+`https://images.prinscosmetic.eu/<EAN>.jpg`. Do not append `/images/` or expose the internal
+`lps-media` service name in public URLs. Keep the base configurable through dashboard Settings and
+`LPS_MEDIA_BASE_URL`. Non-EAN supplier hotlinks remain external.
 
-For a product detail with no usable supplier image URL, the storefront may try the product's
-EAN filename through the same-origin `/lps-media/` route before showing its no-image state.
-Non-EAN supplier hotlinks are not rewritten.
-
-Drop new files onto the host `data/media/` path; nginx serves them immediately (read-only mount).
+Drop new files onto the host `~/sillage/data/media/` path; the media service serves them
+immediately (read-only mount). The local Compose `/images/` route is only a development fallback.
 
 Brasty watermark asset: `tools/images/brasty/assets/lps-logo.png`.
 
@@ -273,5 +264,5 @@ cd ../../tools/images/brasty
 npm run typecheck
 ```
 
-For Brasty work: trial-run 10–20 EANs, inspect output URLs, then scale on **`ovhe`** — not
-production **`ovh`** unless read-only inspection.
+For Brasty work: trial-run 10–20 EANs and inspect output URLs before scaling. Use a test target;
+use read-only inspection when pointed at a production host.

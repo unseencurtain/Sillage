@@ -5,7 +5,7 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 | Priority | Item | Notes |
 |---|---|---|
 | P0 | Missing product photos (`no_image` / placeholders) | **Done (stage 3):** cross-vendor EAN fill on full+fast sync; `hide_products_without_image` (default on) excludes unresolved placeholders. Overrides still via `image_overrides.json` / the python-analysis enricher. |
-| P0 | Theme compatibility (Astra / Blocksy / Elementor) | Bridge attachment filters (see `sillage-bridge`). |
+| P0 | ~~WordPress theme compatibility~~ | **Done / no longer a storefront dependency:** React is the public storefront; WordPress is headless. The bridge attachment filters remain theme-independent for admin and API behavior. |
 | P1 | Rename shop sections to **LPS01** (BTS) / **LPS02** (BeautyFort) | **Done (stage 3):** `sil_vendors.storefront_label`; root `product_cat` renamed in place. SKU prefix / slug formula unchanged. |
 | P1 | Vendor **wholesale-perfumes.eu** (full catalogue + orders) | **Parked / decoupled:** connector stays in sillage-core but inactive + excluded from `--vendor=all` on this shop. Future own site under [`b2b-wholesale/`](../b2b-wholesale/README.md). Cart `code` confirmed for that project. |
 | P1 | Brasty **Playwright image scrape** | Image source only (EAN → `image_overrides.json`). Tool: `tools/images/brasty/`. See `docs/specs/S3-images.md`. |
@@ -19,7 +19,8 @@ Source: client chat (`chat-with-client.md`, Aug 2026) + vendor feed handoff (Aug
 
 | Fact | Value |
 |---|---|
-| Live SSH | `ovhe` (`139.99.61.71`) — retail shop + dashboard. `ovh` (`51.79.255.226`) unused |
+| Current test environment | Retail shop + dashboard; connection alias is configured locally and is not a repository default |
+| Existing photo source | Optional media-only copy source; never copy a database, WordPress tree, or app folder |
 | Wholesaler / B2B site | Separate future project — scaffold in `b2b-wholesale/` (not on this WP) |
 | Storefront labels | LPS01 = BTS, LPS02 = BeautyFort (LPS03 parked; `_sillage_vendor` + `storefront_label` for ops/MOQ; never `product_cat` or visible `pa_vendor`) |
 | Image CDN | `sil_settings.image_cdn_base_url` / `LPS_MEDIA_BASE_URL` → `https://images.<domain>/…` via `lps-media` |

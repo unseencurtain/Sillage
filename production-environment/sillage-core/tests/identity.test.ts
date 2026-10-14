@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RETIRED_IDENTITY, validateIdentity } from "../src/identity/rules.ts";
+import { validateIdentity } from "../src/identity/rules.ts";
 
 describe("identity validation", () => {
   test("accepts a complete valid record", () => {
@@ -15,10 +15,8 @@ describe("identity validation", () => {
     ).toEqual([]);
   });
 
-  test("refuses the retired address from the old box", () => {
-    const problems = validateIdentity({ admin_email: "cherry@codeinmoon.xyz" });
-    expect(problems.map((p) => p.field)).toEqual(["admin_email"]);
-    expect(problems[0]?.message).toContain("previous store");
+  test("allows identity values to be changed between stores", () => {
+    expect(validateIdentity({ admin_email: "operator@example.org" })).toEqual([]);
   });
 
   test("refuses a bad email and an empty store name", () => {
@@ -28,9 +26,5 @@ describe("identity validation", () => {
 
   test("refuses markup in names", () => {
     expect(validateIdentity({ store_name: "<b>Shop</b>" })[0]?.message).toContain("< > or quotes");
-  });
-
-  test("retired list is non-empty so the audit has something to find", () => {
-    expect(RETIRED_IDENTITY.length).toBeGreaterThan(0);
   });
 });

@@ -9,8 +9,8 @@ Keep it matching live UI in the same change as any user-visible behaviour.
 **Operator reference:** [OPERATOR-DASHBOARD.md](../OPERATOR-DASHBOARD.md) — BeautyFort + BTS
 dashboard controls (Settings, Vendors, Sync, Orders). Parked WPF / dead knobs called out.
 
-**Whole-project loop:** [AGENTS-RUNBOOK.md](../AGENTS-RUNBOOK.md) · photos on a new VPS:
-[VPS-MIGRATE.md](../VPS-MIGRATE.md) · BTS tracking: [BTS-ORDERS.md](../BTS-ORDERS.md).
+**Whole-project loop:** [AGENTS-RUNBOOK.md](../AGENTS-RUNBOOK.md) · new VPS:
+[NEW-VPS-PLAN.md](../NEW-VPS-PLAN.md) · BTS tracking: [BTS-ORDERS.md](../BTS-ORDERS.md).
 
 ## Stage 1
 

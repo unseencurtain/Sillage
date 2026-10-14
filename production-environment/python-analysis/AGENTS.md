@@ -29,11 +29,11 @@ python3 beautyfort-enriched/fill_missing_shop_images.py \
 # Restore CDN-hosted files onto a new VPS (map is in git; JPEGs are not)
 python3 beautyfort-enriched/restore_found_images.py \
   --overrides ../sillage-core/data/image_overrides.json \
-  --dest ~/ecom_sites/data/media \
+  --dest ~/sillage/data/media \
   --brasty-root /home/ubuntu/brasty \
   --from-cdn \
   --write-manifest ../sillage-core/data/found-images-manifest.json
-# see docs/VPS-MIGRATE.md
+# For a new host, use the clean setup in docs/NEW-VPS-PLAN.md; copy image files only.
 
 # optional: copy .env.example → .env and set WHOLESALE_PERFUMES_USER / WHOLESALE_PERFUMES_TOKEN
 python3 beautyfort-enriched/test.py
@@ -47,7 +47,7 @@ LPS_MEDIA_BASE_URL=https://images.prinscosmetic.eu \
 # optional next: --host www.oceanfragrances.com
 ```
 
-After merging overrides, on `ovhe`: copy Brasty jpgs into `~/ecom_sites/data/media/`, rsync
+After merging overrides, on the selected target: copy Brasty jpgs into `~/sillage/data/media/`, rsync
 `image_overrides.json` to `~/sillage/sillage-core/data/`, **recreate** `sillage-core` /
 `sillage-cron`, then:
 
@@ -68,7 +68,7 @@ beautyfort-enriched/
   restore_found_images.py      — copy/download CDN files listed in image_overrides.json
   brasty_placeholders.py       — MD5 skip-list for Brasty camera graphics
   fetch_wholesale_perfumes.py  — wholesale-perfumes.eu catalog download + parse
-  host_override_images.py      — download remote override URLs → ecom_sites/data/media (images CDN)
+  host_override_images.py      — download remote override URLs → sillage/data/media (images CDN)
   test.py
   fixtures/
     wholesale_perfumes_catalog_sample.xml  — tiny fixture for tests

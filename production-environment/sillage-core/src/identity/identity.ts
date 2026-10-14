@@ -15,12 +15,11 @@ import {
   IDENTITY_KEYS,
   type Identity,
   type IdentityField,
-  RETIRED_IDENTITY,
   validateIdentity,
   WP_FIELDS,
 } from "./rules.ts";
 
-export { IDENTITY_KEYS, RETIRED_IDENTITY, validateIdentity, emptyIdentity };
+export { IDENTITY_KEYS, validateIdentity, emptyIdentity };
 export type { Identity, IdentityField };
 
 const log = logger("identity");
@@ -103,10 +102,9 @@ export interface Mismatch {
 }
 
 /**
- * Compare the record with WordPress. Also reports any retired value still in the record itself.
- * Returns an empty list when WordPress matches.
+ * Compare the configurable identity record with WordPress.
  */
-export async function checkIdentity(): Promise<{ mismatches: Mismatch[]; retired: string[] }> {
+export async function checkIdentity(): Promise<{ mismatches: Mismatch[] }> {
   const record = await loadIdentity();
   const live = await readWordPressIdentity();
   const mismatches: Mismatch[] = [];
@@ -120,8 +118,5 @@ export async function checkIdentity(): Promise<{ mismatches: Mismatch[]; retired
   if (record.support_email !== "" && (live.pos_email ?? "") !== record.support_email) {
     mismatches.push({ field: "pos_email", record: record.support_email, wordpress: live.pos_email ?? "" });
   }
-  const retired = (Object.keys(record) as IdentityField[])
-    .filter((f) => RETIRED_IDENTITY.some((r) => record[f].toLowerCase().includes(r)))
-    .map((f) => f);
-  return { mismatches, retired };
+  return { mismatches };
 }

@@ -25,31 +25,28 @@ Networks are **external** and must exist before `docker compose up`:
 `ecom_network` (ecom ↔ ecom-db ↔ sillage-core ↔ lps-media ↔ shop-gateway) and
 `redis_network` (ecom ↔ valkey ↔ sillage-core).
 
-**Product images (CDN / `lps-media`).** This folder is **this retail shop**. BTS has no
-vendor photos; some bottle JPEGs are provided here so listings can show. Wholesale-perfumes
+**Product images.** `lps-media` is the internal Docker service name, not a public URL. The public
+image base is `https://images.prinscosmetic.eu`, configurable in dashboard Settings and the VPS
+`.env`. This folder is **this retail shop**. BTS has no vendor photos; some bottle JPEGs are
+provided here so listings can show. Wholesale-perfumes
 uses catalog `flask_front` URLs and must not mount this directory. Host directory
-`production-environment/ecom_sites/data/media/` (on VPS: `~/ecom_sites/data/media`) is
+`production-environment/ecom_sites/data/media/` (on VPS: `~/sillage/data/media`) is
 bind-mounted read-only into `lps-media` at `/usr/share/nginx/html` (never a named/anonymous
-Docker volume). Preferred public URLs are `https://images.<domain>/<file>` (Caddy site →
-`lps-media` document root). The CDN
+Docker volume). Public image URLs use `https://<image-domain>/<file>` (Caddy → media document
+root). The image host
 does not list files, does not advertise nginx’s version on 404s, and only serves
-image extensions. Shop path
-`https://<shop>/lps-media/<file>` remains a fallback (`handle_path` strips the prefix). Locally
-`shop-gateway` serves `/lps-media/*` the same way. WordPress/`ecom` does not serve these files.
+image extensions. The local Compose edge can also serve `/images/<file>` for development.
+WordPress/`ecom` does not serve these files.
 Sync stores absolute URLs only (`_external_thumbnail_url` / `image_overrides.json`). New image
 URLs come from tool env `LPS_MEDIA_BASE_URL` / `PUBLIC_URL_BASE` (default
 `https://images.prinscosmetic.eu`). Settings `image_cdn_base_url` is on the dashboard and
 hot-applied into Bun runtime via `applyRuntimeUrls`; it does **not** by itself rewrite URLs
 already written on products — use overrides + a content rewrite.
 
-**Headless React image rule:** root-level EAN image URLs are requested through the current
-storefront origin's `/lps-media/<EAN>.<ext>` route, with a cache-version query. Caddy sends that
-path to the same box's `lps-media` container and `data/media/`; the active storefront URL therefore
-selects which VPS serves the file. Never hardcode another VPS's `images.*` hostname in React
-storefront code. Product-detail pages also try the product EAN in this same local media directory
-when the supplier image URL is missing or fails. Bump the frontend's `LOCAL_MEDIA_VERSION` when
-replacing files. Non-EAN supplier hotlinks remain external. A hostname must resolve to the intended
-VPS and its Caddy site must route `/lps-media/*` to that VPS's `lps-media` container.
+**Headless React image rule:** use the configured image base URL for local product photos. The
+image hostname must resolve to the intended VPS and Caddy must route it to that VPS's media
+container. Never hardcode a VPS hostname in React; the image base is configuration. Non-EAN
+supplier hotlinks remain external.
 
 ```bash
 docker network create ecom_network
@@ -61,25 +58,16 @@ cd production-environment && docker compose --env-file .env up -d
 Compose: `production-environment/compose.yaml`. Env template: `production-environment/.env.example`.
 Legacy `ecom_sites/compose.yaml` and `redis/compose.yaml` are thin includes only.
 
-**Production VPS:** SSH `ovh` (`ubuntu@51.79.255.226`) — shop `codeinmoon.xyz`, dashboard
-`sillage.codeinmoon.xyz`, images `images.codeinmoon.xyz`, plus wholesale on
-`wholesale.codeinmoon.xyz` / `sillage-wholesale.codeinmoon.xyz`.
+**Current retail test install:** SSH alias is operator-configured — React shop and WordPress Admin at
+`prinscosmetic.eu`, Sillage dashboard at `/sillagedash`, product media at
+`images.prinscosmetic.eu`. The storefront is open for account-flow testing; WordPress and
+dashboard use their own logins. Retail identity values remain editable in dashboard Settings and
+deployment configuration; no hostname is baked into application defaults.
 
-**Development VPS:** SSH `ovhe` (`ubuntu@139.99.61.71`, hostname `ovh-experi`) — the same two
-stacks restored from a production pack, on `prinscosmetic.eu` / `sillage.prinscosmetic.eu` /
-`images.prinscosmetic.eu` and `wholesale.mirainikki.xyz` / `sillage-wholesale.mirainikki.xyz`,
-and `SILLAGE_ROLE=development`, which is a deploy-time label only: the engine behaves identically
-on either role, hits the same live vendor APIs on the same credentials, and lets the Orders page
-decide dry-run versus Live. The role is declared per stack in its own `.env`, never inferred from
-the hostname ([`ENVIRONMENTS.md`](ENVIRONMENTS.md)). These roles swapped on 2026-09-08;
-`ovhe` used to be the live shop, and older text may still say so.
-
-On both boxes each stack lives in its own directory (`~/sillage/`, `~/sillage-wholesale/`) and
-keeps **all** of its state under that directory's `data/` — WordPress in `data/wp/`, MariaDB in
-`data/wp-db/`, photos in `data/media/`. There are no Docker named volumes; see
-[`VPS-MIGRATE.md`](VPS-MIGRATE.md) for why, and for how to pack and clone a box. Use
-`mariadb.vps.cnf` (1G buffer pool) — WordPress, Valkey, Bun and MariaDB share ~4 GB RAM.
-Resume context: [`HANDOFF.md`](HANDOFF.md).
+The new retail stack keeps WordPress, MariaDB, photos, and sitemaps under `~/sillage/data/` as
+editable bind mounts. Rebuilds create fresh WordPress/database state; they do not pack or clone
+those runtime folders. See [`NEW-VPS-PLAN.md`](NEW-VPS-PLAN.md) for the repeatable procedure and
+[`HANDOFF.md`](HANDOFF.md) for current deployment details.
 
 One image, one role per container. `sillage-core` runs supercronic; the dashboard service overrides
 `command` to run the API instead. A full sync must never be able to stall the dashboard, and either
@@ -296,9 +284,9 @@ cadence is a settings edit, not a rebuild.
 | `sync_enabled` | `1` | Schedule kill switch. Manual Update works when off and does not turn this back on |
 | `fast_sync_minutes` | `30` | Schedule cadence; kept equal to `live_feed_min_minutes` from Settings |
 | `live_feed_min_minutes` | `30` | Per-vendor call interval. Daily download counters are recorded but never block |
-| `full_sync_enabled` | seed `0`; **live shop `1`** | Routine once-per-day full import (new SKUs + WP categories). Keep on. Incremental 30-min checks still run. Sync → Rebuild remains the manual escape |
-| `schedule_timezone` | `UTC` (live: `Asia/Dhaka`) | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
-| `full_sync_hour` | `3` (live: `23`) | Hour of day (0–23) in `schedule_timezone`. One attempt after this hour |
+| `full_sync_enabled` | seed `0`; **OVHE test VPS `0`** | Scheduled full imports are paused during account/catalogue verification. Enable deliberately after the first manual sync succeeds |
+| `schedule_timezone` | `UTC` (OVHE test VPS: `Asia/Dhaka`) | IANA zone for interpreting `full_sync_hour` and dashboard clocks |
+| `full_sync_hour` | `3` (OVHE test VPS: `23`) | Hour of day (0–23) in `schedule_timezone`. Applies only when full sync scheduling is enabled |
 | `sync_source` | `live` | `live` hits vendors (no silent disk fallback when gated); `local` = fixtures; `cache` = rewrite-only internal |
 
 Rules, all evaluated by the database so no clock skew is possible:
@@ -354,7 +342,7 @@ can illustrate any vendor's product.
 | Image source | Where | Notes |
 |---|---|---|
 | oceanfragrances | `python-analysis/.../products/oceanfragrances.csv` | **This — and only this — is what "ocean" means.** A CSV. Not a vendor. |
-| Brasty | Was VPS `~/brasty/` (removed 2026-09-03). Needed missing-SKU files copied to `~/ecom_sites/data/media/`. Tool `tools/images/brasty/` remains in git. Skip camera placeholders (`brasty_placeholders.py`). Not a supplier |
+| Brasty | Was VPS `~/brasty/` (removed 2026-09-03). Needed missing-SKU files copied to `~/sillage/data/media/`. Tool `tools/images/brasty/` remains in git. Skip camera placeholders (`brasty_placeholders.py`). Not a supplier |
 | Shopify export | `python-analysis/.../products/products_export_1.csv` | Historic export (`Variant Barcode` → `Image Src`) |
 | Cross-vendor | `sil_offers` | One vendor's photo filling another's product, by EAN |
 | wholesale-perfumes catalog XML | its `pictures/flask_front` | The one system that is *both* a vendor and an image source |

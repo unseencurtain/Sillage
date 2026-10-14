@@ -3,7 +3,7 @@
 
 Does not touch products that already have a usable Woo thumb.
 Does not apply the EAN scrape (unreviewed). Skips camera placeholders.
-Must run on ovhe.
+Must run on the selected target.
 """
 from __future__ import annotations
 

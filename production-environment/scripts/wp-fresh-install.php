@@ -3,11 +3,8 @@
  * First boot inside the WordPress image. Plugin and theme files are already in place.
  *
  * Installs the site, writes the shop settings that the architecture depends on (HPOS, EUR,
- * pretty permalinks, Coming soon off), and leaves every plugin and the theme *inactive*.
- *
- * Activation is the operator's: they upload the paid Blocksy companion, activate what they
- * want and customise the shop before any products exist. Set WP_ACTIVATE_PLUGINS=1 for an
- * unattended install that should come up ready to serve.
+ * pretty permalinks, Coming soon off). The React storefront is served by Caddy; WordPress stays
+ * headless and uses a bundled default theme only as WordPress's required fallback.
  *
  * After the operator has activated and customised, `wp-readiness.php` verifies — and with
  * WP_READINESS_FIX=1 repairs — the settings the engine and orders rely on.
@@ -57,13 +54,10 @@ update_option('permalink_structure', '/%postname%/');
 update_option('woocommerce_coming_soon', 'no');
 update_option('woocommerce_onboarding_profile', array('skipped' => true));
 
-// Blocksy's companion ships as either the free or the pro directory depending on the image, so
-// report whichever is present rather than guessing one name.
 $plugins = array(
     array('woocommerce/woocommerce.php'),
     array('redis-cache/redis-cache.php'),
     array('sillage-bridge/sillage-bridge.php'),
-    array('blocksy-companion-pro/blocksy-companion.php', 'blocksy-companion/blocksy-companion.php'),
 );
 $activate = getenv('WP_ACTIVATE_PLUGINS') === '1';
 foreach ($plugins as $candidates) {
@@ -86,12 +80,12 @@ foreach ($plugins as $candidates) {
     echo $found . (is_wp_error($res) ? (' FAIL ' . $res->get_error_message()) : ' activated') . PHP_EOL;
 }
 
-if (function_exists('wp_get_theme') && wp_get_theme('blocksy')->exists()) {
+if (function_exists('wp_get_theme') && wp_get_theme('twentytwentyfive')->exists()) {
     if ($activate) {
-        switch_theme('blocksy');
-        echo "theme=blocksy activated\n";
+        switch_theme('twentytwentyfive');
+        echo "theme=twentytwentyfive selected as headless fallback\n";
     } else {
-        echo "theme=blocksy present, left for the operator to activate\n";
+        echo "theme=twentytwentyfive available as headless fallback\n";
     }
 }
 
@@ -140,9 +134,7 @@ if ($secret !== '' && defined('ABSPATH')) {
                 . "\tdefine( 'SILLAGE_DASHBOARD_URL', '" . addcslashes($dash, "'\\") . "' );\n"
                 . "\tdefine( 'SILLAGE_DB', '" . addcslashes($sillageDb, "'\\") . "' );\n"
                 . "\tdefine( 'DISABLE_WP_CRON', true );\n"
-                // The operator installs the paid Blocksy companion by uploading a zip in
-                // wp-admin. Without this, WordPress can decide it cannot write directly and
-                // asks for FTP credentials that do not exist on a container host.
+                // Keep managed filesystem updates usable inside the container.
                 . "\tdefine( 'FS_METHOD', 'direct' );\n"
                 . "}\n";
             $marker = "/* That's all, stop editing!";

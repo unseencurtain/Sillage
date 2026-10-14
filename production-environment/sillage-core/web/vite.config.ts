@@ -18,6 +18,7 @@ const allowedHosts = (process.env.VITE_ALLOWED_HOSTS || "")
 
 export default defineConfig({
   plugins: [react()],
+  base: process.env.VITE_BASE_PATH || "/",
   root,
   resolve: {
     alias: { "@": resolve(root, "src") },

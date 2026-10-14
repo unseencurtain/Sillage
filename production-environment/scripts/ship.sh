@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Ship this checkout to a box. One command, start to finish.
 #
-#   ./production-environment/scripts/ship.sh                 # gates → build → push → ovhe
-#   ./production-environment/scripts/ship.sh --to ovhe --to ovh
-#   ./production-environment/scripts/ship.sh --status        # what is each box running?
-#   ./production-environment/scripts/ship.sh --rollback 82bd81e --to ovhe
+#   ./production-environment/scripts/ship.sh --to <ssh-alias>
+#   ./production-environment/scripts/ship.sh --to <ssh-alias-1> --to <ssh-alias-2>
+#   ./production-environment/scripts/ship.sh --status --to <ssh-alias>
+#   ./production-environment/scripts/ship.sh --rollback 82bd81e --to <ssh-alias>
 #
 # What it does, in order:
 #   1. refuses a dirty tree (--dirty to override; the tag then says so)
@@ -27,8 +27,7 @@ CORE_DIR="$REPO_ROOT/production-environment/sillage-core"
 # Retail. Wholesale ships from unseencurtain/sillage-b2b with its own copy of this script.
 IMAGE_REPO="${SILLAGE_SHIP_IMAGE_REPO:-unseencurtain/sillage-core}"
 REMOTE_DIR="${SILLAGE_SHIP_REMOTE_DIR:-sillage}"
-BUILDER="${SILLAGE_SHIP_BUILDER:-ovhe}"
-DEFAULT_TARGET="${SILLAGE_SHIP_TARGET:-ovhe}"
+BUILDER="${SILLAGE_SHIP_BUILDER:-}"
 
 TARGETS=()
 TAG=""
@@ -53,7 +52,12 @@ while [[ $# -gt 0 ]]; do
     *)           echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
-[[ ${#TARGETS[@]} -eq 0 ]] && TARGETS=("$DEFAULT_TARGET")
+if [[ ${#TARGETS[@]} -eq 0 && -n "$BUILDER" ]]; then TARGETS=("$BUILDER"); fi
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  echo "No default VPS is configured; pass --to <SSH alias> to choose the target." >&2
+  exit 2
+fi
+if [[ -z "$BUILDER" && ${#TARGETS[@]} -gt 0 ]]; then BUILDER="${TARGETS[0]}"; fi
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }

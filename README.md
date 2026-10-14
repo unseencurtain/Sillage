@@ -48,8 +48,10 @@ Demo script for a live review: [`docs/CLIENT-FEATURE-WALKTHROUGH.md`](docs/CLIEN
 
 ## One-click VPS deploy (presentation path)
 
-**Full step-by-step (provider → bootstrap → DNS → deploy → verify):** see [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md).
-**Move an existing shop / restore photos:** [`docs/VPS-MIGRATE.md`](docs/VPS-MIGRATE.md).
+**Full step-by-step clean VPS setup (provider → bootstrap → DNS → deploy → verify):** see [`docs/NEW-VPS-PLAN.md`](docs/NEW-VPS-PLAN.md). [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md) covers lower-level deploy details.
+
+**Headless React/WooCommerce storefront handoff:** see [`docs/STOREFRONT-OPERATIONS.md`](docs/STOREFRONT-OPERATIONS.md) for the frontend/backend code map, country and cache flow, flat department rules, and laptop-to-VPS deployment sequence. [`docs/DEPLOYMENT-CHRONOLOGY.md`](docs/DEPLOYMENT-CHRONOLOGY.md) records the actual runs, fixes and backups.
+**Build a new VPS:** [`docs/NEW-VPS-PLAN.md`](docs/NEW-VPS-PLAN.md). It never copies an existing database or WordPress tree.
 **Agent handbook:** [`docs/AGENTS-RUNBOOK.md`](docs/AGENTS-RUNBOOK.md).
 
 Needs: Ubuntu 22.04+ (or 24/26), SSH key access, Docker Hub reachability, a domain on Porkbun (optional `--dns`).
@@ -113,7 +115,7 @@ What that does:
 5. Fresh WordPress: WooCommerce, HPOS, permalinks, Coming soon off; grants + migrate
 6. Writes dashboard passwords to **`.deploy/vps-dashboard-<host>.txt`** (gitignored)
 
-Re-run to update images/plugin. It will not wipe MariaDB / WordPress data unless you clear `~/ecom_sites/data`.
+Re-run to update images/plugin. It will not wipe MariaDB / WordPress data unless you clear `~/sillage/data`.
 
 ### 4. After deploy checklist
 

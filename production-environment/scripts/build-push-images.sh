@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Run **on ovhe** (`ssh ovhe`). That host is already `docker login` as unseencurtain.
-# Do not build Hub images in a cloud-agent VM or on a laptop. Copy sillage-core
-# source to ~/sillage/sillage-core (keep data/ and logs/), then:
+# Run on the configured builder VPS (the host used with `--builder`). It must have Docker
+# registry credentials and the Sillage source checkout under `~/sillage/`.
 #
 #   ~/sillage/scripts/build-push-images.sh
 #   ~/sillage/scripts/build-push-images.sh --namespace unseencurtain --tag abc1234
 #   ~/sillage/scripts/build-push-images.sh --core-only   # day-2 engine bump; skip WP image
 #
-# Laptop git checkout (same script, still run it on ovhe after rsync):
+# Laptop git checkout (invoke this script remotely after syncing source to the builder):
 #   production-environment/scripts/build-push-images.sh
 #
 # Default builds **core + WordPress** so an empty VPS can come up unattended.
@@ -25,7 +24,9 @@ WP_DIR="$PE/wordpress-image"
 NAMESPACE=""
 TAG=""
 PUSH_LATEST=1
+PUSH_IMAGES=1
 WITH_WORDPRESS=1
+DASHBOARD_PATH="${DASHBOARD_PATH:-/sillagedash}"
 
 usage() {
   sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
@@ -37,8 +38,11 @@ while [[ $# -gt 0 ]]; do
     --namespace) NAMESPACE="${2:?}"; shift 2 ;;
     --tag) TAG="${2:?}"; shift 2 ;;
     --no-latest) PUSH_LATEST=0; shift ;;
+    --no-push) PUSH_IMAGES=0; shift ;;
+    --push) PUSH_IMAGES=1; shift ;;
     --core-only) WITH_WORDPRESS=0; shift ;;
     --with-wordpress) WITH_WORDPRESS=1; shift ;;
+    --dashboard-path) DASHBOARD_PATH="${2:?}"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unexpected arg: $1" >&2; usage ;;
   esac
@@ -89,10 +93,16 @@ fi
 
 CORE_REPO="${NAMESPACE}/sillage-core"
 WP_REPO="${NAMESPACE}/sillage-wordpress"
+DASHBOARD_PATH="/${DASHBOARD_PATH#/}"
+DASHBOARD_PATH="${DASHBOARD_PATH%/}/"
+if [[ ! "$DASHBOARD_PATH" =~ ^/[a-zA-Z0-9/_-]+/$ || "$DASHBOARD_PATH" == *".."* ]]; then
+  echo "Invalid dashboard path: $DASHBOARD_PATH" >&2
+  exit 2
+fi
 
 echo "==> namespace=${NAMESPACE} tag=${TAG} wordpress=${WITH_WORDPRESS}"
 echo "==> build ${CORE_REPO}:${TAG} from ${CORE_DIR}"
-docker build -t "${CORE_REPO}:${TAG}" "$CORE_DIR"
+docker build --build-arg "VITE_BASE_PATH=${DASHBOARD_PATH}" -t "${CORE_REPO}:${TAG}" "$CORE_DIR"
 
 if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
   if [[ ! -f "$WP_DIR/Dockerfile" ]]; then
@@ -110,18 +120,22 @@ if [[ "$PUSH_LATEST" -eq 1 ]]; then
   fi
 fi
 
-echo "==> push ${CORE_REPO}:${TAG}"
-docker push "${CORE_REPO}:${TAG}"
-if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
-  echo "==> push ${WP_REPO}:${TAG}"
-  docker push "${WP_REPO}:${TAG}"
-fi
-
-if [[ "$PUSH_LATEST" -eq 1 ]]; then
-  docker push "${CORE_REPO}:latest"
+if [[ "$PUSH_IMAGES" -eq 1 ]]; then
+  echo "==> push ${CORE_REPO}:${TAG}"
+  docker push "${CORE_REPO}:${TAG}"
   if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
-    docker push "${WP_REPO}:latest"
+    echo "==> push ${WP_REPO}:${TAG}"
+    docker push "${WP_REPO}:${TAG}"
   fi
+
+  if [[ "$PUSH_LATEST" -eq 1 ]]; then
+    docker push "${CORE_REPO}:latest"
+    if [[ "$WITH_WORDPRESS" -eq 1 ]]; then
+      docker push "${WP_REPO}:latest"
+    fi
+  fi
+else
+  echo "==> keeping built images local on this VPS"
 fi
 
 echo
