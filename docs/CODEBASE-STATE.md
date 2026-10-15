@@ -176,7 +176,7 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 ## 9. Commit policy — what MAY / MAY NOT be committed
 
 ### ✅ May be committed
-- `plugins/**` source, `production-environment/sillage-core/**` (source, migrations, dashboard),
+- `plugins/**` and `mu-plugins/**` source, `production-environment/sillage-core/**` (source, migrations, dashboard),
   `production-environment/scripts/**`, `production-environment/python-analysis/**` (code + tracked
   override data), `docs/**`, `AGENTS.md`, `README.md`, `compose.yaml`, `*.example`, DB config.
 
@@ -185,8 +185,9 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 - `production-environment/sillage-core/data/secrets.overlay.env` and `…secrets.overlay.wpf.env`.
 - `.deploy/**` (dashboard passwords, VPS creds, private keys, snapshots).
 - `*.pem`, `*.log`, `/data/`, `.recovery/`, `.feedscratch/`.
-- Raw WP/MariaDB runtime data under `ecom_sites/data/**` — **except** the deliberate re-includes:
-  the `sillage-bridge` plugin and `…/mu-plugins/sillage-disable-wc-admin.php`.
+- Raw WP/MariaDB runtime data under `ecom_sites/data/**` — **except** the deliberate re-include:
+  the `sillage-bridge` plugin. The storefront auth MU plugin is tracked under `mu-plugins/`, not
+  under the runtime tree.
 - Runtime image bytes (`/photo-pack/`, `tmp-image-inventory/`, `tools/images/brasty/{output,watermarked,*.jpg,...}`).
 
 ### ⚠️ Grey — decide, do not assume
