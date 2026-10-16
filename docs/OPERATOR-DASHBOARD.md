@@ -334,8 +334,8 @@ the pages themselves are compared on the host and ten seconds' work, so writing 
 | Refresh pages & sitemap | `storefront_pages_enabled` | on | Off freezes both: a product added afterwards never reaches a crawler. Independent of `sync_enabled` |
 | Wait after the rebuild (minutes) | `storefront_pages_delay_minutes` | 10 | How long after a full rebuild finishes the pages are refreshed; 0 = immediately. Keeps the refresh off the sync's back |
 | Refresh anyway after (hours) | `storefront_pages_max_age_hours` | 30 | The floor under a rebuild that stops happening. Pages older than this are refreshed whether a rebuild ran or not. Min 1 |
-| Products per batch | `storefront_pages_batch_size` | 500 | How much of the shop is asked for before a pause — the size of the burst, not the amount of work. 0 = one burst |
-| Pause between batches (seconds) | `storefront_pages_batch_pause_seconds` | 60 | The quiet in between, and how long a night takes: 500/60 s is ~260 requests spread over about an hour |
+| Products per batch | `storefront_pages_batch_size` | 100 | How much of the shop is asked for before a pause — the size of each bite, not the amount of work. 100 is one request; 0 = one burst |
+| Pause between batches (seconds) | `storefront_pages_batch_pause_seconds` | 15 | The quiet in between, and what the run costs the shop. At 100 a batch: 15 s ≈ a few percent of the box over about an hour, 5 s ≈ 10% in ~25 min, 30 s ≈ 2% in ~2 h |
 | Include price & availability | `storefront_pages_include_offers` | on | Off → pages say what a product is and nothing about price/stock (JSON-LD offers, meta tags and the static body all drop them). A page with no price cannot go stale between a feed sync and the next run |
 
 Defaults live in `src/db/settings.ts`; `storefront-pages-cron.py` on the shop host mirrors them, so a
