@@ -560,6 +560,92 @@ export function Settings() {
       </Section>
 
       <Section
+        title="Storefront pages & sitemap"
+        help="One static page per product the shop shows (in stock, not hidden), plus /sitemap.xml and robots.txt — what a crawler that does not run JavaScript reads. Shoppers always get the live shop; this copy exists for search, and it is generated on the shop server, never uploaded. It follows the daily rebuild above: the rebuild finishes, you wait, the pages are refreshed."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
+            <Toggle
+              label="Refresh pages & sitemap"
+              hint="Off → both freeze as they are: a product added afterwards never reaches a crawler, and a sold-out one never leaves the sitemap. Independent of Sync enabled."
+              checked={isTruthy(form.storefront_pages_enabled)}
+              disabled={busy}
+              onChange={(v) => setBool("storefront_pages_enabled", v)}
+            />
+          </div>
+          <Field
+            label="Wait after the rebuild (minutes)"
+            help="How long after a full catalogue rebuild finishes the pages are refreshed, so the refresh never competes with the sync for the shop's own API. 0 = as soon as it finishes."
+          >
+            <input
+              type="number"
+              step="1"
+              min={0}
+              max={720}
+              className={inputClass}
+              value={form.storefront_pages_delay_minutes ?? ""}
+              disabled={busy || !isTruthy(form.storefront_pages_enabled)}
+              onChange={(e) => set("storefront_pages_delay_minutes", e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Refresh anyway after (hours)"
+            help="The floor under a rebuild that stops happening — Sync enabled turned off, a supplier down. Pages older than this are refreshed on the next check whether a rebuild ran or not."
+          >
+            <input
+              type="number"
+              step="1"
+              min={1}
+              max={168}
+              className={inputClass}
+              value={form.storefront_pages_max_age_hours ?? ""}
+              disabled={busy || !isTruthy(form.storefront_pages_enabled)}
+              onChange={(e) => set("storefront_pages_max_age_hours", e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Products per batch"
+            help="The run reads the shop and writes the pages in batches, pausing in between, so a shopper's request is never queued behind a wall of ours. 0 = one burst, which is what a manual rebuild uses."
+          >
+            <input
+              type="number"
+              step="100"
+              min={0}
+              max={100000}
+              className={inputClass}
+              value={form.storefront_pages_batch_size ?? ""}
+              disabled={busy || !isTruthy(form.storefront_pages_enabled)}
+              onChange={(e) => set("storefront_pages_batch_size", e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Pause between batches (seconds)"
+            help="The pause itself. A batch of 2,000 with a 5-second pause spreads a full run over a few minutes instead of a few seconds of solid load."
+          >
+            <input
+              type="number"
+              step="1"
+              min={0}
+              max={300}
+              className={inputClass}
+              value={form.storefront_pages_batch_pause_seconds ?? ""}
+              disabled={busy || !isTruthy(form.storefront_pages_enabled)}
+              onChange={(e) => set("storefront_pages_batch_pause_seconds", e.target.value)}
+            />
+          </Field>
+          <div className="rounded-lg border border-line/70 bg-canvas/40 px-4 py-3">
+            <Toggle
+              label="Include price & availability"
+              hint="On → pages carry the price and stock, and search results can show both. Off → they say what each product is and nothing about what it costs: a page with no price on it cannot go stale between a feed sync and this run, and no search result can quote a wrong one."
+              checked={isTruthy(form.storefront_pages_include_offers)}
+              disabled={busy || !isTruthy(form.storefront_pages_enabled)}
+              onChange={(v) => setBool("storefront_pages_include_offers", v)}
+            />
+          </div>
+        </div>
+      </Section>
+
+      <Section
         title="Order safety"
         help="Fail-closed defaults: dry-run on, auto-dispatch off. Dashboard Dry-run / Live buttons ignore this dry-run flag — they always set their own mode."
       >

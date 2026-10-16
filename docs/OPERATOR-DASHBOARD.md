@@ -315,6 +315,32 @@ a country is served.
 | Daily rebuild hour | `full_sync_hour` | **0–23 only** in `schedule_timezone` (not the minutes interval). One attempt after this hour |
 | Sync source | `sync_source` | Hidden from main UI; keep `live` in production (`local` = fixtures) |
 
+### Storefront pages & sitemap
+
+The storefront serves one prerendered page per product in stock (`/product/<slug>/`), plus a public
+sitemap at `/sitemap.xml` and `robots.txt`. Those files are an artifact of the catalogue, not of the
+frontend bundle, and they live on the shop host — the storefront repo's `bun tools/sillage-deploy.ts`
+installs the generator and a poller, and never rewrites a page on deploy.
+
+Nothing here runs the generator either: the **poller** on the host reads these keys from
+`sil_settings` on a five-minute cron and decides. So the schedule is a dashboard value, not a line in
+a box's crontab. A run follows the daily full rebuild above (plus the max-age floor), and the two
+pieces that make up a run — reading the shop, then writing pages — are paced by the batch keys so a
+shopper's own request is never queued behind it.
+
+| UI label | Key | Default | Effect |
+|---|---|---|---|
+| Refresh pages & sitemap | `storefront_pages_enabled` | on | Off freezes both: a product added afterwards never reaches a crawler. Independent of `sync_enabled` |
+| Wait after the rebuild (minutes) | `storefront_pages_delay_minutes` | 10 | How long after a full rebuild finishes the pages are refreshed; 0 = immediately. Keeps the refresh off the sync's back |
+| Refresh anyway after (hours) | `storefront_pages_max_age_hours` | 30 | The floor under a rebuild that stops happening. Pages older than this are refreshed whether a rebuild ran or not. Min 1 |
+| Products per batch | `storefront_pages_batch_size` | 2000 | Slowest unit of the run; pauses in between. 0 = one burst |
+| Pause between batches (seconds) | `storefront_pages_batch_pause_seconds` | 5 | The pause. 2,000/5 s spreads a full run over minutes instead of seconds |
+| Include price & availability | `storefront_pages_include_offers` | on | Off → pages say what a product is and nothing about price/stock (JSON-LD offers, meta tags and the static body all drop them). A page with no price cannot go stale between a feed sync and the next run |
+
+Defaults live in `src/db/settings.ts`; `storefront-pages-cron.py` on the shop host mirrors them, so a
+key that has never been saved behaves identically on both sides. Saving any of these never queues a
+price or content rewrite.
+
 ### Pricing & catalogue visibility
 
 | UI label | Key | Effect |

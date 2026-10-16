@@ -272,6 +272,7 @@ order dry-run is off.
 | **Cart minimum (storefront fee)** | Optional small-order fee (off by default). Independent of per-vendor minimum order value |
 | **Shipping** (own page) | Markup (% and EUR, all countries), free shipping above a bag subtotal (0 = off), one shipping line or one per parcel, and the vendor costs read-only. Markup defaults to 0 |
 | **Schedule** | **Sync enabled**, timezone, **Minutes between syncs** (a *check interval*, not “minutes a day”), **Daily full catalogue rebuild** + hour |
+| **Storefront pages & sitemap** | When the crawler-facing product pages and `/sitemap.xml` are refreshed (after the catalogue rebuild + a wait), the give-up-after floor, batch size and pause, and whether those pages carry a price at all |
 | **Order safety** | Dry-run, auto-dispatch, max order value, daily spend cap, tracking poll minutes, customer email on tracking |
 | **Advanced** | Volume filter (ranges vs exact ml), description mode, **company billing** (fill BeautyFort **before** the first live BeautyFort order; BTS invoices from their portal) |
 
@@ -300,8 +301,17 @@ shop photos until someone inspects them — many are tiny or generic.
 Google is allowed to crawl the shop. Only products that are **visible in the shop** (real photo
 + enough stock, not **Keep hidden**) are listed in the sitemap. Catalogue-hidden products are
 told not to be indexed. The sitemap is a static file Caddy serves (PHP does not build it). It
-refreshes when the catalogue is fully rebuilt, not on every **Minutes between syncs** tick —
-that setting is only how often **price and stock** are checked.
+refreshes after the catalogue is fully rebuilt, plus a wait you choose, not on every **Minutes
+between syncs** tick — that setting is only how often **price and stock** are checked.
+
+The wait, and whether those pages carry a price at all, are the controls under **Storefront pages &
+sitemap** on Settings. By default the refresh starts ten minutes after a full rebuild finishes, so
+it never competes with the sync, and it gives up after **30 hours** without a rebuild and refreshes
+anyway — that is the safety net if you switch the schedule off or a supplier goes quiet. With
+**Include price & availability** off, the pages a search engine reads say what each product is and
+nothing about what it costs: nothing can then go stale between a feed sync and the next refresh, and
+no search result can quote a price you have since changed. Turning **Refresh pages & sitemap** off
+leaves the files exactly as they are.
 
 **Price.** What the customer pays is **your markup on wholesale cost**. Wholesaler “RRP” is ignored
 (BTS recommended prices are often empty or nonsense). There is no fake “was €X, now €Y” from those

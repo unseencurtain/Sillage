@@ -1118,6 +1118,12 @@ api.get("/settings", async (c) => {
     full_sync_hour: String(s.fullSyncHour),
     schedule_timezone: s.scheduleTimezone,
     sync_source: s.syncSource,
+    storefront_pages_enabled: s.storefrontPagesEnabled ? "1" : "0",
+    storefront_pages_delay_minutes: String(s.storefrontPagesDelayMinutes),
+    storefront_pages_max_age_hours: String(s.storefrontPagesMaxAgeHours),
+    storefront_pages_batch_size: String(s.storefrontPagesBatchSize),
+    storefront_pages_batch_pause_seconds: String(s.storefrontPagesBatchPauseSeconds),
+    storefront_pages_include_offers: s.storefrontPagesIncludeOffers ? "1" : "0",
     global_price_multiplier: String(s.priceMultiplier),
     price_tiers: JSON.stringify(s.priceTiers),
     global_stock_threshold: String(s.stockThreshold),
@@ -1190,6 +1196,12 @@ api.put("/settings", async (c) => {
     "full_sync_hour",
     "schedule_timezone",
     "sync_source",
+    "storefront_pages_enabled",
+    "storefront_pages_delay_minutes",
+    "storefront_pages_max_age_hours",
+    "storefront_pages_batch_size",
+    "storefront_pages_batch_pause_seconds",
+    "storefront_pages_include_offers",
     "global_price_multiplier",
     "price_tiers",
     "global_stock_threshold",
@@ -1260,6 +1272,21 @@ api.put("/settings", async (c) => {
     } else if (key === "full_sync_hour") {
       const h = Math.min(23, Math.max(0, Math.trunc(Number(value)) || 0));
       persist = String(h);
+    } else if (key === "storefront_pages_delay_minutes") {
+      // 0 means "the moment the rebuild finishes". A day is the ceiling: any longer and the pages
+      // trail the catalogue past the max-age floor below, which would make this value meaningless.
+      const m = Math.trunc(Number(value));
+      persist = String(Number.isFinite(m) ? Math.min(720, Math.max(0, m)) : 10);
+    } else if (key === "storefront_pages_max_age_hours") {
+      // A floor, never zero: "refresh whenever it is older than nothing" is a run every tick.
+      const h = Math.trunc(Number(value));
+      persist = String(Number.isFinite(h) && h > 0 ? Math.min(168, h) : 30);
+    } else if (key === "storefront_pages_batch_size") {
+      const n = Math.trunc(Number(value));
+      persist = String(Number.isFinite(n) ? Math.min(100_000, Math.max(0, n)) : 2000);
+    } else if (key === "storefront_pages_batch_pause_seconds") {
+      const s = Math.trunc(Number(value));
+      persist = String(Number.isFinite(s) ? Math.min(300, Math.max(0, s)) : 5);
     } else if (key === "live_feed_min_minutes" || key === "fast_sync_minutes") {
       // 30 minutes is the floor: anything above is the operator's call, nothing below is. Both
       // wholesalers are one account each, and a cadence under half an hour spends their rate limit

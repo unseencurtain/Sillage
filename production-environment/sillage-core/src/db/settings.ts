@@ -80,6 +80,27 @@ export interface GlobalSettings {
   /** IANA zone for full-sync hour + dashboard clocks. Default UTC. */
   scheduleTimezone: string;
   syncSource: "live" | "local";
+  /**
+   * The storefront's prerendered product pages and its public sitemap.
+   *
+   * Those pages are an artifact of the *catalogue*, not of the frontend bundle: they are generated
+   * on the shop host, which holds both the catalogue and the built shell. Nothing here generates
+   * anything — these values are the schedule and the shape of that run, and a small poller on the
+   * host reads them out of `sil_settings` on a short cron and decides. That is deliberate: timing
+   * the page refresh is a setting here, not an edit to a crontab on a box.
+   */
+  storefrontPagesEnabled: boolean;
+  /** Wait this long after a full catalogue rebuild finishes, then refresh the pages. */
+  storefrontPagesDelayMinutes: number;
+  /** Refresh anyway once the pages are this old: a rebuild that stops must not rot the sitemap. */
+  storefrontPagesMaxAgeHours: number;
+  /** Products per batch, with a pause between batches. 0 = one burst. */
+  storefrontPagesBatchSize: number;
+  /** How long that pause is, so the shop's own API is never queued behind a full-burst run. */
+  storefrontPagesBatchPauseSeconds: number;
+  /** Leave price and availability off the pages: a page that says only what a product is cannot
+   * go stale on a price. Off also drops them from the JSON-LD, the meta tags and the static body. */
+  storefrontPagesIncludeOffers: boolean;
   /** Exclude products whose resolved image is still a placeholder. */
   hideProductsWithoutImage: boolean;
   /**
@@ -167,6 +188,14 @@ export async function loadSettings(): Promise<GlobalSettings> {
       return resolved;
     })(),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
+    // The displayed and acted-on defaults. `storefront-pages-cron.py` on the shop host mirrors
+    // these; a key that has never been saved behaves the same on both sides.
+    storefrontPagesEnabled: flag("storefront_pages_enabled", true),
+    storefrontPagesDelayMinutes: num("storefront_pages_delay_minutes", 10),
+    storefrontPagesMaxAgeHours: num("storefront_pages_max_age_hours", 30),
+    storefrontPagesBatchSize: num("storefront_pages_batch_size", 2000),
+    storefrontPagesBatchPauseSeconds: num("storefront_pages_batch_pause_seconds", 5),
+    storefrontPagesIncludeOffers: flag("storefront_pages_include_offers", true),
     hideProductsWithoutImage: flag("hide_products_without_image", true),
     imageCdnBaseUrl: (() => {
       const fromDb = (map.get("image_cdn_base_url") ?? "").trim().replace(/\/$/, "");
