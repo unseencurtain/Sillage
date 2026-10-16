@@ -324,22 +324,36 @@ installs the generator and a poller, and never rewrites a page on deploy.
 
 Nothing here runs the generator either: the **poller** on the host reads these keys from
 `sil_settings` on a five-minute cron and decides. So the schedule is a dashboard value, not a line in
-a box's crontab. A run follows the daily full rebuild above (plus the max-age floor), and the two
-pieces that make up a run — reading the shop, then writing pages — are paced by the batch keys so a
-shopper's own request is never queued behind it.
+a box's crontab. A run follows the daily full rebuild above (plus the max-age floor), and the reads
+that make up a run — the shop's in-stock list, then the few products whose dates moved — are paced
+by the batch keys so a shopper's own request is never queued behind it. Only the reads are paced:
+the pages themselves are compared on the host and ten seconds' work, so writing never waits.
 
 | UI label | Key | Default | Effect |
 |---|---|---|---|
 | Refresh pages & sitemap | `storefront_pages_enabled` | on | Off freezes both: a product added afterwards never reaches a crawler. Independent of `sync_enabled` |
 | Wait after the rebuild (minutes) | `storefront_pages_delay_minutes` | 10 | How long after a full rebuild finishes the pages are refreshed; 0 = immediately. Keeps the refresh off the sync's back |
 | Refresh anyway after (hours) | `storefront_pages_max_age_hours` | 30 | The floor under a rebuild that stops happening. Pages older than this are refreshed whether a rebuild ran or not. Min 1 |
-| Products per batch | `storefront_pages_batch_size` | 2000 | Slowest unit of the run; pauses in between. 0 = one burst |
-| Pause between batches (seconds) | `storefront_pages_batch_pause_seconds` | 5 | The pause. 2,000/5 s spreads a full run over minutes instead of seconds |
+| Products per batch | `storefront_pages_batch_size` | 500 | How much of the shop is asked for before a pause — the size of the burst, not the amount of work. 0 = one burst |
+| Pause between batches (seconds) | `storefront_pages_batch_pause_seconds` | 60 | The quiet in between, and how long a night takes: 500/60 s is ~260 requests spread over about an hour |
 | Include price & availability | `storefront_pages_include_offers` | on | Off → pages say what a product is and nothing about price/stock (JSON-LD offers, meta tags and the static body all drop them). A page with no price cannot go stale between a feed sync and the next run |
 
 Defaults live in `src/db/settings.ts`; `storefront-pages-cron.py` on the shop host mirrors them, so a
 key that has never been saved behaves identically on both sides. Saving any of these never queues a
 price or content rewrite.
+
+### What a run costs, and what it reuses
+
+The pages themselves are reused: a run renders and compares every page it lists but writes only the
+ones whose content moved — on a normal night that is a handful out of ~25,000, and pruning covers
+the products that vanished. The cost of a run is the *read*, and it is two reads:
+
+- the shop's in-stock list (one Store API page per 100 products; ~255 requests at 25k in stock),
+  which is the only thing that can say what is still for sale — store API answers carry no dates;
+- the products whose `modified_gmt` moved since the last run, from the shop's content API. This
+  used to be every published product (~519 requests for 51k), for dates that almost never change;
+  it is now `modified_after` the last run's timestamp, usually a handful of pages. The dates the
+  last run read are kept in the host's snapshot and reused.
 
 ### Pricing & catalogue visibility
 

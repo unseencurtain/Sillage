@@ -189,12 +189,14 @@ export async function loadSettings(): Promise<GlobalSettings> {
     })(),
     syncSource: (map.get("sync_source") as GlobalSettings["syncSource"]) ?? "live",
     // The displayed and acted-on defaults. `storefront-pages-cron.py` on the shop host mirrors
-    // these; a key that has never been saved behaves the same on both sides.
+    // these; a key that has never been saved behaves the same on both sides. The batch pair is the
+    // shape of a night: 500 products is five requests to the shop, a minute of quiet, then five
+    // more — a full read lands at about an hour, in a trickle instead of bursts.
     storefrontPagesEnabled: flag("storefront_pages_enabled", true),
     storefrontPagesDelayMinutes: num("storefront_pages_delay_minutes", 10),
     storefrontPagesMaxAgeHours: num("storefront_pages_max_age_hours", 30),
-    storefrontPagesBatchSize: num("storefront_pages_batch_size", 2000),
-    storefrontPagesBatchPauseSeconds: num("storefront_pages_batch_pause_seconds", 5),
+    storefrontPagesBatchSize: num("storefront_pages_batch_size", 500),
+    storefrontPagesBatchPauseSeconds: num("storefront_pages_batch_pause_seconds", 60),
     storefrontPagesIncludeOffers: flag("storefront_pages_include_offers", true),
     hideProductsWithoutImage: flag("hide_products_without_image", true),
     imageCdnBaseUrl: (() => {

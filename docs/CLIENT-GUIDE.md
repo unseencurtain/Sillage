@@ -307,7 +307,13 @@ between syncs** tick — that setting is only how often **price and stock** are 
 The wait, and whether those pages carry a price at all, are the controls under **Storefront pages &
 sitemap** on Settings. By default the refresh starts ten minutes after a full rebuild finishes, so
 it never competes with the sync, and it gives up after **30 hours** without a rebuild and refreshes
-anyway — that is the safety net if you switch the schedule off or a supplier goes quiet. With
+anyway — that is the safety net if you switch the schedule off or a supplier goes quiet. A run does
+not rewrite pages that have not changed: it compares all of them and writes the handful that moved,
+and drops the ones for products that left the shop. What it *reads* is the rest of the cost — the
+current in-stock list (the only thing that can say what sold out) and the few products whose dates
+moved since the last run, so the refresh is a trickle rather than a burst: by default 500 products
+at a time with a minute of quiet in between, about an hour for the whole shop. Reduce the batch or
+raise the pause to stretch it further. With
 **Include price & availability** off, the pages a search engine reads say what each product is and
 nothing about what it costs: nothing can then go stale between a feed sync and the next refresh, and
 no search result can quote a price you have since changed. Turning **Refresh pages & sitemap** off

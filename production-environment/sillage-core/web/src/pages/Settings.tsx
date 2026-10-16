@@ -605,7 +605,7 @@ export function Settings() {
           </Field>
           <Field
             label="Products per batch"
-            help="The run reads the shop and writes the pages in batches, pausing in between, so a shopper's request is never queued behind a wall of ours. 0 = one burst, which is what a manual rebuild uses."
+            help="How much of the shop is asked for before a pause — it is the size of the burst the shop sees, not how much work the run does. 500 is five requests, then a minute of quiet. 0 = one burst, which is what a manual rebuild uses."
           >
             <input
               type="number"
@@ -620,7 +620,7 @@ export function Settings() {
           </Field>
           <Field
             label="Pause between batches (seconds)"
-            help="The pause itself. A batch of 2,000 with a 5-second pause spreads a full run over a few minutes instead of a few seconds of solid load."
+            help="The quiet in between, and the setting that decides how long a night takes. 500 with a 60-second pause spreads a full run over about an hour — the same work, as a trickle. Smaller batches and longer pauses only stretch the night further. The pause is between requests to the shop; writing the changed pages does not wait."
           >
             <input
               type="number"
