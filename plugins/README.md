@@ -11,6 +11,7 @@ named the stale domain `dash.mirainikki.xyz`.)
 | `storefront-legal-notice` | Adds the EU legal-guarantee notice to customer order emails | Active on the `ecom` box. Separate from the SMTP plugin so the SMTP plugin can be reused without it |
 | `storefront-ean` | EAN (barcode) lookup only: `/cereve/v1/ean/{ean}` + `/cereve/v1/products/{id}/ean` | **Live** on the `ecom` box. EAN-only by design — catalogue/counts/delivery stay in `sillage-warehouses` |
 | `sillage-storefront` | Storefront image proxy: `GET /sillage/v1/img?src=&w=` | Installed on the `ecom` box (verified 2026-10-14) |
+| `sillage-tracking` | The shop's own "your parcel has shipped" email, with the carrier and the tracking number, plus the storefront's parcel lookup at `POST /sillage/v1/track` | Active on the `ecom` box (2026-10-18). Skips WooCommerce's generic "note to customer" for a tracking note while this email is enabled |
 | `sillage-warehouses` | Location A/B rules: country scope, shipping per location, order line meta | Live on the `ecom` box (verified 2026-10-14) |
 
 **None of these are dead weight** — `headless-core` and `headless-woocommerce` are also copied and
