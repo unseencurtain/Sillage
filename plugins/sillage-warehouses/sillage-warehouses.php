@@ -362,6 +362,11 @@ add_action(
  */
 function sillage_wh_delivery_endpoint( WP_REST_Request $request ) {
 	unset( $request );
+	// The operator's shipping rules, read once: the free-shipping threshold is the shop's
+	// own promise, so the storefront is told it rather than guessing one.
+	$shipping_rules = function_exists( 'sillage_ship_rules' )
+		? sillage_ship_rules()
+		: array( 'ok' => false, 'free_over' => 0.0 );
 	$sets      = sillage_wh_vendor_countries();
 	$union     = array();
 	$locations = array();
@@ -399,6 +404,11 @@ function sillage_wh_delivery_endpoint( WP_REST_Request $request ) {
 			'countries' => $countries,
 			'locations' => $locations,
 			'geo'       => $geo,
+			// The operator's free-shipping rule (`shipping_free_over_eur`, dashboard Shipping page),
+			// in minor units, so the storefront can advertise exactly what checkout applies. Null
+			// when the settings cannot be read and 0 when the shop charges shipping at every
+			// subtotal: in both cases the storefront makes no free-shipping claim.
+			'freeShippingOver' => $shipping_rules['ok'] ? (int) round( $shipping_rules['free_over'] * 100 ) : null,
 		)
 	);
 	$response->header( 'Cache-Control', 'private, no-store' );
@@ -573,7 +583,10 @@ add_filter(
 		}
 		$base = $GLOBALS['sillage_wh_store_base'] ?? null;
 		unset( $GLOBALS['sillage_wh_store_base'] );
-		if ( null === $base || sillage_wh_store_cache_base( $request ) !== $base ) {
+		// Use the base captured before dispatch, never recompute it here: WooCommerce's Store API
+		// normalises the query while it runs (`hide_empty=true` becomes `hide_empty=1`), so a fresh
+		// `sillage_wh_store_cache_base()` would differ and the response would never be cached.
+		if ( null === $base ) {
 			return $response;
 		}
 		if ( 200 !== $response->get_status() ) {
@@ -686,6 +699,77 @@ add_action(
 	10,
 	4
 );
+
+/*
+ * "Two parcels" notice in customer order emails.
+ *
+ * Only an order that ships from both warehouses leaves as two parcels — one from Location A (BTS)
+ * and one from Location B (BeautyFort) — and those can arrive on different days. The order lines
+ * carry their location, so the note is shown exactly when both are present, and never otherwise.
+ * It is about parcels, not the charge, so it holds whatever the shipping display mode is.
+ *
+ * It renders just below the order summary and above the legal-guarantee notice, in the email's own
+ * type and palette, and is mirrored in the plain-text alternative.
+ */
+/** Locations (A/B) the order's own lines ship from. Empty when no line carries a warehouse. */
+function sillage_wh_order_locations( $order ): array {
+	if ( ! $order instanceof WC_Order ) {
+		return array();
+	}
+	$letters = array();
+	foreach ( $order->get_items() as $item ) {
+		$letter = (string) $item->get_meta( '_sillage_location', true );
+		if ( '' !== $letter ) {
+			$letters[ $letter ] = true;
+		}
+	}
+	return array_keys( $letters );
+}
+
+add_action( 'woocommerce_email_after_order_table', 'sillage_wh_two_parcels_email', 5, 4 );
+
+/**
+ * Tell the customer an order that ships from both warehouses arrives in two parcels.
+ *
+ * @param mixed $order         Order being emailed. A WC_Order on WooCommerce order emails.
+ * @param bool  $sent_to_admin Whether this copy goes to a shop administrator.
+ * @param bool  $plain_text    Whether this is the plain-text alternative of the email.
+ * @param mixed $email         The WC_Email instance handling the send.
+ */
+function sillage_wh_two_parcels_email( $order, $sent_to_admin, $plain_text, $email ): void {
+	// Consumer information: never to shop staff, and only alongside a real order.
+	if ( $sent_to_admin || ! ( $order instanceof WC_Order ) ) {
+		return;
+	}
+
+	// Customer-facing lifecycle emails only, matching the legal-guarantee notice.
+	$email_id = is_object( $email ) && isset( $email->id ) ? (string) $email->id : '';
+	if ( ! in_array( $email_id, array( 'customer_processing_order', 'customer_on_hold_order', 'customer_completed_order' ), true ) ) {
+		return;
+	}
+
+	// Two parcels only when both warehouses actually ship: Location A (BTS) and Location B (BeautyFort).
+	$locations = sillage_wh_order_locations( $order );
+	if ( ! in_array( 'A', $locations, true ) || ! in_array( 'B', $locations, true ) ) {
+		return;
+	}
+
+	$heading = __( 'Delivery in two parcels', 'sillage-warehouses' );
+	$body    = __( 'Your order is being prepared in two of our warehouses, so it will arrive in two separate parcels. These may be delivered on different days.', 'sillage-warehouses' );
+
+	if ( $plain_text ) {
+		echo "\n" . $heading . "\n" . $body . "\n\n";
+		return;
+	}
+
+	// The email's own base colour for the accent, and its own body type via `.font-family`.
+	$accent = (string) get_option( 'woocommerce_email_base_color', '#111111' );
+
+	echo '<div class="font-family" style="margin:24px 0;padding:18px;background:#f7f7f7;border-left:4px solid ' . esc_attr( $accent ) . ';">';
+	echo '<p style="margin:0 0 8px;font-weight:bold;">' . esc_html( $heading ) . '</p>';
+	echo '<p style="margin:0;">' . esc_html( $body ) . '</p>';
+	echo '</div>';
+}
 
 /**
  * Items must be deliverable to the destination country. The storefront flags them first; this
