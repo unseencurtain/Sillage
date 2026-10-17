@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Purelymail SMTP
  * Description: Send WordPress and WooCommerce email through encrypted Purelymail SMTP connections.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Requires at least: 5.7
  * Requires PHP: 7.4
  * License: GPL-2.0-or-later
@@ -17,6 +17,22 @@
 defined('ABSPATH') || exit;
 
 const PURELYMAIL_SMTP_OPTION = 'purelymail_smtp_settings';
+
+/** Kept in step with the header. Used to run one-off database cleanups once. */
+const PURELYMAIL_SMTP_VERSION = '1.1.1';
+
+/**
+ * 1.1.1 dropped the send history. Delete anything an older version stored, once
+ * per version, so the old `purelymail_smtp_log` option does not linger in the
+ * database after the upgrade.
+ */
+add_action('admin_init', function () {
+    if (get_option('purelymail_smtp_db_version') === PURELYMAIL_SMTP_VERSION) {
+        return;
+    }
+    delete_option('purelymail_smtp_log');
+    update_option('purelymail_smtp_db_version', PURELYMAIL_SMTP_VERSION, false);
+});
 
 /** Return the saved SMTP profiles and selected profile. */
 function purelymail_smtp_settings(): array {
@@ -406,8 +422,6 @@ function purelymail_smtp_render_settings_page(): void {
                 <?php submit_button(__('Send test email', 'purelymail-smtp'), 'secondary', 'submit', false); ?>
                 <p class="description"><?php esc_html_e('Uses the default sender above, exactly like order and account emails.', 'purelymail-smtp'); ?></p>
             </form>
-
-            <?php purelymail_smtp_render_log(); ?>
         <?php endif; ?>
     </div>
     <?php
@@ -534,38 +548,16 @@ add_action('phpmailer_init', function ($mailer) {
 }, 20);
 
 /* -------------------------------------------------------------------------
- * Send log and test email
+ * Test email
  * ---------------------------------------------------------------------- */
 
-const PURELYMAIL_SMTP_LOG_OPTION = 'purelymail_smtp_log';
-const PURELYMAIL_SMTP_LOG_MAX = 30;
-
-/** Record one send attempt. Only metadata is stored, never the message body. */
-function purelymail_smtp_log_add(string $status, array $data, string $error = ''): void {
-    $recipients = isset($data['to']) ? (array) $data['to'] : [];
-    $log = get_option(PURELYMAIL_SMTP_LOG_OPTION, []);
-    $log = is_array($log) ? $log : [];
-
-    array_unshift($log, [
-        'time'    => time(),
-        'status'  => $status,
-        'to'      => sanitize_text_field(implode(', ', array_map('strval', $recipients))),
-        'subject' => sanitize_text_field((string) ($data['subject'] ?? '')),
-        'error'   => sanitize_text_field($error),
-    ]);
-
-    update_option(PURELYMAIL_SMTP_LOG_OPTION, array_slice($log, 0, PURELYMAIL_SMTP_LOG_MAX), false);
-}
-
-add_action('wp_mail_succeeded', function ($data) {
-    purelymail_smtp_log_add('sent', (array) $data);
-});
-
+/**
+ * Keep the real SMTP reason from a failed send for a couple of minutes, so the
+ * test form can show it. Nothing else about a send is recorded: this plugin
+ * keeps no send history, so there is nothing on the settings page to refresh.
+ */
 add_action('wp_mail_failed', function ($error) {
-    $data = is_object($error) && method_exists($error, 'get_error_data') ? (array) ($error->get_error_data() ?: []) : [];
     $message = is_object($error) && method_exists($error, 'get_error_message') ? $error->get_error_message() : '';
-    purelymail_smtp_log_add('failed', $data, $message);
-    // Kept briefly so the test form can show the real SMTP reason.
     set_transient('purelymail_smtp_last_error', $message, 120);
 });
 
@@ -602,37 +594,4 @@ function purelymail_smtp_send_test(): void {
     }
     wp_safe_redirect(add_query_arg('pm_test', $result, $back));
     exit;
-}
-
-/** Show the most recent send attempts on the settings page. */
-function purelymail_smtp_render_log(): void {
-    $log = get_option(PURELYMAIL_SMTP_LOG_OPTION, []);
-    $log = is_array($log) ? $log : [];
-    ?>
-    <h2><?php esc_html_e('Recent email', 'purelymail-smtp'); ?></h2>
-    <?php if (!$log) : ?>
-        <p class="description"><?php esc_html_e('No email has been sent through this plugin yet.', 'purelymail-smtp'); ?></p>
-    <?php else : ?>
-        <table class="widefat striped" style="max-width:1050px">
-            <thead><tr>
-                <th><?php esc_html_e('Time', 'purelymail-smtp'); ?></th>
-                <th><?php esc_html_e('Result', 'purelymail-smtp'); ?></th>
-                <th><?php esc_html_e('To', 'purelymail-smtp'); ?></th>
-                <th><?php esc_html_e('Subject', 'purelymail-smtp'); ?></th>
-                <th><?php esc_html_e('SMTP message', 'purelymail-smtp'); ?></th>
-            </tr></thead>
-            <tbody>
-            <?php foreach ($log as $entry) : ?>
-                <tr>
-                    <td><?php echo esc_html(wp_date('Y-m-d H:i:s', (int) $entry['time'])); ?></td>
-                    <td><?php echo $entry['status'] === 'sent' ? esc_html__('Sent', 'purelymail-smtp') : '<strong>' . esc_html__('Failed', 'purelymail-smtp') . '</strong>'; ?></td>
-                    <td><?php echo esc_html($entry['to']); ?></td>
-                    <td><?php echo esc_html($entry['subject']); ?></td>
-                    <td><?php echo esc_html($entry['error']); ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-    <?php endif; ?>
-    <?php
 }
