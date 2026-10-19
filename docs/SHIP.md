@@ -24,7 +24,12 @@ box's `~/sillage-wholesale` and the `sillage-b2b` image.
    explicitly selected `--builder <host>` when deploying to multiple targets.
 4. **Deploys to each target**: pins `SILLAGE_CORE_IMAGE` in that box's `.env`, pulls, restarts the
    engine and the scheduler, waits for `/health`.
-5. **Verifies.** If `/health` does not answer, the old `.env` is restored and the previous image
+5. **Syncs the dashboard.** The compose stack serves `/app/web/dist` from a host bind mount
+   (${SILLAGE_WEB_DIST_DIR}), not from the image, so a rebuilt image alone leaves the old bundle
+   being served. `ship.sh` builds the bundle locally with that box's `SILLAGE_DASHBOARD_PATH` as
+   Vite's base and rsyncs it onto the mount. A `--rollback` ships the image only and leaves the
+   dashboard untouched.
+6. **Verifies.** If `/health` does not answer, the old `.env` is restored and the previous image
    is brought back up rather than leaving a shop on a broken build. Then it diffs every
    operator-owned `sil_settings` row from before the deploy against after, and fails the run if
    one moved. Finally it checks that the image's revision label is the commit being shipped, so a

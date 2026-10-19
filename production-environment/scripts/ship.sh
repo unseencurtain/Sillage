@@ -12,13 +12,16 @@
 #   3. builds the engine image on the builder box and pushes it to Hub, tagged with the commit
 #      (skipped when that exact tag is already on Hub — re-shipping is then seconds)
 #   4. for each target: pin the tag in that box's .env, pull, restart engine + scheduler
-#   5. verifies /health, and that no operator setting changed across the deploy
+#   5. builds the dashboard locally with that box's base path and syncs it onto the box's
+#      dashboard mount (compose serves /app/web/dist from a host directory, not from the image)
+#   6. verifies /health, that the dashboard synced, and that no operator setting changed
 #
 # It never edits sil_settings, and it fails loudly if a deploy did. Each box's Sync enabled,
 # cadence and dry-run are that operator's — see docs/SYNC-RULES.md.
 #
-# Only the engine ships this way. WordPress, Caddy, media and the first-boot of an empty VPS are
-# deploy-vps.sh's job — that runs once per box, this runs every time you change a line of code.
+# The engine image and the dashboard bundle ship this way. WordPress, Caddy, media and the
+# first-boot of an empty VPS are deploy-vps.sh's job — that runs once per box, this runs every
+# time you change a line of code.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -85,6 +88,24 @@ settings_snapshot() {
     docker exec \"\$cid\" mariadb -uroot -p\"\$MYSQL_ROOT_PWD\" -N -B -e \
       \"SELECT CONCAT(setting_key,'=',setting_value) FROM \${SILLAGE_DB}.sil_settings \
         WHERE ${OPERATOR_KEYS_SQL} ORDER BY setting_key;\" 2>/dev/null" || true
+}
+
+# The dashboard does not ride in the image the way the rest of the engine does: compose mounts a
+# host directory over /app/web/dist (${SILLAGE_WEB_DIST_DIR}), so rebuilding the image alone leaves
+# the old bundle being served — a front-end change then reads as "the fix never shipped". Build the
+# bundle here with that box's own dashboard base path and sync it onto the mount. The engine reads
+# dashboard files straight from disk, so nothing needs restarting.
+sync_dashboard() {
+  local host="$1" path dist
+  path="$("${SSH[@]}" "$host" "sed -n 's/^SILLAGE_DASHBOARD_PATH=//p' ~/${REMOTE_DIR}/.env 2>/dev/null | tail -1")"
+  path="${path:-/sillagedash}"; path="/${path#/}"; path="${path%/}"
+  dist="$("${SSH[@]}" "$host" "d=\$(sed -n 's/^SILLAGE_WEB_DIST_DIR=//p' ~/${REMOTE_DIR}/.env 2>/dev/null | tail -1)
+    [ -n \"\$d\" ] || d=./sillage-core/web/dist
+    case \"\$d\" in /*) : ;; *) d=\"\$HOME/${REMOTE_DIR}/\${d#./}\" ;; esac
+    printf '%s' \"\$d\"")"
+  ( cd "$CORE_DIR" && VITE_BASE_PATH="${path}/" bun run web:build ) >/tmp/ship-web-build.log 2>&1 \
+    || { tail -20 /tmp/ship-web-build.log; return 1; }
+  rsync -a --delete -e "${SSH[*]}" "$CORE_DIR/web/dist/" "$host:$dist/"
 }
 
 # ---------------------------------------------------------------------------------------- status
@@ -201,6 +222,14 @@ for host in "${TARGETS[@]}"; do
     FAILED+=("$host"); printf '    \033[31m✗ %s\033[0m\n' "$host: deploy failed, .env restored"; continue
   fi
   ok "engine healthy"
+
+  if [[ "$FORCE_BUILD" -eq -1 ]]; then
+    ok "dashboard left as-is (rollback ships the engine image only)"
+  elif sync_dashboard "$host"; then
+    ok "dashboard synced"
+  else
+    FAILED+=("$host"); printf '    \033[31m✗ %s\033[0m\n' "$host: dashboard sync failed"
+  fi
 
   AFTER="$(settings_snapshot "$host")"
   if [[ -n "$BEFORE" && "$BEFORE" != "$AFTER" ]]; then
