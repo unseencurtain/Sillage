@@ -12,8 +12,10 @@
  *  3. Both deliver there: all products are shown; each location ships and charges separately.
  *  4. Neither delivers there: no products are shown ("not delivered" state).
  *
- * Internal vendor slugs stay on the server and in admin data. Customer-facing text, HTML, and
- * emails only ever say "Location A" or "Location B".
+ * Internal vendor slugs stay on the server and in admin data. Customers never see the suppliers
+ * (BTS, BeautyFort) or the location letters: customer-facing text, HTML and emails name the
+ * warehouses by their customer-facing names, "Warehouse Blossom" and "Warehouse Fern". Admin
+ * screens, and this plugin's own data, still work in letters.
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -656,7 +658,7 @@ add_filter(
 add_filter(
 	'woocommerce_shipping_package_name',
 	static function ( $name, $index, $package ) {
-		// Customers never see a warehouse name. With several parcels, each one is numbered.
+		// A split bag's packages read "Parcel 1" / "Parcel 2" rather than a warehouse name.
 		if ( empty( $package['sillage_location'] ) || ! function_exists( 'WC' ) || ! WC()->shipping() ) {
 			return $name;
 		}
@@ -754,8 +756,20 @@ function sillage_wh_two_parcels_email( $order, $sent_to_admin, $plain_text, $ema
 		return;
 	}
 
+	// Name the two warehouses the customer will see the parcels come from, in a stable A-then-B order.
+	$names = array();
+	foreach ( array( 'A', 'B' ) as $letter ) {
+		if ( in_array( $letter, $locations, true ) ) {
+			$names[] = 'Warehouse ' . SILLAGE_WH_NAMES[ $letter ];
+		}
+	}
+
 	$heading = __( 'Delivery in two parcels', 'sillage-warehouses' );
-	$body    = __( 'Your order is being prepared in two of our warehouses, so it will arrive in two separate parcels. These may be delivered on different days.', 'sillage-warehouses' );
+	$body    = sprintf(
+		/* translators: %s: the two warehouse names, e.g. "Warehouse Blossom and Warehouse Fern". */
+		__( 'Your order is being prepared in %s, so it will arrive in two separate parcels. These may be delivered on different days.', 'sillage-warehouses' ),
+		implode( ' and ', $names )
+	);
 
 	if ( $plain_text ) {
 		echo "\n" . $heading . "\n" . $body . "\n\n";
@@ -877,7 +891,7 @@ function sillage_wh_render_settings(): void {
 			<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Storefront query guard setting saved.', 'sillage-warehouses' ); ?></p></div>
 		<?php endif; ?>
 
-		<p><?php esc_html_e( 'Country sets are read from each product (_sillage_ship_countries). Warehouses appear to customers as Location A and Location B only.', 'sillage-warehouses' ); ?></p>
+		<p><?php esc_html_e( 'Country sets are read from each product (_sillage_ship_countries). Customers see the warehouses as Warehouse Blossom (A) and Warehouse Fern (B); internal vendor slugs and the letters stay in admin data.', 'sillage-warehouses' ); ?></p>
 
 		<table class="widefat striped" style="max-width:900px">
 			<thead>

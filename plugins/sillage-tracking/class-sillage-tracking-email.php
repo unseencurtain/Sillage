@@ -31,6 +31,13 @@ class Sillage_Tracking_Email extends WC_Email {
 	private $parcels = array();
 
 	/**
+	 * The customer note that triggered this send, so only its parcel is printed.
+	 *
+	 * @var string
+	 */
+	private $note = '';
+
+	/**
 	 * Set the email's identity, defaults and placeholders.
 	 */
 	public function __construct() {
@@ -57,9 +64,11 @@ class Sillage_Tracking_Email extends WC_Email {
 	 * Send the email for an order.
 	 *
 	 * @param WC_Order|int $order Order to report on.
+	 * @param string       $note  The customer note that triggered the send, when there was one.
 	 */
-	public function trigger( $order ) {
+	public function trigger( $order, $note = '' ) {
 		$this->setup_locale();
+		$this->note = (string) $note;
 
 		if ( ! $order instanceof WC_Order ) {
 			$order = wc_get_order( $order );
@@ -68,7 +77,7 @@ class Sillage_Tracking_Email extends WC_Email {
 		if ( $order instanceof WC_Order ) {
 			$this->object    = $order;
 			$this->recipient = $order->get_billing_email();
-			$this->parcels   = sillage_tracking_parcels( $order );
+			$this->parcels   = $this->parcels_for_note( sillage_tracking_parcels( $order ) );
 
 			$this->placeholders['{order_number}'] = $order->get_order_number();
 			$this->placeholders['{order_date}']   = $order->get_date_created()
@@ -86,6 +95,33 @@ class Sillage_Tracking_Email extends WC_Email {
 		}
 
 		$this->restore_locale();
+	}
+
+	/**
+	 * Narrow the parcel list to the one the triggering note names.
+	 *
+	 * A mixed order ships from both warehouses and each parcel gets its own note, so a later note
+	 * must not re-announce an earlier parcel. The note carries the tracking code verbatim, so the
+	 * codes we already hold are the match. When no note was passed (a direct trigger) nothing is
+	 * dropped.
+	 *
+	 * @param array<int, array<string, mixed>> $parcels Every parcel on the order.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function parcels_for_note( array $parcels ): array {
+		if ( '' === trim( $this->note ) ) {
+			return $parcels;
+		}
+
+		$matched = array();
+		foreach ( $parcels as $parcel ) {
+			$code = (string) $parcel['code'];
+			if ( '' !== $code && false !== strpos( $this->note, $code ) ) {
+				$matched[] = $parcel;
+			}
+		}
+
+		return $matched ? $matched : $parcels;
 	}
 
 	/**
@@ -115,10 +151,14 @@ class Sillage_Tracking_Email extends WC_Email {
 		$lines = array( $this->get_heading(), '' );
 
 		foreach ( $this->parcels as $parcel ) {
-			$courier = (string) $parcel['courier'];
-			$code    = (string) $parcel['code'];
-			$url     = (string) $parcel['url'];
+			$courier   = (string) $parcel['courier'];
+			$code      = (string) $parcel['code'];
+			$url       = (string) $parcel['url'];
+			$warehouse = sillage_tracking_warehouse_name( (string) ( $parcel['location'] ?? '' ) );
 
+			if ( '' !== $warehouse ) {
+				$lines[] = $warehouse;
+			}
 			if ( '' !== $courier ) {
 				$lines[] = $courier;
 			}
@@ -161,9 +201,10 @@ class Sillage_Tracking_Email extends WC_Email {
 		$out = '';
 
 		foreach ( $this->parcels as $parcel ) {
-			$courier = (string) $parcel['courier'];
-			$code    = (string) $parcel['code'];
-			$url     = (string) $parcel['url'];
+			$courier   = (string) $parcel['courier'];
+			$code      = (string) $parcel['code'];
+			$url       = (string) $parcel['url'];
+			$warehouse = sillage_tracking_warehouse_name( (string) ( $parcel['location'] ?? '' ) );
 
 			if ( '' === $code ) {
 				continue;
@@ -171,6 +212,10 @@ class Sillage_Tracking_Email extends WC_Email {
 
 			$out .= '<table cellspacing="0" cellpadding="0" border="0" style="width:100%;margin:0 0 16px;border:1px solid #e5e0da;border-radius:6px;">';
 			$out .= '<tr><td style="padding:14px 16px;font-family:Helvetica,Roboto,Arial,sans-serif;font-size:14px;line-height:1.6;color:#2f2a26;">';
+
+			if ( '' !== $warehouse ) {
+				$out .= '<p style="margin:0 0 6px;font-size:11px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:#8a6d3b;">' . esc_html( $warehouse ) . '</p>';
+			}
 
 			if ( '' !== $courier ) {
 				$out .= '<p style="margin:0 0 6px;font-weight:bold;">' . esc_html( $courier ) . '</p>';

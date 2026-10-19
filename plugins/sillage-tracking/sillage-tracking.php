@@ -36,10 +36,64 @@ if ( ! defined( 'SILLAGE_TRACKING_VERSION' ) ) {
 require_once __DIR__ . '/class-sillage-tracking-lookup.php';
 
 /**
+ * The location letter (A or B) a supplier ships from.
+ *
+ * `sillage-warehouses` owns the vendor → letter map; this reads it when that plugin is active and
+ * falls back to the same two values otherwise, so tracking still labels a parcel with the warehouses
+ * plugin off. An empty string means the vendor is unknown and the parcel is left unlabelled.
+ *
+ * @param string $vendor Vendor slug (`bts`, `beautyfort`) or an already-resolved letter.
+ * @return string Letter, or '' when the vendor is not one of the two warehouses.
+ */
+function sillage_tracking_vendor_letter( string $vendor ): string {
+	$vendor = strtolower( trim( $vendor ) );
+	if ( '' === $vendor ) {
+		return '';
+	}
+
+	if ( 'a' === $vendor || 'b' === $vendor ) {
+		return strtoupper( $vendor );
+	}
+
+	$map = defined( 'SILLAGE_WH_LOCATIONS' ) ? SILLAGE_WH_LOCATIONS : array(
+		'bts'        => 'A',
+		'beautyfort' => 'B',
+	);
+
+	return isset( $map[ $vendor ] ) ? (string) $map[ $vendor ] : '';
+}
+
+/**
+ * Customer-facing warehouse name for a location letter, e.g. "Warehouse Blossom".
+ *
+ * @param string $letter Location letter (A or B).
+ * @return string Name, or '' when the letter is unknown.
+ */
+function sillage_tracking_warehouse_name( string $letter ): string {
+	if ( '' === $letter ) {
+		return '';
+	}
+
+	if ( function_exists( 'sillage_wh_location_name' ) && defined( 'SILLAGE_WH_LOCATIONS' ) ) {
+		$vendor = array_search( $letter, SILLAGE_WH_LOCATIONS, true );
+		if ( false !== $vendor ) {
+			return sillage_wh_location_name( (string) $vendor );
+		}
+	}
+
+	$names = defined( 'SILLAGE_WH_NAMES' ) ? SILLAGE_WH_NAMES : array(
+		'A' => 'Blossom',
+		'B' => 'Fern',
+	);
+
+	return isset( $names[ $letter ] ) ? 'Warehouse ' . $names[ $letter ] : '';
+}
+
+/**
  * Every parcel `sillage-bridge` has recorded on an order, normalised.
  *
  * @param WC_Order $order Order to read.
- * @return array<int, array<string, mixed>> Each parcel as vendor, courier, code, url, added.
+ * @return array<int, array<string, mixed>> Each parcel as vendor, location, courier, code, url, added.
  */
 function sillage_tracking_parcels( WC_Order $order ): array {
 	$stored = $order->get_meta( '_sillage_tracking' );
@@ -52,12 +106,14 @@ function sillage_tracking_parcels( WC_Order $order ): array {
 		if ( ! is_array( $entry ) || empty( $entry['code'] ) ) {
 			continue;
 		}
+		$vendor     = isset( $entry['vendor'] ) ? (string) $entry['vendor'] : '';
 		$parcels[] = array(
-			'vendor'  => isset( $entry['vendor'] ) ? (string) $entry['vendor'] : '',
-			'courier' => isset( $entry['courier'] ) ? (string) $entry['courier'] : '',
-			'code'    => (string) $entry['code'],
-			'url'     => isset( $entry['url'] ) ? (string) $entry['url'] : '',
-			'added'   => isset( $entry['added'] ) ? (int) $entry['added'] : 0,
+			'vendor'   => $vendor,
+			'location' => sillage_tracking_vendor_letter( $vendor ),
+			'courier'  => isset( $entry['courier'] ) ? (string) $entry['courier'] : '',
+			'code'     => (string) $entry['code'],
+			'url'      => isset( $entry['url'] ) ? (string) $entry['url'] : '',
+			'added'    => isset( $entry['added'] ) ? (int) $entry['added'] : 0,
 		);
 	}
 
@@ -158,7 +214,9 @@ function sillage_tracking_on_customer_note( $args ): void {
 		return;
 	}
 
-	$email->trigger( $order );
+	// The note names one parcel; passing it lets the email print only that parcel instead of every
+	// parcel the order has so far, so a mixed order's second shipment does not repeat the first.
+	$email->trigger( $order, $note );
 }
 add_action( 'woocommerce_new_customer_note', 'sillage_tracking_on_customer_note', 5 );
 

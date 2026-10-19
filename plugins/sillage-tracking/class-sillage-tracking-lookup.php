@@ -189,19 +189,27 @@ final class Sillage_Tracking_Lookup {
 		$parcels = array();
 		foreach ( sillage_tracking_parcels( $order ) as $parcel ) {
 			$parcels[] = array(
-				'courier' => (string) $parcel['courier'],
-				'code'    => (string) $parcel['code'],
-				'url'     => (string) $parcel['url'],
+				// The letter (A/B), not the name: the storefront translates "Warehouse {name}" itself.
+				'warehouse' => (string) ( $parcel['location'] ?? '' ),
+				'courier'   => (string) $parcel['courier'],
+				'code'      => (string) $parcel['code'],
+				'url'       => (string) $parcel['url'],
 			);
 		}
 
 		$items = array();
 		foreach ( $order->get_items() as $item ) {
-			$product = $item->get_product();
+			$product  = $item->get_product();
+			$location = (string) $item->get_meta( '_sillage_location', true );
+			if ( '' === $location ) {
+				// Legacy orders predate the location meta; the vendor slug is the fallback.
+				$location = sillage_tracking_vendor_letter( (string) $item->get_meta( '_sillage_vendor', true ) );
+			}
 			$items[] = array(
-				'name'     => (string) $item->get_name(),
-				'quantity' => (int) $item->get_quantity(),
-				'image'    => $product ? (string) wp_get_attachment_image_url( $product->get_image_id(), 'woocommerce_thumbnail' ) : '',
+				'name'      => (string) $item->get_name(),
+				'quantity'  => (int) $item->get_quantity(),
+				'image'     => $product ? (string) wp_get_attachment_image_url( $product->get_image_id(), 'woocommerce_thumbnail' ) : '',
+				'warehouse' => $location,
 			);
 		}
 

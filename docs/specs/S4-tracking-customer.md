@@ -1,6 +1,11 @@
 # S4 — Customer tracking: account + email, labelled by warehouse
 
-**Status:** planned · subject to change · every phase is independently revertable.
+**Status:** implemented (2026-10-19) · every phase is independently revertable. One deviation from the
+plan below: **Phase 1 did not add a new route.** The authenticated order route
+(`GET /wc/store/v1/customer/orders/{id}`, `cereve-storefront-auth` MU plugin) already returns one
+order to its signed-in owner, so the parcels and each item's warehouse were added to its response
+instead of standing up `GET /sillage/v1/order-tracking/{id}`. The account view then needs no second
+request, and there is one ownership check, not two.
 
 ## Goal
 
@@ -32,11 +37,16 @@ page, and the warehouse name never reaches the customer in any tracking surface.
 
 Customers only ever see **"Warehouse Blossom" / "Warehouse Fern"** — never "BTS" / "BeautyFort".
 
-## The gap (what this feature closes)
+## The gap (what this feature closed)
 
-1. The tracking **email** shows courier + code + URL, but not which warehouse.
-2. The public **`/track`** lookup drops the `vendor` field (returns only courier/code/url).
-3. The **account order detail** shows no tracking at all.
+1. ~~The tracking **email** shows courier + code + URL, but not which warehouse.~~ **Done:** each
+   parcel card is labelled with its warehouse, and an email prints only the parcel its triggering
+   note names, so a mixed order's second shipment does not repeat the first.
+2. ~~The public **`/track`** lookup drops the `vendor` field (returns only courier/code/url).~~
+   **Done:** each parcel and item now carries the location letter (`warehouse`), on both the public
+   and account responses.
+3. ~~The **account order detail** shows no tracking at all.~~ **Done:** it shows a Parcels section
+   and groups items by warehouse on a mixed order.
 
 ---
 
@@ -46,9 +56,13 @@ Each phase is a self-contained, shippable change. Any can be reverted on its own
 others, because the underlying data (`_sillage_tracking` meta, item `_sillage_location` meta) is
 already written and stored regardless.
 
-### Phase 1 — Authenticated order-tracking endpoint (server)
+### Phase 1 — Authenticated order-tracking endpoint (server) — done, with a deviation
 
-Add `GET /sillage/v1/order-tracking/{order_id}` to the `sillage-tracking` plugin.
+**Implemented by extending the existing MU route, not by adding `GET /sillage/v1/order-tracking/{id}`**
+(see the status note above). The plan below is kept for the record.
+
+The original plan was to add `GET /sillage/v1/order-tracking/{order_id}` to the `sillage-tracking`
+plugin.
 
 - `permission_callback`: the current user must own the order — compare `get_current_user_id()` to the
   order's customer id (or billing email). The headless storefront already logs customers in via
@@ -61,7 +75,7 @@ Add `GET /sillage/v1/order-tracking/{order_id}` to the `sillage-tracking` plugin
 **Done when:** an authenticated customer gets parcels with `warehouse` = "Warehouse Blossom" /
 "Warehouse Fern"; anonymous or another user's order returns 401/403.
 
-### Phase 2 — Account order detail shows parcels
+### ✅ Phase 2 — Account order detail shows parcels
 
 In `OrderDetail.jsx`, after the order loads, fetch the Phase 1 endpoint and render a **Parcels**
 section: one card per parcel with warehouse name, courier, code, and a "track with carrier" link
@@ -75,7 +89,7 @@ when `url` is present. Silent no-op when there are no parcels or the request fai
 **Done when:** an account order with a parcel shows warehouse + code + link; a mixed order shows
 both warehouses.
 
-### Phase 3 — Warehouse name in the tracking email
+### ✅ Phase 3 — Warehouse name in the tracking email
 
 In `Sillage_Tracking_Email::parcels_html()` and `get_content_plain()`, prefix each parcel card with
 its warehouse name (Blossom / Fern). Because a mixed order can send one email per vendor, each email
@@ -84,7 +98,7 @@ should still make clear which warehouse that parcel came from.
 **Files:** `plugins/sillage-tracking/class-sillage-tracking-email.php`.
 **Done when:** a mixed order's email labels each parcel with its warehouse.
 
-### Phase 4 — Warehouse name on the public `/track` page
+### ✅ Phase 4 — Warehouse name on the public `/track` page
 
 In `Sillage_Tracking_Lookup::payload()`, include `vendor`/`warehouse` per parcel (today it returns
 only courier/code/url), and render it in `OrderTracking.jsx`.
@@ -93,11 +107,14 @@ only courier/code/url), and render it in `OrderTracking.jsx`.
 `react_store/frontend/src/features/content/pages/OrderTracking.jsx`.
 **Done when:** `/order-tracking` labels each parcel with its warehouse.
 
-### Phase 5 (optional) — item ↔ warehouse grouping
+### ✅ Phase 5 — item ↔ warehouse grouping
 
-Order items already carry `_sillage_location` (A/B) meta. Group the account's item list under
-"Warehouse Blossom" / "Warehouse Fern", and optionally a "what's in this parcel" list per parcel. The
-"two parcels" email notice already exists; extend it only if a per-parcel item list is wanted.
+Order items already carry `_sillage_location` (A/B) meta. **Chosen: "parcels + items".** Both the
+account order detail and `/order-tracking` group the parcel cards *and* the item list under "Warehouse
+Blossom" / "Warehouse Fern" when — and only when — the order ships from both. A single-warehouse order
+stays a flat list (each parcel card names its warehouse). No "what's in this parcel" list was added:
+there is no parcel↔line mapping stored, and the group heading already says which lines ship together.
+The "two parcels" email notice now names both warehouses.
 
 ---
 
@@ -107,16 +124,25 @@ Order items already carry `_sillage_location` (A/B) meta. Group the account's it
   `_sillage_location`). No migration, no data change, no pipeline change.
 - To revert a phase: revert its commit (or deactivate the plugin / remove the render). The
   poll → store → push pipeline is untouched by all of them.
-- The warehouse name map is duplicated in a few spots (`sillage-warehouses` PHP, frontend
-  `WAREHOUSE_NAMES`, and this new endpoint). Keep them in step; if it grows beyond these, promote it
-  to one shared source.
+- The warehouse name map still lives in **two** places by necessity of the repo split: the server
+  (`SILLAGE_WH_LOCATIONS` / `SILLAGE_WH_NAMES` in `sillage-warehouses`, read by the tracking plugin
+  and the MU route through `sillage_tracking_vendor_letter()` / `cereve_auth_warehouse_letter()` with
+  an inline fallback when that plugin is off) and the frontend (`src/shared/lib/warehouse.js`, the
+  one map the bag, account and tracking page all import). Keep the two in step.
+- The server sends the **letter** and the frontend renders the **name**, because the name is
+  translated and the server has no catalogue. Do not move a translated name onto the server.
 
 ## Files touched
 
 - `plugins/sillage-tracking/{sillage-tracking.php, class-sillage-tracking-lookup.php, class-sillage-tracking-email.php}`
+- `mu-plugins/cereve-storefront-auth.php` (Phase 1's homes for the parcels + item warehouse)
+- `plugins/sillage-warehouses/sillage-warehouses.php` (two-parcels notice names the warehouses;
+  stale "customers never see a warehouse name" notes corrected)
 - `react_store/frontend/src/features/account/pages/OrderDetail.jsx`
 - `react_store/frontend/src/features/content/pages/OrderTracking.jsx`
-- `react_store/frontend/src/locales/*.json` (24 catalogues)
+- `react_store/frontend/src/shared/ui/TrackingParcels.jsx` (new)
+- `react_store/frontend/src/shared/lib/warehouse.js` (new; `cart/constants.js` re-exports it)
+- `react_store/frontend/src/locales/*.json` (24 catalogues — one new key, `track.parcels`)
 - `docs/TRACKING.md` (keep in sync)
 
 ## Hazards / invariants

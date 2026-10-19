@@ -855,6 +855,68 @@ function cereve_auth_address( WC_Order $order, $type = 'billing' ) {
 }
 
 /**
+ * The warehouse letter (A or B) a supplier ships from.
+ *
+ * `sillage-warehouses` owns the vendor → letter map; this reads it when that plugin is active and
+ * falls back to the same two values otherwise. An empty string means the vendor is unknown, so the
+ * line is left ungrouped rather than guessed into a warehouse.
+ *
+ * @param string $vendor Vendor slug (`bts`, `beautyfort`) or an already-resolved letter.
+ * @return string Letter, or '' when the vendor is not one of the two warehouses.
+ */
+function cereve_auth_warehouse_letter( $vendor ) {
+	$vendor = strtolower( trim( (string) $vendor ) );
+	if ( '' === $vendor ) {
+		return '';
+	}
+
+	if ( 'a' === $vendor || 'b' === $vendor ) {
+		return strtoupper( $vendor );
+	}
+
+	$map = defined( 'SILLAGE_WH_LOCATIONS' ) ? SILLAGE_WH_LOCATIONS : array(
+		'bts'        => 'A',
+		'beautyfort' => 'B',
+	);
+
+	return isset( $map[ $vendor ] ) ? (string) $map[ $vendor ] : '';
+}
+
+/**
+ * Every parcel recorded on an order, normalised for the account view.
+ *
+ * The storefront reads `_sillage_tracking` through this response instead of a second request, and
+ * each parcel is labelled with the warehouse letter only, so the UI can translate the name.
+ *
+ * @param WC_Order $order Order to read.
+ * @return array<int, array<string, mixed>>
+ */
+function cereve_auth_order_parcels( WC_Order $order ) {
+	$stored = $order->get_meta( '_sillage_tracking' );
+	if ( ! is_array( $stored ) ) {
+		return array();
+	}
+
+	$parcels = array();
+	foreach ( $stored as $entry ) {
+		if ( ! is_array( $entry ) || empty( $entry['code'] ) ) {
+			continue;
+		}
+
+		$vendor    = isset( $entry['vendor'] ) ? (string) $entry['vendor'] : '';
+		$parcels[] = array(
+			'warehouse' => cereve_auth_warehouse_letter( $vendor ),
+			'courier'   => isset( $entry['courier'] ) ? (string) $entry['courier'] : '',
+			'code'      => (string) $entry['code'],
+			'url'       => isset( $entry['url'] ) ? (string) $entry['url'] : '',
+			'added'     => isset( $entry['added'] ) ? (int) $entry['added'] : 0,
+		);
+	}
+
+	return $parcels;
+}
+
+/**
  * A single order, for the order detail view. Owners only.
  *
  * @param WP_REST_Request $request Request.
@@ -881,16 +943,22 @@ function cereve_auth_order( WP_REST_Request $request ) {
 	$items = array();
 
 	foreach ( $order->get_items() as $item ) {
-		$product = $item->get_product();
-		$image   = $product ? $product->get_image_id() : 0;
+		$product  = $item->get_product();
+		$image    = $product ? $product->get_image_id() : 0;
+		$location = (string) $item->get_meta( '_sillage_location', true );
+		if ( '' === $location ) {
+			// Legacy orders predate the location meta; the vendor slug is the fallback.
+			$location = cereve_auth_warehouse_letter( $item->get_meta( '_sillage_vendor', true ) );
+		}
 
 		$items[] = array(
-			'name'     => $item->get_name(),
-			'quantity' => (int) $item->get_quantity(),
-			'subtotal' => (string) $item->get_subtotal(),
-			'total'    => (string) $item->get_total(),
-			'sku'      => $product ? $product->get_sku() : null,
-			'image'    => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
+			'name'      => $item->get_name(),
+			'quantity'  => (int) $item->get_quantity(),
+			'subtotal'  => (string) $item->get_subtotal(),
+			'total'     => (string) $item->get_total(),
+			'sku'       => $product ? $product->get_sku() : null,
+			'image'     => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
+			'warehouse' => $location,
 		);
 	}
 
@@ -918,6 +986,7 @@ function cereve_auth_order( WP_REST_Request $request ) {
 			'billing'          => cereve_auth_address( $order, 'billing' ),
 			'shipping_address' => cereve_auth_address( $order, 'shipping' ),
 			'items'            => $items,
+			'parcels'          => cereve_auth_order_parcels( $order ),
 		),
 		200
 	);

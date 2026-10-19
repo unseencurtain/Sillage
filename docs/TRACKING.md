@@ -96,17 +96,23 @@ WooCommerce order backward; that stays a human decision).
     socket; a missing IP is never limited).
   - **Obfuscates**: an unknown order and a wrong email return the same `not_found`, so the reply
     never reveals whether the order exists.
-  - Returns `{ok, order:{number,status,status_label,placed,currency}, parcels:[{courier,code,url}],
-    items:[{name,quantity,image}]}`. Parcels are read from `_sillage_tracking` by
-    `sillage_tracking_parcels()`.
-- **`sillage-tracking.php`** — `sillage_tracking_parcels()` (read `_sillage_tracking`), the email
-  class registration, and two hooks:
+  - Returns `{ok, order:{number,status,status_label,placed,currency}, parcels:[{warehouse,courier,code,url}],
+    items:[{name,quantity,image,warehouse}]}`. `warehouse` is the **location letter** (`A`/`B`), not a
+    name: the storefront translates "Warehouse Blossom" / "Warehouse Fern" itself. Parcels are read
+    from `_sillage_tracking` by `sillage_tracking_parcels()`; each item's letter comes from its
+    `_sillage_location` meta (falling back to `_sillage_vendor` on older orders).
+- **`sillage-tracking.php`** — `sillage_tracking_parcels()` (read `_sillage_tracking`),
+  `sillage_tracking_vendor_letter()` / `sillage_tracking_warehouse_name()` (the vendor→letter→name
+  map, shared with `sillage-warehouses` when it is active), the email class registration, and two
+  hooks:
   - on `woocommerce_new_customer_note` → if the note contains a tracking code we know, send the
     **branded email** instead of WooCommerce's generic one;
   - filter `woocommerce_email_recipient_customer_note` → suppress WooCommerce's own generic note for
     tracking notes (so the customer gets one email, not two; turning the tracking email off restores
     the generic one).
-- **`class-sillage-tracking-email.php`** — the `WC_Email` subclass ("your parcel has shipped").
+- **`class-sillage-tracking-email.php`** — the `WC_Email` subclass ("your parcel has shipped"). It
+  names each parcel's warehouse, and prints **only the parcel whose code the triggering note carries**,
+  so a mixed order's second shipment does not repeat the first warehouse's parcel.
 
 ### Storefront page (`react_store/frontend`)
 - `src/features/content/pages/OrderTracking.jsx` — the interactive panel on **`/order-tracking`**
@@ -114,9 +120,17 @@ WooCommerce order backward; that stays a human decision).
   `trackOrder({order, email})`.
 - `src/shared/lib/woo.js` → `trackOrder()` → `POST /sillage/v1/track` against the WordPress base
   (public, no nonce/cart token).
-- The result renders: order number, a status pill, placed date, one card per parcel (courier,
-  tracking number, "Track with carrier" link when `url` is present), and the order's line items.
-- All copy is i18n (`track.*`, `account.*` keys in `src/locales/*.json`).
+- The result renders: order number, a status pill, placed date, the parcels and the order's line
+  items. A **mixed** order (both warehouses) groups parcels and items under warehouse headings; a
+  single-warehouse order shows one flat list per section with the warehouse named on each parcel
+  card. `src/shared/ui/TrackingParcels.jsx` holds the parcel cards and headings;
+  `groupByWarehouse()` in `src/shared/lib/warehouse.js` decides when to group.
+- The **account order detail** (`src/features/account/pages/OrderDetail.jsx`) shows the same Parcels
+  section and the same grouping for its item list. It reads `parcels` and each item's `warehouse`
+  from the authenticated route `GET /wc/store/v1/customer/orders/{id}` (the
+  `cereve-storefront-auth` MU plugin) — no second request.
+- All copy is i18n (`track.*`, `account.*` keys in `src/locales/*.json`); the warehouse name reuses
+  `cart.warehouse` (`"Warehouse {{name}}"`).
 
 ---
 
@@ -141,11 +155,11 @@ Works end to end: the two legs are polled by their own adapters, each parcel is 
 order, one email fires per vendor as each ships, and the WC order only reaches `completed` when
 every live leg is delivered/cancelled.
 
-**Known gap:** the `vendor` tag is stored in `_sillage_tracking` but **dropped** by the lookup —
-`Sillage_Tracking_Lookup::payload()` returns only `courier`, `code`, `url`, and `OrderTracking.jsx`
-renders only those. A shopper cannot tell which parcel came from which vendor (only the courier
-name), and items are one combined list with no parcel↔item mapping. To fix: expose `vendor` in the
-`/track` payload and render a per-vendor label on each parcel card.
+The `vendor` tag is now **surfaced** as the location letter (`A` = Warehouse Blossom, `B` = Warehouse
+Fern) by both the public `/track` payload and the authenticated account route. Parcels and items are
+grouped under warehouse headings wherever a mixed order shows them (account order detail, tracking
+page, email), and an email announces only the parcel its triggering note names. Customers still see
+**only** "Warehouse Blossom" / "Warehouse Fern" — never "BTS" / "BeautyFort" or the letters.
 
 ---
 
@@ -159,9 +173,13 @@ name), and items are one combined list with no parcel↔item mapping. To fix: ex
 | Bridge REST | `…/plugins/sillage-bridge/includes/class-sillage-rest.php` | `/sillage/v1/order-update` (HMAC) |
 | Bridge tracking | `…/plugins/sillage-bridge/includes/class-sillage-orders.php` (`apply_tracking`) | `_sillage_tracking` meta + customer note |
 | Public lookup | `Sillage/plugins/sillage-tracking/class-sillage-tracking-lookup.php` | `POST /sillage/v1/track` |
-| Email | `Sillage/plugins/sillage-tracking/{sillage-tracking.php, class-sillage-tracking-email.php}` | branded email on `woocommerce_new_customer_note` |
+| Email | `Sillage/plugins/sillage-tracking/{sillage-tracking.php, class-sillage-tracking-email.php}` | branded email on `woocommerce_new_customer_note`, labelled by warehouse |
+| Account route | `Sillage/mu-plugins/cereve-storefront-auth.php` (`cereve_auth_order`) | `GET /wc/store/v1/customer/orders/{id}` — parcels + item warehouse |
 | Storefront page | `react_store/frontend/src/features/content/pages/OrderTracking.jsx` | `/order-tracking` form + result |
-| Storefront client | `react_store/frontend/src/shared/lib/woo.js` (`trackOrder`) | POST to `/sillage/v1/track` |
+| Storefront account | `react_store/frontend/src/features/account/pages/OrderDetail.jsx` | Parcels section + warehouse-grouped items |
+| Storefront parcels | `react_store/frontend/src/shared/ui/TrackingParcels.jsx` | Parcel cards + warehouse headings |
+| Storefront grouping | `react_store/frontend/src/shared/lib/warehouse.js` | warehouse names + `groupByWarehouse()` |
+| Storefront client | `react_store/frontend/src/shared/lib/woo.js` (`trackOrder`, `getCustomerOrder`) | POST to `/sillage/v1/track`; account route |
 
 ---
 

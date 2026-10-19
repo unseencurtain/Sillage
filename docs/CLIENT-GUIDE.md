@@ -232,6 +232,10 @@ A badge shows how many are unread in each.
 The list shows **25 messages to a page**; **Previous** / **Next** sit just under the list. **Refresh**
 checks for new messages without reloading the page.
 
+The shop’s own **Contact** page and its **Right of Withdrawal** page post here: the customer fills in
+the form on the shop, it lands in this inbox, and you are emailed a copy. Turnstile is only asked for
+when both the site key (Settings → **Storefront messages**) and its secret (Secrets page) are set.
+
 ### Vendors
 
 Cards for **BeautyFort** and **BTS** only.
@@ -267,6 +271,12 @@ WooCommerce; it only changes what we send the wholesaler.
 **Tracking** fills in after the wholesaler ships (BTS often 24–72 hours, and cancelled orders
 never get a code). Sillage can copy tracking into WooCommerce and email the customer if
 **Notify customer on tracking** is on.
+
+Every parcel is labelled with the warehouse it ships from — **Warehouse Blossom** (BTS) or
+**Warehouse Fern** (BeautyFort). Customers only ever see that name, never the supplier or a letter.
+An order that ships from both warehouses is announced parcel by parcel: the email names only the
+parcel that just shipped, and the order page in the customer’s account groups the parcels and the
+lines under each warehouse.
 
 BeautyFort may sit in **Payment Hold** on their side if their portal still wants a payment
 confirmation.
@@ -351,7 +361,8 @@ BeautyFort is a smaller EU set; BTS is broader.
 **EAN.** The barcode appears on the product page. Shop search understands barcodes.
 
 **Track order.** Customers open https://prinscosmetic.eu/track-order/ and enter order
-number + checkout email.
+number + checkout email. The same parcels, each with its warehouse, appear on the order in the
+customer's account when they are signed in.
 
 **Vendor names.** LPS01 / LPS02 are operations labels. They must not appear as shop categories or
 on the product “Additional information” table.
