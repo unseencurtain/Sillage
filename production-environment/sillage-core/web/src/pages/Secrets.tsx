@@ -10,6 +10,8 @@ const HELP: Record<string, string> = {
   BEAUTYFORT_USER: "BeautyFort SOAP username for catalogue + order APIs.",
   BEAUTYFORT_SECRET: "BeautyFort SOAP password/secret. Never shown after save.",
   BTS_JWT_TOKEN: "BTS Wholesaler JWT from their portal. Powers catalogue + dispatch.",
+  TURNSTILE_SECRET:
+    "The secret half of Cloudflare Turnstile, from the same Cloudflare widget as the site key in Settings → Storefront messages. Set both or neither.",
 };
 
 function sourceLabel(source: SecretStatus["source"]) {
@@ -53,7 +55,7 @@ export function Secrets() {
   if (error || !data) return <p className="text-danger">Failed to load secrets</p>;
 
   const busy = setMut.isPending || clearMut.isPending;
-  const missing = data.secrets.filter((s) => !s.set);
+  const missing = data.secrets.filter((s) => !s.set && !s.optional);
   const allSet = missing.length === 0;
 
   return (
@@ -125,7 +127,7 @@ export function Secrets() {
                         : "border-amber-200 bg-amber-50 text-amber-800",
                     )}
                   >
-                    {s.set ? s.masked || "••••••••" : "empty — required"}
+                    {s.set ? s.masked || "••••••••" : s.optional ? "empty — optional" : "empty — required"}
                   </span>
                   <span className="text-muted">{sourceLabel(s.source)}</span>
                 </div>

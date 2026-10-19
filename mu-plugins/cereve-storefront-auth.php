@@ -65,6 +65,33 @@ function cereve_auth_register_routes() {
 			'permission' => '__return_true',
 			'args'       => $credentials,
 		),
+		// Start a password reset. Answers the same way whether or not the
+		// address has an account, so it cannot be used to probe for customers.
+		array(
+			'path'       => '/customer/lost-password',
+			'methods'    => 'POST',
+			'callback'   => 'cereve_auth_lost_password',
+			'permission' => '__return_true',
+			'args'       => array(
+				'email' => array(
+					'type'              => 'string',
+					'required'          => true,
+					'sanitize_callback' => 'sanitize_email',
+				),
+			),
+		),
+		// Finish a password reset with the key the email carried.
+		array(
+			'path'       => '/customer/reset-password',
+			'methods'    => 'POST',
+			'callback'   => 'cereve_auth_reset_password',
+			'permission' => '__return_true',
+			'args'       => array(
+				'login'    => array( 'type' => 'string', 'required' => true ),
+				'key'      => array( 'type' => 'string', 'required' => true ),
+				'password' => array( 'type' => 'string', 'required' => true ),
+			),
+		),
 		// Order history is only readable by the signed-in owner.
 		array(
 			'path'       => '/customer/orders',
@@ -149,13 +176,20 @@ function cereve_auth_payload( WP_User $user ) {
 	$base            = wc_get_base_location();
 	$default_country = is_array( $base ) && ! empty( $base['country'] ) ? $base['country'] : '';
 
+	// The customer's own name (usermeta `first_name`) is written by the storefront signup
+	// route; the billing name is written by checkout. An account created outside signup --
+	// the shop's own admin, an imported customer -- has only the latter, so fall back to it
+	// rather than showing an empty name on the account page.
+	$first_name = $customer->get_first_name() ? $customer->get_first_name() : $customer->get_billing_first_name();
+	$last_name  = $customer->get_last_name() ? $customer->get_last_name() : $customer->get_billing_last_name();
+
 	return array(
 		'id'           => $user->ID,
 		'username'     => $user->user_login,
 		'email'        => $user->user_email,
-		'first_name'   => $customer->get_first_name(),
-		'last_name'    => $customer->get_last_name(),
-		'display_name' => trim( $customer->get_first_name() . ' ' . $customer->get_last_name() ),
+		'first_name'   => $first_name,
+		'last_name'    => $last_name,
+		'display_name' => trim( $first_name . ' ' . $last_name ),
 		'phone'        => $customer->get_billing_phone(),
 		'billing'      => array(
 			'first_name' => $customer->get_billing_first_name(),
@@ -239,6 +273,12 @@ const CEREVE_AUTH_REGISTER_MAX = 5;
 
 /** Seconds a registration is held back once the limit is reached. */
 const CEREVE_AUTH_REGISTER_LOCKOUT = 3600;
+
+/** Reset emails a single IP may ask for per hour. */
+const CEREVE_AUTH_RESET_MAX = 5;
+
+/** Seconds a reset request is held back once the limit is reached. */
+const CEREVE_AUTH_RESET_LOCKOUT = 3600;
 
 /**
  * Transient key for an IP's attempt counter.
@@ -465,6 +505,126 @@ function cereve_auth_login( WP_REST_Request $request ) {
 	return new WP_REST_Response( cereve_auth_sign_in( $user ), 200 );
 }
 
+/* -------------------------------------------------------------------------
+ * Password reset
+ *
+ * The storefront asks for the reset; WordPress sends the mail. Core's
+ * retrieve_password() is reused rather than WooCommerce's my-account form
+ * because its link is built here: the shopper resets on the storefront's own
+ * page instead of on wp-login.php or my-account, neither of which a headless
+ * site serves.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Point the reset email at the storefront's reset page.
+ *
+ * @param array   $email      Mail arguments: to, subject, message, headers.
+ * @param string  $key        Password reset key.
+ * @param string  $user_login Login of the account being reset.
+ * @param WP_User $user_data  That account.
+ * @return array
+ */
+function cereve_auth_reset_email( $email, $key, $user_login, $user_data ) {
+	$store = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+	$url   = add_query_arg(
+		array(
+			'login' => rawurlencode( $user_login ),
+			'key'   => $key,
+		),
+		home_url( '/reset-password' )
+	);
+	$name  = $user_data instanceof WP_User && '' !== $user_data->display_name ? $user_data->display_name : $user_login;
+
+	$email['subject'] = sprintf(
+		/* translators: %s: store name. */
+		__( 'Set a new %s password', 'cereve' ),
+		$store
+	);
+
+	$email['message'] = sprintf(
+		/* translators: 1: customer name, 2: store name, 3: reset link. */
+		__(
+			"Hello %1\$s,\n\nSomeone asked to set a new password for your %2\$s account.\n\nChoose it here:\n\n%3\$s\n\nThe link works for 24 hours and can only be used once. If this was not you, ignore this email: your password has not changed.",
+			'cereve'
+		),
+		$name,
+		$store,
+		$url
+	);
+
+	return $email;
+}
+add_filter( 'retrieve_password_notification_email', 'cereve_auth_reset_email', 10, 4 );
+
+/**
+ * Email a reset link for an address, if it has an account.
+ *
+ * Always reports success: saying which addresses are registered would turn
+ * this into an account-discovery endpoint.
+ *
+ * @param WP_REST_Request $request Request.
+ * @return WP_REST_Response|WP_Error
+ */
+function cereve_auth_lost_password( WP_REST_Request $request ) {
+	$locked = cereve_auth_throttled( 'lost_password', CEREVE_AUTH_RESET_MAX, CEREVE_AUTH_RESET_LOCKOUT );
+	if ( $locked instanceof WP_REST_Response ) {
+		return $locked;
+	}
+
+	cereve_auth_count_attempt( 'lost_password', CEREVE_AUTH_RESET_MAX, CEREVE_AUTH_RESET_LOCKOUT );
+
+	$email = $request->get_param( 'email' );
+	$user  = $email && is_email( $email ) ? get_user_by( 'email', $email ) : false;
+
+	if ( $user ) {
+		// Sends the mail and stores the key check_password_reset_key() reads.
+		retrieve_password( $user->user_login );
+	}
+
+	return new WP_REST_Response( array( 'sent' => true ), 200 );
+}
+
+/**
+ * Set a new password from a reset link, then sign that customer in.
+ *
+ * @param WP_REST_Request $request Request.
+ * @return WP_REST_Response|WP_Error
+ */
+function cereve_auth_reset_password( WP_REST_Request $request ) {
+	$locked = cereve_auth_throttled( 'reset_password', CEREVE_AUTH_RESET_MAX, CEREVE_AUTH_RESET_LOCKOUT );
+	if ( $locked instanceof WP_REST_Response ) {
+		return $locked;
+	}
+
+	cereve_auth_count_attempt( 'reset_password', CEREVE_AUTH_RESET_MAX, CEREVE_AUTH_RESET_LOCKOUT );
+
+	$user = check_password_reset_key( (string) $request->get_param( 'key' ), (string) $request->get_param( 'login' ) );
+
+	if ( is_wp_error( $user ) ) {
+		return cereve_auth_error(
+			new WP_Error(
+				'cereve_bad_reset_key',
+				__( 'This reset link has expired or has already been used. Request a new one.', 'cereve' )
+			)
+		);
+	}
+
+	$password = (string) $request->get_param( 'password' );
+	$error    = cereve_auth_validate_password( $password );
+
+	if ( is_wp_error( $error ) ) {
+		return cereve_auth_error( $error );
+	}
+
+	// Fires password_reset (WooCommerce emails the change) and drops every
+	// session tied to the password being replaced.
+	reset_password( $user, $password );
+
+	// Then starts one for the browser that just proved it owns the address, so
+	// the shopper lands in their account rather than back on the sign-in form.
+	return new WP_REST_Response( cereve_auth_sign_in( $user ), 200 );
+}
+
 /**
  * Return the signed-in customer.
  *
@@ -527,6 +687,14 @@ function cereve_auth_update( WP_REST_Request $request ) {
 		$value = $request->get_param( $field );
 		if ( null !== $value ) {
 			$clean = sanitize_text_field( $value );
+
+			// The account page's name field is the customer's own name, not just the address
+			// blocks. Writing only billing_/shipping_ is what made an edit look like it never
+			// saved: the next read served the untouched usermeta `first_name` back.
+			if ( 'first_name' === $field || 'last_name' === $field ) {
+				$customer->{"set_{$field}"}( $clean );
+			}
+
 			$customer->{"set_billing_{$field}"}( $clean );
 			$customer->{"set_shipping_{$field}"}( $clean );
 		}

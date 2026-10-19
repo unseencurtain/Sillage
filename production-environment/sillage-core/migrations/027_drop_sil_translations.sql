@@ -1,0 +1,16 @@
+-- Retire the engine's content-translation table.
+--
+-- `025_translations.sql` created `sil_translations` so the `sillage-translations` plugin could
+-- rewrite a REST read for `lang=<code>`. `026_drop_sil_phrases.sql` retired the product-name
+-- phrase dictionary; this retires the last table, because the owner has scoped translation to the
+-- shop's fixed structure only and the frontend now owns it.
+--
+-- The thirteen department names are the app's own copy (`departments.<key>` in the storefront's
+-- `src/locales/`), translated by i18next beside every other string. Nothing is asked of the API for
+-- them, so no read carries `lang` any more and there is nothing left to rewrite or to store.
+--
+-- A product's name and description are inventory, already the words the shop typed, and are never
+-- translated; a brand is a proper noun and is never translated either.
+--
+-- Nothing reads the table. It goes.
+DROP TABLE IF EXISTS sil_translations;

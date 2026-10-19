@@ -7,6 +7,15 @@ import { applyRuntimeUrls } from "../../config/env.ts";
 import { clearSecret, listSecretStatus, loadSecretsOverlay, setSecret } from "../../config/secrets.ts";
 import { execute, query, type RowDataPacket } from "../../db/pool.ts";
 import { loadSettings, loadVendor, loadVendors, recordEvent, setSetting, updateVendor } from "../../db/settings.ts";
+import {
+  deleteArchived,
+  deleteMessage,
+  deleteMessages,
+  listMessages,
+  setMessageStatus,
+  type MessageKind,
+  type MessageStatus,
+} from "../../messages/store.ts";
 import { listCachedQuotes, loadShippingRules, SHIPPING_SETTING_KEYS, refreshAllQuotes } from "../../shipping/quotes.ts";
 import { logger } from "../../lib/log.ts";
 import { resolveTimeZone } from "../../lib/timezone.ts";
@@ -20,7 +29,7 @@ import {
   resolveDeliveryAddress,
   saveCompanyBilling,
 } from "../../orders/addresses.ts";
-import { destinationAddress, readWooOrder } from "../../orders/ingest.ts";
+import { destinationAddress, readWooOrder, ignoreOrderIngest } from "../../orders/ingest.ts";
 import { approveVendorOrder, dispatchVendorOrder } from "../../orders/dispatch.ts";
 import { maybeCompleteWooOrder } from "../../orders/tracking.ts";
 import { clearSyncAbort, requestSyncAbort } from "../../sync/abort.ts";
@@ -37,7 +46,7 @@ import type { OrderAddress } from "../../orders/types.ts";
 import { getStorefrontLiveCooldown } from "../../vendors/liveGate.ts";
 import { parseVendorPatch } from "../../vendors/validateVendorPatch.ts";
 import { isParkedVendor, storefrontVendorSlugs } from "../../vendors/registry.ts";
-import { requireSession, type AuthEnv } from "../auth.ts";
+import { requireSession, verifyPassword, type AuthEnv } from "../auth.ts";
 import { IDENTITY_KEYS, loadIdentity, pushIdentity, saveIdentity, validateIdentity, type IdentityField } from "../../identity/identity.ts";
 
 const log = logger("api");
@@ -135,15 +144,46 @@ async function hasSuccessfulCatalogue(): Promise<boolean> {
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-export const api = new Hono<AuthEnv>();
-api.use("*", requireSession);
+/**
+ * Catalogue counts: the heavy aggregate behind the Overview tiles.
+ *
+ * "Published / Visible / Hidden" are read from `wp_posts` joined to `sil_products`, the
+ * `_external_thumbnail_url` meta and two `product_visibility` term scans — tens of thousands of rows
+ * per call. They only move when a sync writes, so recomputing them on a dashboard timer (the page
+ * used to poll every 15s, per open tab) spent a small VPS's CPU on numbers that had not changed.
+ * Precompute once and reuse.
+ *
+ * The cache key is the newest finished sync run, read fresh on each request (one indexed row). That
+ * keeps the cache correct even though the sync runs in its own process, so a cold cache or a newly
+ * finished run recomputes once while every other request — however many tabs, however often — is a
+ * plain lookup.
+ */
+interface CatalogueCounts {
+  offers: number;
+  products: number;
+  published: number;
+  catalogVisible: number;
+  hiddenFromCatalog: number;
+  outOfStock: number;
+  hiddenNoImage: number;
+  hiddenStock: number;
+  hiddenOperator: number;
+}
 
-api.get("/overview", async (c) => {
-  const settings = await loadSettings();
-  // Shop loop ≈ publish AND NOT exclude-from-catalog (same rule as recountTerms).
-  // "Published" alone overstates what customers see when hide-without-image / stock
-  // threshold attach those visibility terms.
-  //
+let catalogueCountsCache: { key: number; data: CatalogueCounts } | null = null;
+let catalogueCountsInFlight: { key: number; promise: Promise<CatalogueCounts> } | null = null;
+
+/** The newest run that finished, success or not. `0` before any run has completed. */
+async function newestFinishedRunId(): Promise<number> {
+  const rows = await query<RowDataPacket & { id: number }>(
+    `SELECT id FROM ${sil("sil_sync_runs")}
+      WHERE status IN ('success','partial','error')
+      ORDER BY id DESC LIMIT 1`,
+  );
+  return Number(rows[0]?.id ?? 0);
+}
+
+async function computeCatalogueCounts(): Promise<CatalogueCounts> {
   // The hide reasons are counted from `_external_thumbnail_url` — the photo the shop actually
   // prints — and not from sil_offers.image_url. Two reasons, and the first is why these numbers
   // were wrong for so long.
@@ -160,7 +200,7 @@ api.get("/overview", async (c) => {
   // products, zero rows hold a placeholder, a /pic/ thumb or a non-http value. So `TRIM() = ''` here
   // is not an approximation of the rule, it is the writer's own verdict read back — and it agrees
   // exactly with the `hiddenNoImage` figure the sync run reports.
-  const [offerRows, productRows, catalogRows, lastSync, orderRows] = await Promise.all([
+  const [offerRows, productRows, catalogRows] = await Promise.all([
     query<RowDataPacket & { offers: number }>(`SELECT COUNT(*) AS offers FROM ${sil("sil_offers")} WHERE vanished_at IS NULL`),
     query<RowDataPacket & { products: number }>(`SELECT COUNT(*) AS products FROM ${sil("sil_products")}`),
     query<
@@ -217,6 +257,57 @@ api.get("/overview", async (c) => {
        ) oos ON oos.object_id = p.ID
       WHERE p.post_type = 'product' AND p.post_status = 'publish'`,
     ),
+  ]);
+
+  const cat = catalogRows[0];
+  return {
+    offers: Number(offerRows[0]?.offers ?? 0),
+    products: Number(productRows[0]?.products ?? 0),
+    published: Number(cat?.published ?? 0),
+    catalogVisible: Number(cat?.catalog_visible ?? 0),
+    hiddenFromCatalog: Number(cat?.hidden_from_catalog ?? 0),
+    outOfStock: Number(cat?.out_of_stock ?? 0),
+    hiddenNoImage: Number(cat?.hidden_no_image ?? 0),
+    hiddenStock: Number(cat?.hidden_stock ?? 0),
+    hiddenOperator: Number(cat?.hidden_operator ?? 0),
+  };
+}
+
+/**
+ * Cached catalogue counts, recomputed only when a sync has finished since the last read. `runId` is
+ * the sync run the numbers reflect: the dashboard echoes it back so it can tell, without guessing,
+ * when a newer run has landed and its value is due to move.
+ */
+async function loadCatalogueCounts(): Promise<{ runId: number; counts: CatalogueCounts }> {
+  const key = await newestFinishedRunId();
+  const cached = catalogueCountsCache;
+  if (cached && cached.key === key) return { runId: key, counts: cached.data };
+  if (catalogueCountsInFlight && catalogueCountsInFlight.key === key) {
+    return { runId: key, counts: await catalogueCountsInFlight.promise };
+  }
+  const promise = computeCatalogueCounts()
+    .then((data) => {
+      catalogueCountsCache = { key, data };
+      return data;
+    })
+    .finally(() => {
+      if (catalogueCountsInFlight?.key === key) catalogueCountsInFlight = null;
+    });
+  catalogueCountsInFlight = { key, promise };
+  return { runId: key, counts: await promise };
+}
+
+export const api = new Hono<AuthEnv>();
+api.use("*", requireSession);
+
+api.get("/overview", async (c) => {
+  const settings = await loadSettings();
+  // Shop loop ≈ publish AND NOT exclude-from-catalog (same rule as recountTerms). "Published" alone
+  // overstates what customers see when hide-without-image / the stock threshold attach those terms.
+  // The catalogue counts themselves are precomputed — see loadCatalogueCounts — so this endpoint is a
+  // couple of point reads however often the dashboard asks.
+  const [snapshot, lastSync, orderRows] = await Promise.all([
+    loadCatalogueCounts(),
     query<RowDataPacket>(
       `SELECT id, mode, source, status, duration_ms, products_fetched, posts_created, posts_updated,
               prices_updated, products_vanished, errors, started_at, finished_at, stats
@@ -237,25 +328,24 @@ api.get("/overview", async (c) => {
   const ordersByStatus: Record<string, number> = {};
   for (const r of orderRows) ordersByStatus[r.status] = Number(r.n);
 
-  const cat = catalogRows[0];
-  const published = Number(cat?.published ?? 0);
-  const catalogVisible = Number(cat?.catalog_visible ?? 0);
-  const hiddenFromCatalog = Number(cat?.hidden_from_catalog ?? 0);
+  const { counts, runId: countsRunId } = snapshot;
 
   return c.json({
-    offers: Number(offerRows[0]?.offers ?? 0),
-    products: Number(productRows[0]?.products ?? 0),
+    offers: counts.offers,
+    products: counts.products,
     /** @deprecated Prefer catalogVisible — publish status alone includes catalog-excluded posts. */
-    published,
-    catalogVisible,
-    hiddenFromCatalog,
-    outOfStock: Number(cat?.out_of_stock ?? 0),
+    published: counts.published,
+    catalogVisible: counts.catalogVisible,
+    hiddenFromCatalog: counts.hiddenFromCatalog,
+    outOfStock: counts.outOfStock,
     /** Exclusive hide reason (writer order): no/weak image, including those also OOS. */
-    hiddenNoImage: Number(cat?.hidden_no_image ?? 0),
+    hiddenNoImage: counts.hiddenNoImage,
     /** Exclusive hide reason: usable image, out of stock / below threshold. */
-    hiddenStock: Number(cat?.hidden_stock ?? 0),
+    hiddenStock: counts.hiddenStock,
     /** Exclusive hide reason: operator Keep hidden. */
-    hiddenOperator: Number(cat?.hidden_operator ?? 0),
+    hiddenOperator: counts.hiddenOperator,
+    /** The finished sync run the counts above were computed from. */
+    countsRunId,
     lastSync: lastSync[0] ? decorateSyncRun(lastSync[0]) : null,
     ordersByStatus,
     syncsLast7Days: syncs.map((s) => ({ day: String(s.day), n: Number(s.n) })),
@@ -270,7 +360,9 @@ api.get("/overview", async (c) => {
     secrets: (() => {
       loadSecretsOverlay();
       const { secrets } = listSecretStatus();
-      const missing = secrets.filter((s) => !s.set).map((s) => s.key);
+      // Optional entries (the forms' SMTP password, the Turnstile secret) are not part of "ready":
+      // the shop syncs, prices and sells without either, so they must never block a sync.
+      const missing = secrets.filter((s) => !s.set && !s.optional).map((s) => s.key);
       return { ready: missing.length === 0, missing };
     })(),
   });
@@ -821,45 +913,249 @@ api.put("/vendors/:slug", async (c) => {
   });
 });
 
+// A row is "done" once it is really at the vendor or closed. A dry-run submit is a rehearsal, not a
+// placement, so it stays in "to do" until it is submitted live.
+const DONE_STATUSES = ["submitted", "confirmed", "dispatched", "delivered", "cancelled"] as const;
+/** Statuses that mean a row is really at a vendor and must never be bulk-closed. */
+const PLACED_STATUSES = ["submitted", "confirmed", "dispatched", "delivered"] as const;
+
+// Compile-time constants, never input, so they are inlined instead of bound.
+const doneSql = (alias: string) =>
+  `(${alias}.status IN (${DONE_STATUSES.map((s) => `'${s}'`).join(", ")})` +
+  ` AND NOT (${alias}.dry_run = 1 AND ${alias}.status = 'submitted'))`;
+const placedSql = (alias: string) =>
+  `(${alias}.dry_run = 0 AND ${alias}.status IN (${PLACED_STATUSES.map((s) => `'${s}'`).join(", ")}))`;
+
+/** Rows a single bulk call may touch. The UI re-runs it for the rest. */
+const BULK_ORDER_LIMIT = 500;
+
 api.get("/orders", async (c) => {
-  const status = c.req.query("status");
+  const filter = c.req.query("filter");
   const page = Math.max(1, Number(c.req.query("page") ?? 1));
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 50)));
   const offset = (page - 1) * limit;
-  const where = status ? "WHERE v.status = ?" : "";
-  const filterParams: unknown[] = status ? [status] : [];
 
-  const [totalRows, orders] = await Promise.all([
+  // The list shows one row per WooCommerce order; the vendor split lives under it (and in the
+  // panel tabs). An order is "to do" while any of its vendor rows is to do, "done" only once every
+  // one of them is placed or closed.
+  const orderDone = `MIN(${doneSql("v")})`;
+  const having =
+    filter === "todo" ? `HAVING ${orderDone} = 0` : filter === "done" ? `HAVING ${orderDone} = 1` : "";
+
+  const [totalRows, orders, countRows] = await Promise.all([
     query<RowDataPacket & { total: number }>(
       `SELECT COUNT(*) AS total
-         FROM ${sil("sil_vendor_orders")} v
-         ${where}`,
-      filterParams,
+         FROM (SELECT 1 FROM ${sil("sil_vendor_orders")} v GROUP BY v.wc_order_id ${having}) o`,
     ),
-    query<RowDataPacket>(
-      `SELECT v.id, v.wc_order_id, v.our_reference, v.status, v.items_cost, v.shipping_cost,
-              v.total_cost, v.revenue, v.destination_country, v.dry_run, v.vendor_order_number,
-              v.created_at, v.updated_at, ven.slug AS vendor
+    query<RowDataPacket & { wc_order_id: number }>(
+      `SELECT v.wc_order_id,
+              SUM(v.items_cost)         AS items_cost,
+              SUM(v.shipping_cost)      AS shipping_cost,
+              SUM(v.total_cost)         AS total_cost,
+              SUM(v.revenue)            AS revenue,
+              MAX(v.destination_country) AS destination_country,
+              MAX(v.dry_run)            AS any_dry_run,
+              MIN(v.created_at)         AS created_at,
+              MAX(v.updated_at)         AS updated_at,
+              ${orderDone}              AS order_done
          FROM ${sil("sil_vendor_orders")} v
-         JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
-         ${where}
-        ORDER BY v.id DESC LIMIT ? OFFSET ?`,
-      [...filterParams, limit, offset],
+        GROUP BY v.wc_order_id
+        ${having}
+        ORDER BY v.wc_order_id DESC
+        LIMIT ? OFFSET ?`,
+      [limit, offset],
+    ),
+    // Whole-table counts at order level, so the filter row can say how much is waiting.
+    query<RowDataPacket & { total: number; done: number | null }>(
+      `SELECT COUNT(*) AS total, SUM(order_done) AS done
+         FROM (SELECT ${orderDone} AS order_done FROM ${sil("sil_vendor_orders")} v GROUP BY v.wc_order_id) o`,
     ),
   ]);
 
+  const wcOrderIds = orders.map((o) => Number(o.wc_order_id));
+  const vendorRows = wcOrderIds.length
+    ? await query<RowDataPacket>(
+        `SELECT v.id, v.wc_order_id, v.our_reference, v.status, v.items_cost, v.shipping_cost,
+                v.total_cost, v.revenue, v.destination_country, v.dry_run, v.vendor_order_number,
+                v.created_at, v.updated_at, ven.slug AS vendor, ven.sku_prefix AS vendor_prefix,
+                ${doneSql("v")} AS done
+           FROM ${sil("sil_vendor_orders")} v
+           JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
+          WHERE v.wc_order_id IN (${wcOrderIds.map(() => "?").join(", ")})
+          ORDER BY v.wc_order_id DESC, v.id ASC`,
+        wcOrderIds,
+      )
+    : [];
+
+  const byOrder = new Map<number, RowDataPacket[]>();
+  for (const row of vendorRows) {
+    const list = byOrder.get(Number(row.wc_order_id)) ?? [];
+    list.push(row);
+    byOrder.set(Number(row.wc_order_id), list);
+  }
+
+  const all = Number(countRows[0]?.total ?? 0);
+  const done = Number(countRows[0]?.done ?? 0);
+
   return c.json({
-    orders,
+    orders: orders.map((o) => ({
+      wc_order_id: Number(o.wc_order_id),
+      items_cost: o.items_cost,
+      shipping_cost: o.shipping_cost,
+      total_cost: o.total_cost,
+      revenue: o.revenue,
+      destination_country: o.destination_country,
+      any_dry_run: o.any_dry_run,
+      order_done: o.order_done,
+      created_at: o.created_at,
+      updated_at: o.updated_at,
+      vendors: byOrder.get(Number(o.wc_order_id)) ?? [],
+    })),
     total: Number(totalRows[0]?.total ?? 0),
     page,
     limit,
+    counts: { all, done, todo: all - done },
+  });
+});
+
+/**
+ * Bulk-close or delete dispatch rows from the Orders list.
+ *
+ * `done` is a close, not a spend: the row becomes `cancelled`, which is terminal for the tracking
+ * poller, and it can be reopened from the stage buttons. `delete` is irreversible and therefore
+ * needs the operator's own password (not just the session cookie).
+ *
+ * Either explicit `wc_order_ids` (whole orders, from the list) or `ids` (single vendor rows), or a
+ * `filter` of todo/done/all, so clearing a list of test orders costs one request instead of one per
+ * row. A row that is really at a vendor — live submitted or later — is never touched.
+ */
+api.post("/orders/bulk", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    action?: string;
+    ids?: unknown;
+    wc_order_ids?: unknown;
+    filter?: string;
+    password?: string;
+  };
+  const action = body.action;
+  if (action !== "done" && action !== "delete") {
+    return c.json({ ok: false, error: "action must be 'done' or 'delete'" }, 400);
+  }
+
+  // Selection is either whole WooCommerce orders (`wc_order_ids`, from the list), single vendor
+  // rows (`ids`), or a filter. Both id lists are expanded to the vendor rows that belong to them.
+  const numList = (v: unknown) =>
+    Array.isArray(v) ? v.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0) : [];
+  const wcOrderIds = numList(body.wc_order_ids);
+  const ids = numList(body.ids);
+  const filter = body.filter;
+  const hasFilter = filter === "todo" || filter === "done" || filter === "all";
+  if (wcOrderIds.length === 0 && ids.length === 0 && !hasFilter) {
+    return c.json({ ok: false, error: "pass wc_order_ids[], ids[] or a filter of todo, done or all" }, 400);
+  }
+
+  if (action === "delete" && !verifyPassword(c.get("user"), body.password ?? "")) {
+    return c.json({ ok: false, error: "wrong password" }, 403);
+  }
+
+  const selection =
+    wcOrderIds.length > 0
+      ? `v.wc_order_id IN (${wcOrderIds.map(() => "?").join(", ")})`
+      : ids.length > 0
+        ? `v.id IN (${ids.map(() => "?").join(", ")})`
+        : filter === "todo"
+          ? `NOT ${doneSql("v")}`
+          : filter === "done"
+            ? doneSql("v")
+            : "1 = 1";
+  const selectionParams = wcOrderIds.length > 0 ? wcOrderIds : ids;
+  const where = `${selection} AND NOT ${placedSql("v")}`;
+
+  const rows = await query<RowDataPacket & { id: number; status: string; wc_order_id: number }>(
+    `SELECT v.id, v.status, v.wc_order_id
+       FROM ${sil("sil_vendor_orders")} v
+      WHERE ${where}
+      ORDER BY v.id ASC
+      LIMIT ?`,
+    [...selectionParams, BULK_ORDER_LIMIT],
+  );
+
+  const touchedOrders = new Set<number>();
+  for (const row of rows) {
+    if (action === "done") {
+      await execute(
+        `UPDATE ${sil("sil_vendor_orders")} SET status = 'cancelled', updated_at = NOW() WHERE id = ?`,
+        [row.id],
+      );
+      await execute(
+        `INSERT INTO ${sil("sil_order_events")} (vendor_order_id, from_status, to_status, message, context)
+         VALUES (?, ?, 'cancelled', ?, ?)`,
+        [
+          row.id,
+          row.status,
+          "closed in bulk — nothing was sent to a vendor",
+          JSON.stringify({ bulk: true }),
+        ],
+      );
+    } else {
+      await execute(`DELETE FROM ${sil("sil_vendor_order_items")} WHERE vendor_order_id = ?`, [row.id]);
+      await execute(`DELETE FROM ${sil("sil_vendor_order_tracking")} WHERE vendor_order_id = ?`, [row.id]);
+      await execute(`DELETE FROM ${sil("sil_order_events")} WHERE vendor_order_id = ?`, [row.id]);
+      await execute(`DELETE FROM ${sil("sil_vendor_orders")} WHERE id = ?`, [row.id]);
+      touchedOrders.add(Number(row.wc_order_id));
+    }
+  }
+
+  // Only once an order has no dispatch row left does deleting it mean "never import this again" —
+  // that is what stops the poller bringing a live WooCommerce order back.
+  let ignored = 0;
+  if (action === "delete") {
+    for (const wcOrderId of touchedOrders) {
+      const [left] = await query<RowDataPacket & { n: number }>(
+        `SELECT COUNT(*) AS n FROM ${sil("sil_vendor_orders")} WHERE wc_order_id = ?`,
+        [wcOrderId],
+      );
+      if (Number(left?.n ?? 0) > 0) continue;
+      await ignoreOrderIngest(wcOrderId, `order #${wcOrderId} deleted in the dashboard`);
+      ignored += 1;
+    }
+  }
+
+  // Anything matching the selection, so the answer can say what was skipped and what is left.
+  const [matchedRow] = await query<RowDataPacket & { n: number }>(
+    `SELECT COUNT(*) AS n FROM ${sil("sil_vendor_orders")} v WHERE ${selection}`,
+    selectionParams,
+  );
+  const [remaining] = await query<RowDataPacket & { n: number }>(
+    `SELECT COUNT(*) AS n FROM ${sil("sil_vendor_orders")} v WHERE ${where}`,
+    selectionParams,
+  );
+
+  const touchedCount = new Set(rows.map((r) => Number(r.wc_order_id))).size;
+
+  await recordEvent("info", "orders", `${action === "done" ? "closed" : "deleted"} ${rows.length} order row(s)`, {
+    action,
+    wc_order_ids: wcOrderIds.length ? wcOrderIds : null,
+    ids: ids.length ? ids : null,
+    filter: hasFilter ? filter : null,
+    ignored,
+  });
+
+  return c.json({
+    ok: true,
+    action,
+    changed: rows.length,
+    orders: touchedCount,
+    skipped: Math.max(0, Number(matchedRow?.n ?? 0) - rows.length),
+    ignored,
+    remaining: Number(remaining?.n ?? 0),
   });
 });
 
 api.get("/orders/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const [order] = await query<RowDataPacket>(
-    `SELECT v.*, ven.slug AS vendor
+    `SELECT v.*, ven.slug AS vendor, ven.sku_prefix AS vendor_prefix
        FROM ${sil("sil_vendor_orders")} v
        JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
       WHERE v.id = ?`,
@@ -886,6 +1182,16 @@ api.get("/orders/:id", async (c) => {
     String(order.vendor),
   );
   const companyBilling = await loadCompanyBilling(String(order.vendor));
+  // Sibling rows of the same WooCommerce order — the vendor tabs in the panel. Ordered so the
+  // currently-open row and its siblings read left-to-right in the order they were ingested.
+  const siblings = await query<RowDataPacket>(
+    `SELECT v.id, ven.slug AS vendor, ven.sku_prefix AS vendor_prefix, v.status, ${doneSql("v")} AS done
+       FROM ${sil("sil_vendor_orders")} v
+       JOIN ${sil("sil_vendors")} ven ON ven.id = v.vendor_id
+      WHERE v.wc_order_id = ? AND v.id <> ?
+      ORDER BY v.id ASC`,
+    [order.wc_order_id, id],
+  );
   const wpAdminUrl = `${env.wordpress.baseUrl}/wp-admin/admin.php?page=wc-orders&action=edit&id=${order.wc_order_id}`;
   return c.json({
     order,
@@ -899,6 +1205,7 @@ api.get("/orders/:id", async (c) => {
     items,
     events,
     tracking,
+    siblings,
   });
 });
 
@@ -1141,6 +1448,10 @@ api.get("/settings", async (c) => {
     orders_daily_cap_eur: String(s.ordersDailyCapEur),
     orders_poll_minutes: String(s.ordersPollMinutes),
     orders_notify_customer: s.ordersNotifyCustomer ? "1" : "0",
+    contact_recipients: s.contactRecipients,
+    contact_turnstile_site_key: s.contactTurnstileSiteKey,
+    mail_username: s.mailUsername,
+    mail_password: s.mailPassword,
     description_mode: s.descriptionMode,
     volume_filter_mode: s.volumeFilterMode,
     live_feed_min_minutes: String(s.liveFeedMinMinutes),
@@ -1219,6 +1530,10 @@ api.put("/settings", async (c) => {
     "orders_daily_cap_eur",
     "orders_poll_minutes",
     "orders_notify_customer",
+    "contact_recipients",
+    "contact_turnstile_site_key",
+    "mail_username",
+    "mail_password",
     "description_mode",
     "volume_filter_mode",
     "live_feed_min_minutes",
@@ -1412,4 +1727,96 @@ api.get("/logs", async (c) => {
     page,
     limit,
   });
+});
+
+/* ------------------------------------------------------------------ *
+ * Storefront messages (Contact / Right of Withdrawal)
+ * ------------------------------------------------------------------ */
+
+const MESSAGE_KINDS: MessageKind[] = ["contact", "withdrawal"];
+const MESSAGE_STATUSES: MessageStatus[] = ["new", "read", "archived"];
+
+api.get("/messages", async (c) => {
+  const kind = (c.req.query("kind") ?? "contact") as MessageKind;
+  if (!MESSAGE_KINDS.includes(kind)) {
+    return c.json({ ok: false, error: "unknown kind" }, 400);
+  }
+
+  const rawStatus = c.req.query("status") ?? "all";
+  if (rawStatus !== "all" && !MESSAGE_STATUSES.includes(rawStatus as MessageStatus)) {
+    return c.json({ ok: false, error: "unknown status" }, 400);
+  }
+
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 25)));
+
+  const result = await listMessages({
+    kind,
+    status: rawStatus as MessageStatus | "all",
+    page,
+    limit,
+  });
+  return c.json(result);
+});
+
+/** Move a message between new / read / archived. The kind says which table, always. */
+api.put("/messages/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ ok: false, error: "bad id" }, 400);
+
+  const kind = (c.req.query("kind") ?? "") as MessageKind;
+  if (!MESSAGE_KINDS.includes(kind)) return c.json({ ok: false, error: "unknown kind" }, 400);
+
+  const body = await c.req.json<{ status?: string }>().catch(() => ({}) as { status?: string });
+  const status = body.status as MessageStatus | undefined;
+  if (!status || !MESSAGE_STATUSES.includes(status)) {
+    return c.json({ ok: false, error: "unknown status" }, 400);
+  }
+
+  const changed = await setMessageStatus(kind, id, status);
+  if (!changed) return c.json({ ok: false, error: "not found" }, 404);
+  return c.json({ ok: true, status });
+});
+
+api.delete("/messages/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ ok: false, error: "bad id" }, 400);
+
+  const kind = (c.req.query("kind") ?? "") as MessageKind;
+  if (!MESSAGE_KINDS.includes(kind)) return c.json({ ok: false, error: "unknown kind" }, 400);
+
+  const removed = await deleteMessage(kind, id);
+  if (!removed) return c.json({ ok: false, error: "not found" }, 404);
+  await recordEvent("info", "messages", `${kind} message #${id} deleted by the operator`);
+  return c.json({ ok: true });
+});
+
+/**
+ * Delete a selection in one go. Ids arrive in the body rather than the path — a dozen of them would
+ * not fit a URL — and the kind still names the single table they may come from, so a body can never
+ * reach across both.
+ */
+api.post("/messages/bulk-delete", async (c) => {
+  const kind = (c.req.query("kind") ?? "") as MessageKind;
+  if (!MESSAGE_KINDS.includes(kind)) return c.json({ ok: false, error: "unknown kind" }, 400);
+
+  const body = await c.req
+    .json<{ ids?: unknown }>()
+    .catch(() => ({}) as { ids?: unknown });
+  const ids = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+  if (ids.length === 0) return c.json({ ok: false, error: "no ids" }, 400);
+
+  const removed = await deleteMessages(kind, ids);
+  await recordEvent("info", "messages", `${removed} ${kind} message(s) deleted by the operator`);
+  return c.json({ ok: true, removed });
+});
+
+/** Empty one tab's archive: everything already archived, in one move. */
+api.post("/messages/empty-archive", async (c) => {
+  const kind = (c.req.query("kind") ?? "") as MessageKind;
+  if (!MESSAGE_KINDS.includes(kind)) return c.json({ ok: false, error: "unknown kind" }, 400);
+
+  const removed = await deleteArchived(kind);
+  await recordEvent("info", "messages", `${kind} archive emptied by the operator (${removed} message(s))`);
+  return c.json({ ok: true, removed });
 });

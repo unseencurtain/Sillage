@@ -10,6 +10,7 @@ import { Sync } from "@/pages/Sync";
 import { Products } from "@/pages/Products";
 import { Vendors } from "@/pages/Vendors";
 import { Orders } from "@/pages/Orders";
+import { Messages } from "@/pages/Messages";
 import { Secrets } from "@/pages/Secrets";
 import { Settings } from "@/pages/Settings";
 import { Shipping } from "@/pages/Shipping";
@@ -64,6 +65,7 @@ export function App() {
               <Route path="products" element={<Products />} />
               <Route path="vendors" element={<Vendors />} />
               <Route path="orders" element={<Orders />} />
+              <Route path="messages" element={<Messages />} />
               <Route path="shipping" element={<Shipping />} />
               <Route path="secrets" element={<Secrets />} />
               <Route path="settings" element={<Settings />} />

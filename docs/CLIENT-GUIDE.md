@@ -151,7 +151,8 @@ Left menu, top to bottom — the same words as the screen.
 
 ### Overview
 
-Health at a glance. Numbers refresh on their own.
+Health at a glance. The numbers update **after each sync** — they are counted once and reused until
+the next run, so they do not churn while you watch.
 
 | You see | Meaning |
 |---|---|
@@ -188,6 +189,8 @@ Search **SKU, name, or EAN**.
 
 Columns: **Photo**, **SKU**, **Name**, **Vendor**, **Stock**, **Shop**, **Cost**, **WP**.
 
+The list shows **ten products to a page**; use **Previous** / **Next** at the foot of the list.
+
 **Photo** opens the image the shop would print, in a new tab. No usable photo → **No photo** (or a
 link to the product page if one exists).
 
@@ -213,6 +216,21 @@ tiers / FX / VAT when those are set).
 
 Do not turn **Hide products without image** off shop-wide just to unhide one SKU. That would also
 show thousands of weak BeautyFort thumbs. Ask for a real photo on that EAN instead.
+
+### Messages
+
+Two tabs: **Contact** (the shop’s contact form) and **Withdrawal** (right-of-withdrawal notices).
+A badge shows how many are unread in each.
+
+- **Show** filters the list to All / Unread / Read / Archived.
+- Open a message in the list to read it on the right. Opening an unread one marks it read.
+- **Reply** opens your mail program. The dashboard does not send mail itself.
+- **Archive** keeps a message but moves it to Archived; **Delete** removes it for good.
+- Tick boxes to delete several at once, or **Empty archive** to clear everything already archived
+  under that tab.
+
+The list shows **25 messages to a page**; **Previous** / **Next** sit just under the list. **Refresh**
+checks for new messages without reloading the page.
 
 ### Vendors
 

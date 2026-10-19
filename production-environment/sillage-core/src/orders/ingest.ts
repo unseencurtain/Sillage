@@ -251,7 +251,35 @@ export function orderReference(wcOrderId: number, skuPrefix: string): string {
  * Split an order into vendor orders. Safe to call repeatedly: a vendor that already has a row is
  * left completely alone, because by then it may already have been submitted and paid for.
  */
+/**
+ * The tombstone behind the dashboard's delete button.
+ *
+ * A WooCommerce order that is still processing would be swept back in by `sweepDispatchableOrders`
+ * the moment its last dispatch row is gone, so deleting an order has to record that it was deleted
+ * on purpose. Set from `POST /api/orders/bulk` after the last row of that order is removed.
+ */
+export async function isOrderIngestIgnored(orderId: number): Promise<boolean> {
+  const rows = await query<RowDataPacket & { n: number }>(
+    `SELECT COUNT(*) AS n FROM ${sil("sil_order_ingest_ignore")} WHERE wc_order_id = ?`,
+    [orderId],
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}
+
+export async function ignoreOrderIngest(orderId: number, reason: string): Promise<void> {
+  await execute(
+    `INSERT INTO ${sil("sil_order_ingest_ignore")} (wc_order_id, reason) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE reason = VALUES(reason)`,
+    [orderId, reason],
+  );
+}
+
 export async function ingestOrder(orderId: number): Promise<IngestResult> {
+  if (await isOrderIngestIgnored(orderId)) {
+    log.info(`order ${orderId}: deleted in the dashboard, not importing`);
+    return { orderId, created: [], existing: [], unresolved: [] };
+  }
+
   const order = await readWooOrder(orderId);
   if (!order) throw new Error(`Order ${orderId} does not exist`);
 

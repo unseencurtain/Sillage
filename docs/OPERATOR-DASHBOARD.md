@@ -57,6 +57,7 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 | Products | `/products` | Catalogue search; Shop dropdown can pin **Keep hidden** |
 | Vendors | `/vendors` | BeautyFort + BTS editors; WPF parked notice |
 | Orders | `/orders` | Per-vendor order dispatch |
+| Messages | `/messages` | Storefront contact form + right-of-withdrawal notices |
 | Shipping | `/shipping` | Vendor cost cache per country, markup, free-shipping threshold, total-or-per-parcel display |
 | Secrets | `/secrets` | Vendor API credentials (set / clear; never echoed) |
 | Settings | `/settings` | Schedule, pricing, cart fee, order rails, billing |
@@ -77,7 +78,15 @@ WC order → HMAC webhook → ingest splits sil_vendor_orders (status=received)
 
 ## Overview
 
-Polls `GET /api/overview` every 15s.
+Reads `GET /api/overview` once and refreshes when the next sync finishes — no timer. The
+published / visible / hidden counts are an expensive join over `wp_posts`, postmeta and two
+`product_visibility` term scans, and they only change when a sync writes. The engine **precomputes**
+them (`loadCatalogueCounts` in `src/server/routes/api.ts`) and reuses the result until a run
+finishes: the cache key is the newest finished run, read fresh per request, so a cold cache or a
+new run recomputes once while every other request — any number of tabs, any poll rate — is a plain
+lookup. The page watches the newest `sil_sync_runs` row cheaply and invalidates the overview only
+when a *newer* finished run than `countsRunId` appears. `GET /api/sync/live-status` is polled once a
+minute only while a one-off cooldown is actually ticking.
 
 | UI | Meaning |
 |---|---|
@@ -153,7 +162,7 @@ the sync's ~2 GB heap trigger an OOM kill of Apache mid-run. Seeding is `POST /a
 | Search box | `GET /api/products?q=&page=` | Filters SKU / name / EAN |
 | Photo | same (`photo_url`) | Opens the displayed shop image in a new tab |
 | Shop dropdown | `PUT /api/products/:id/visibility` `{ hidden }` | `hidden: true` sets `sil_products.operator_hidden=1`, hides in Woo immediately, marks `needs_price_write`, kicks a fast rewrite. `hidden: false` clears the pin; rewrite applies image/stock rules again |
-| Pagination | same | 50 per page |
+| Pagination | same | 10 per page, fixed (not adjustable) |
 
 Retail price still changes only via Settings/Vendors. Do not delete the WooCommerce post — the next full write recreates it.
 
@@ -165,29 +174,57 @@ To show that SKU on the shop: add a real photo in `image_overrides.json` for the
 
 ---
 
+## Messages
+
+Two tabs — **Contact** (shop contact form) and **Withdrawal** (right-of-withdrawal notices) — with
+an unread badge each. A **Show** filter narrows to All / Unread / Read / Archived.
+
+| Control | API | Effect |
+|---|---|---|
+| Tab / filter / page | `GET /api/messages?kind=&status=&page=&limit=` | `kind` = `contact` \| `withdrawal`; `limit` defaults to 25 (clamped 1–100). Response carries `items`, `total`, unread `counts` for both tabs and `archived` per tab |
+| Open a row | — | Opening an unread message marks it read (same as a mail client) |
+| **Refresh** | `GET /api/messages` | Re-pulls the current view and both tab badges without a page reload |
+| Reply | `mailto:` | No send path in the dashboard |
+| Mark read / unread · Archive / Unarchive | `PUT /api/messages/:id?kind=` `{ status }` | `status` = `new` \| `read` \| `archived` |
+| **Delete** | `DELETE /api/messages/:id?kind=` | Permanent |
+| **Delete N** (ticked rows) | `POST /api/messages/bulk-delete?kind=` `{ ids }` | Permanent |
+| **Empty archive** | `POST /api/messages/empty-archive?kind=` | Deletes all archived rows under the tab; read/unread stay |
+
+**Pagination** sits at the foot of the message list (inside its box, so it stays in view while the
+list scrolls) and appears whenever the view holds any messages. Changing tab or filter resets to
+page 1, and deleting rows off the last page steps back a page so the list is never blank.
+
+---
+
 ## Orders
 
-Rows are **per-vendor** (`sil_vendor_orders`), not WooCommerce orders. Refresh every 10s.
+One row **per WooCommerce order** (the vendor legs live under it). Full narrative + invariants:
+**[`ORDERS.md`](ORDERS.md)**. Refresh every 10s.
 
-| UI label | API | Effect |
+| UI | API | Effect |
 |---|---|---|
-| Select row `#id` | `GET /api/orders/:id` | Detail pane |
+| Open order row | `GET /api/orders` | One row per WC order, grouped; `Vendors` = BF/BTS chips, `Status` = per-leg badges |
+| Vendor tabs (mixed order) | `GET /api/orders/:id` | One tab per vendor leg; switching refetches that leg |
 | Approve | `POST .../approve` | Coverage + ceiling rails; `received`→`approved` (force) |
-| Dry-run | `POST .../dispatch` `{live:false}` | Full path **without** spending money |
-| Live (+ confirm) | `{live:true}` | **Spends real money.** Confirm required |
+| Dry-run | `POST .../dispatch` `{live:false}` | Full path **without** spending money (ignores `orders_dry_run`) |
+| Live (+ confirm) | `{live:true}` | **Spends real money.** Confirm required (ignores `orders_dry_run`) |
 | Open in WooCommerce | link | HPOS edit URL |
-| Tracking stage chips | `POST .../status` | Manual stage. After live submit, 409 until `confirm:true` |
+| Progress stepper | — | Read-only: received→…→delivered |
+| Manual override (select) | `POST .../status` | Correct a stuck state / reopen. After live submit, 409 until `confirm:true` |
 | Save delivery | `PUT .../address` `{delivery}` | Vendor ship-to; WC unchanged |
 | Reset from WooCommerce | `{resetDeliveryFromWoo:true}` | Re-reads HPOS address |
 | Save billing | `{billing}` | Invoice address for BeautyFort |
 | Use saved company billing | `{useCompanyBilling:true}` | Fills from Settings BF/BTS profiles |
 | Tracking / Event log | detail payload | Read-only |
+| Mark N done (bulk) | `POST /api/orders/bulk` `{action:"done"}` | Closes orders as `cancelled` — reversible, no spend, never touches live-submitted legs |
+| Delete (bulk) | `{action:"delete", password}` | Whole order + legs + items + events + tracking; password-gated; writes an ingest-ignore tombstone so it isn't re-imported |
 
 **Editable window:** `received` \| `approved` \| `needs_attention` \| `submitted` (submitted only if
 still dry-run). Live submitted addresses are locked.
 
-**Auto path:** every cron tick, if `orders_auto_dispatch=1`, due rows dispatch using
-**`orders_dry_run`**. If auto is off, tick still promotes `received`→`approved` when rails allow.
+**Auto path:** every cron tick, if `orders_auto_dispatch=1`, every due leg (both vendors) dispatches
+using **`orders_dry_run`**. If auto is off, the tick still promotes `received`→`approved` when rails
+allow — which is why a new order sits at `approved` until a human (or auto-dispatch) sends it.
 
 ---
 

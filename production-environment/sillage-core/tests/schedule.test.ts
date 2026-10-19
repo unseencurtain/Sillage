@@ -40,6 +40,10 @@ const settings = (patch: Partial<GlobalSettings> = {}): GlobalSettings => ({
   ordersDailyCapEur: 2000,
   ordersPollMinutes: 15,
   ordersNotifyCustomer: true,
+  contactRecipients: "",
+  contactTurnstileSiteKey: "",
+  mailUsername: "",
+  mailPassword: "",
   ...patch,
 });
 

@@ -1,5 +1,6 @@
 /**
- * Operator-managed vendor API secrets.
+ * Operator-managed secrets: the vendor API credentials, plus the Cloudflare Turnstile secret the
+ * storefront forms can use.
  *
  * Compose injects the main `.env` once at container start. Writing that file from inside
  * the container does not update `process.env`. Instead we persist allow-listed keys to a
@@ -11,13 +12,17 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { env, refreshVendorSecretsFromProcessEnv } from "./env.ts";
+import { env, refreshManagedSecretsFromProcessEnv } from "./env.ts";
 
 export const MANAGED_SECRETS = [
   { key: "BEAUTYFORT_USER", label: "BeautyFort user" },
   { key: "BEAUTYFORT_SECRET", label: "BeautyFort secret" },
   { key: "BTS_JWT_TOKEN", label: "BTS JWT token" },
-] as const;
+  // The *secret* half of Cloudflare Turnstile. The matching site key is a public Setting, not a
+  // secret (Settings → Storefront messages); set both or neither. Optional: with it empty no
+  // challenge is asked for, and the honeypot, rate limit and filters stand alone.
+  { key: "TURNSTILE_SECRET", label: "Cloudflare Turnstile secret key", optional: true },
+] as const satisfies readonly { key: string; label: string; optional?: boolean }[];
 
 export type ManagedSecretKey = (typeof MANAGED_SECRETS)[number]["key"];
 
@@ -32,10 +37,17 @@ export interface SecretStatus {
   source: SecretSource;
   /** Present only when set — never the real value. */
   masked: string;
+  /** Optional values never gate "ready": the shop syncs and sells without them. */
+  optional: boolean;
 }
 
 function isManagedKey(key: string): key is ManagedSecretKey {
   return MANAGED_KEY_SET.has(key);
+}
+
+function isOptional(key: ManagedSecretKey): boolean {
+  const entry = MANAGED_SECRETS.find((s) => s.key === key);
+  return Boolean(entry) && (entry as { optional?: boolean }).optional === true;
 }
 
 /** Parse a minimal dotenv file (KEY=VALUE, optional quotes, # comments). */
@@ -96,7 +108,7 @@ function writeOverlayMap(map: Record<string, string>): void {
 export function loadSecretsOverlay(): { path: string; applied: number } {
   const path = env.secretsFile;
   if (!existsSync(path)) {
-    refreshVendorSecretsFromProcessEnv();
+    refreshManagedSecretsFromProcessEnv();
     return { path, applied: 0 };
   }
   const map = readOverlayMap();
@@ -106,7 +118,7 @@ export function loadSecretsOverlay(): { path: string; applied: number } {
     process.env[key] = map[key]!;
     applied += 1;
   }
-  refreshVendorSecretsFromProcessEnv();
+  refreshManagedSecretsFromProcessEnv();
   return { path, applied };
 }
 
@@ -124,6 +136,7 @@ export function listSecretStatus(): { path: string; secrets: SecretStatus[] } {
       set: inEnv || inOverlay,
       source,
       masked: inEnv || inOverlay ? "••••••••" : "",
+      optional: isOptional(key),
     };
   });
   return { path: env.secretsFile, secrets };
@@ -138,7 +151,7 @@ export function setSecret(key: string, value: string): SecretStatus {
   map[key] = trimmed;
   writeOverlayMap(map);
   process.env[key] = trimmed;
-  refreshVendorSecretsFromProcessEnv();
+  refreshManagedSecretsFromProcessEnv();
 
   return (
     listSecretStatus().secrets.find((s) => s.key === key) ?? {
@@ -147,6 +160,7 @@ export function setSecret(key: string, value: string): SecretStatus {
       set: true,
       source: "overlay",
       masked: "••••••••",
+      optional: isOptional(key),
     }
   );
 }
@@ -158,7 +172,7 @@ export function clearSecret(key: string): SecretStatus {
   delete map[key];
   writeOverlayMap(map);
   delete process.env[key];
-  refreshVendorSecretsFromProcessEnv();
+  refreshManagedSecretsFromProcessEnv();
 
   return (
     listSecretStatus().secrets.find((s) => s.key === key) ?? {
@@ -167,6 +181,7 @@ export function clearSecret(key: string): SecretStatus {
       set: false,
       source: "unset",
       masked: "",
+      optional: isOptional(key),
     }
   );
 }

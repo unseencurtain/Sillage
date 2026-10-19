@@ -1,8 +1,9 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api } from "@/lib/api";
+import { api, type SyncRun } from "@/lib/api";
 import { fetchedLabel } from "@/lib/syncRunLabels";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -15,6 +16,11 @@ function isRunActive(run: { status: string; finished_at?: string | null } | null
   return run.finished_at == null || run.finished_at === "";
 }
 
+function isRunFinished(run: SyncRun) {
+  if (run.finished_at) return true;
+  return ["success", "partial", "error"].includes(run.status);
+}
+
 export function Overview() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -22,16 +28,45 @@ export function Overview() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,
-    refetchInterval: 15_000,
+    // No timer. The published / visible / hidden counts are precomputed on the engine and only move
+    // when a sync writes, so re-asking on a 15s poll (per open tab) just spent the VPS's CPU on
+    // numbers that had not changed. The run watcher below pulls the new value in once a sync ends.
   });
 
   const live = useQuery({
     queryKey: ["live-status"],
     queryFn: api.liveStatus,
-    refetchInterval: 15_000,
+    // Only the one-off cooldown countdown needs to tick. When the schedule owns sync, or the live
+    // gate is open, the value is static and polling it would buy nothing.
+    refetchInterval: (query) => {
+      const l = query.state.data;
+      return l && !l.allow && !l.syncEnabled ? 60_000 : false;
+    },
   });
 
-  const syncRunning = isRunActive(data?.lastSync);
+  // Cheap companion to the (now precomputed) overview: one row, so asking once a minute costs
+  // nothing next to the aggregate it replaced. Its only job is to notice a sync finishing, and the
+  // effect below refreshes the counts then — so the page shows the new number once per sync, not
+  // once per tick.
+  const latest = useQuery({
+    queryKey: ["sync-runs", 1],
+    queryFn: () => api.syncRuns(1),
+    refetchInterval: 60_000,
+  });
+
+  const newestRun = latest.data?.runs?.[0];
+  useEffect(() => {
+    // `countsRunId` is the finished run the engine's precomputed counts reflect, so this fires only
+    // when a newer run has landed — not on every poll, and not while one is still running. Bail when
+    // the engine did not send it, so an old server cannot send the UI into a refetch loop.
+    if (!data || !newestRun || typeof data.countsRunId !== "number") return;
+    if (!isRunFinished(newestRun)) return;
+    if (newestRun.id <= data.countsRunId) return;
+    void qc.invalidateQueries({ queryKey: ["overview"] });
+    void qc.invalidateQueries({ queryKey: ["live-status"] });
+  }, [data, newestRun, qc]);
+
+  const syncRunning = isRunActive(newestRun) || isRunActive(data?.lastSync);
   const scheduleOn = Boolean(data?.settings.syncEnabled);
   const onCooldown = Boolean(live.data && !live.data.allow);
   const cooldownMin = live.data?.retryInMinutes ?? 0;

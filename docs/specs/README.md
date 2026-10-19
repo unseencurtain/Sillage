@@ -46,6 +46,12 @@ Read the S3 spec in full before starting any of it. It carries the hazards and t
 are still open, and it is written to be followed without the context of the sessions that produced
 Stage 3.
 
+## Stage 4
+
+| id | Task | Files | Done when |
+|---|---|---|---|
+| S4-tracking-customer | [Deep spec](S4-tracking-customer.md) — tracking in the account order detail and the tracking email, labelled by warehouse (Blossom / Fern) | `plugins/sillage-tracking/`, `react_store/frontend/src/features/{account,content}/`, `src/locales/*` | A mixed order shows both warehouses' parcels in the account and in the email; the public `/track` page labels each parcel with its warehouse |
+
 ## Conventions
 
 - TypeScript strict. No ORM, no query builder — parameterized SQL through `mysql2/promise`.

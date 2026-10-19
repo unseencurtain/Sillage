@@ -255,7 +255,7 @@ export function Settings() {
           <Field label="Reply-to address" help="Where customer replies go. Leave empty to use the sender address.">
             <input type="email" className={inputClass} value={form.identity_reply_to ?? ""} disabled={busy} onChange={(e) => set("identity_reply_to", e.target.value)} />
           </Field>
-          <Field label="Mail login (SMTP username)" help="The mailbox the sender logs in with. The password stays in the Purelymail plugin and is not changed here.">
+          <Field label="Mail login (SMTP username)" help="The mailbox WordPress sends through, for its Purelymail plugin. The engine's own sender is the mailbox under Email sending below.">
             <input type="email" className={inputClass} value={form.identity_smtp_username ?? ""} disabled={busy} onChange={(e) => set("identity_smtp_username", e.target.value)} />
           </Field>
           <Field label="Admin and support address" help="Receives WordPress admin mail, stock alerts and POS notices.">
@@ -715,6 +715,68 @@ export function Settings() {
               onChange={(v) => setBool("orders_notify_customer", v)}
             />
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Storefront messages"
+        help="Where the shop's Contact and Right-of-Withdrawal forms are answered. Submissions are stored in the dashboard's Messages tab; this is who is told a new one arrived."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Notification recipients"
+            help="One address, or several separated by commas. Every new Contact or Withdrawal message is emailed here. Leave empty to use the admin and support address above."
+          >
+            <input
+              className={inputClass}
+              placeholder="orders@example.com, support@example.com"
+              value={form.contact_recipients ?? ""}
+              disabled={busy}
+              onChange={(e) => set("contact_recipients", e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Turnstile site key"
+            help="Optional. Add a Cloudflare Turnstile site key here and its matching secret on the Secrets page to put a bot challenge in front of both forms. Leaving either empty turns the challenge off; the honeypot, the rate limit and the spam filter always run."
+          >
+            <input
+              className={inputClass}
+              placeholder="0x4AAAAAAA…"
+              value={form.contact_turnstile_site_key ?? ""}
+              disabled={busy}
+              onChange={(e) => set("contact_turnstile_site_key", e.target.value)}
+            />
+          </Field>
+        </div>
+      </Section>
+
+      <Section
+        title="Email sending"
+        help="The mailbox the engine sends storefront form notifications with, through Purelymail over implicit TLS (smtp.purelymail.com, port 465) — no host or port to set."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Purelymail mailbox" help="The full address, e.g. hello@prinscosmetic.eu.">
+            <input
+              type="email"
+              className={inputClass}
+              placeholder="hello@prinscosmetic.eu"
+              value={form.mail_username ?? ""}
+              disabled={busy}
+              onChange={(e) => set("mail_username", e.target.value)}
+            />
+          </Field>
+          <Field label="Purelymail password" help="The mailbox password, or an App Password if two-factor is on.">
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              className={inputClass}
+              placeholder="mailbox password"
+              value={form.mail_password ?? ""}
+              disabled={busy}
+              onChange={(e) => set("mail_password", e.target.value)}
+            />
+          </Field>
         </div>
       </Section>
 

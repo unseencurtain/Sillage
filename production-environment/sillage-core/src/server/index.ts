@@ -16,6 +16,7 @@ import { loadSettings } from "../db/settings.ts";
 import { logger, setLogLevel } from "../lib/log.ts";
 import { api } from "./routes/api.ts";
 import { auth } from "./routes/auth.ts";
+import { forms } from "./routes/forms.ts";
 import { webhooks } from "./routes/webhooks.ts";
 
 setLogLevel(env.logLevel);
@@ -44,14 +45,32 @@ app.get("/health", async (c) => {
 
 app.route("/api/webhooks", webhooks);
 app.route("/api/auth", auth);
+// Public storefront forms. Mounted before the session-guarded `/api` so `requireSession` never
+// reaches them; see src/server/routes/forms.ts.
+app.route("/api/public", forms);
 app.route("/api", api);
 
 const distDir = join(env.rootDir, "web/dist");
 if (existsSync(distDir)) {
+  // Cache policy for the two kinds of file. The bundle carries a content hash, so it can be kept
+  // forever; the shell must not be, or a browser that already has it keeps loading the previous
+  // bundle after a deploy — which reads as "the fix never shipped" long after it did.
+  app.use("/*", async (c, next) => {
+    const cache = c.req.path.startsWith("/assets/")
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
+    c.header("Cache-Control", cache);
+    await next();
+    c.res.headers.set("Cache-Control", cache);
+  });
   app.use("/*", serveStatic({ root: distDir }));
   app.get("*", async (c) => {
     const file = Bun.file(join(distDir, "index.html"));
-    if (await file.exists()) return new Response(file, { headers: { "Content-Type": "text/html" } });
+    if (await file.exists()) {
+      return new Response(file, {
+        headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
+      });
+    }
     return c.json({ ok: false, error: "dashboard not built" }, 404);
   });
 } else {

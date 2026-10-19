@@ -129,6 +129,23 @@ export interface GlobalSettings {
   ordersDailyCapEur: number;
   ordersPollMinutes: number;
   ordersNotifyCustomer: boolean;
+  /** Comma-separated addresses that receive a Contact / Withdrawal notification. Empty = fall back
+   * to the shop identity's support address, then its admin address. */
+  contactRecipients: string;
+  /**
+   * Public Cloudflare Turnstile site key for the storefront forms. Not a secret — it ships to the
+   * browser through `GET /api/public/forms` — and empty simply means the widget is not shown. The
+   * matching secret (`TURNSTILE_SECRET`) lives on the Secrets page; set both or neither.
+   */
+  contactTurnstileSiteKey: string;
+  /**
+   * The mailbox and password the engine sends storefront notifications with, over Purelymail's
+   * implicit-TLS endpoint (smtp.purelymail.com:465). Both are ordinary settings, edited on
+   * Settings → Email sending: the mailbox pre-fills and the password round-trips like any other
+   * value. With either empty the forms still store every message, they just do not email.
+   */
+  mailUsername: string;
+  mailPassword: string;
 }
 
 /** MariaDB returns JSON columns as either a string or a parsed value depending on driver mode. */
@@ -240,6 +257,10 @@ export async function loadSettings(): Promise<GlobalSettings> {
     ordersDailyCapEur: num("orders_daily_cap_eur", 2000),
     ordersPollMinutes: num("orders_poll_minutes", 15),
     ordersNotifyCustomer: flag("orders_notify_customer", true),
+    contactRecipients: (map.get("contact_recipients") ?? "").trim(),
+    contactTurnstileSiteKey: (map.get("contact_turnstile_site_key") ?? "").trim(),
+    mailUsername: (map.get("mail_username") ?? "").trim(),
+    mailPassword: (map.get("mail_password") ?? "").trim(),
   };
 }
 

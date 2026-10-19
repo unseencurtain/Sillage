@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import {
   api,
   ApiError,
@@ -8,12 +8,14 @@ import {
   emptyCompanyBilling,
   type CompanyBillingAddress,
   type OrderAddress,
+  type OrderFilter,
+  type OrderRow,
 } from "@/lib/api";
 import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
-import { cn, eur, useFmtDate } from "@/lib/utils";
+import { cn, eur, useFmtDate, useRowLimit } from "@/lib/utils";
 
 const ADDRESS_FIELDS: Array<{ key: keyof OrderAddress; label: string; wide?: boolean }> = [
   { key: "firstName", label: "First name" },
@@ -38,6 +40,20 @@ const BILLING_FIELDS: Array<{ key: keyof CompanyBillingAddress; label: string; w
 const STAGES = ["received", "approved", "submitted", "confirmed", "dispatched", "delivered"] as const;
 const TERMINAL = new Set(["failed", "needs_attention", "cancelled"]);
 
+const ORDER_FILTERS: Array<{ key: OrderFilter; label: string; count: "all" | "todo" | "done" }> = [
+  { key: "all", label: "All", count: "all" },
+  { key: "todo", label: "To do", count: "todo" },
+  { key: "done", label: "Done", count: "done" },
+];
+
+/** A pending bulk close or delete. */
+type BulkTarget = {
+  action: "done" | "delete";
+  wc_order_ids?: number[];
+  filter?: OrderFilter;
+  label: string;
+};
+
 function formatAddress(a: OrderAddress | null | undefined): string {
   if (!a) return "—";
   const lines = [
@@ -56,15 +72,20 @@ export function Orders() {
   const { toast } = useToast();
   const fmtDate = useFmtDate();
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useRowLimit("sillage.rows.orders");
+  const [filter, setFilter] = useState<OrderFilter>("all");
   const [selected, setSelected] = useState<number | null>(null);
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState<BulkTarget | null>(null);
+  const [bulkPassword, setBulkPassword] = useState("");
   const [confirmLiveId, setConfirmLiveId] = useState<number | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
   const [delivery, setDelivery] = useState<OrderAddress>(emptyAddress());
   const [billing, setBilling] = useState<CompanyBillingAddress>(emptyCompanyBilling());
 
   const { data, isLoading } = useQuery({
-    queryKey: ["orders", page],
-    queryFn: () => api.orders(page),
+    queryKey: ["orders", page, limit, filter],
+    queryFn: () => api.orders(page, undefined, limit, filter),
     refetchInterval: 10_000,
   });
 
@@ -174,6 +195,34 @@ export function Orders() {
     },
   });
 
+  const bulk = useMutation({
+    mutationFn: (vars: { target: BulkTarget; password?: string }) =>
+      api.bulkOrders({
+        action: vars.target.action,
+        wc_order_ids: vars.target.wc_order_ids,
+        filter: vars.target.filter,
+        password: vars.password,
+      }),
+    onSuccess: (res, vars) => {
+      const t = vars.target;
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order"] });
+      setBulkTarget(null);
+      setBulkPassword("");
+      setChecked(new Set());
+      if (t.action === "delete") setSelected(null);
+      const verb = t.action === "done" ? "Closed" : "Deleted";
+      const parts = [`${verb} ${res.orders} order${res.orders === 1 ? "" : "s"}`];
+      if (res.skipped > 0) parts.push(`${res.skipped} leg(s) left alone (already at a vendor)`);
+      if (res.remaining > 0) parts.push(`${res.remaining} still to do — run it again`);
+      if (res.ignored > 0) {
+        parts.push(`${res.ignored} order${res.ignored === 1 ? "" : "s"} will not be imported again`);
+      }
+      toast(parts.join(" · "), res.orders === 0 ? "error" : "ok");
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+
   const pendingAction =
     approve.isPending || dispatch.isPending ? (approve.variables ?? dispatch.variables?.id) : null;
 
@@ -188,18 +237,109 @@ export function Orders() {
       ? true
       : settingsQ.data.orders_dry_run === "1" || settingsQ.data.orders_dry_run === "true";
 
+  const todoCount = data?.counts?.todo ?? 0;
+  const pageIds = (data?.orders ?? []).map((o) => o.wc_order_id);
+  const allOnPageChecked = pageIds.length > 0 && pageIds.every((id) => checked.has(id));
+
+  const toggleRow = (id: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const openOrder = (o: OrderRow) => {
+    setSelected(o.vendors[0]?.id ?? null);
+    setConfirmLiveId(null);
+  };
+
+  // Closing an order is reversible and spends nothing; deleting is not, so it asks for the password.
+  const bulkConfirm = bulkTarget ? (
+    bulkTarget.action === "done" ? (
+      <ConfirmPanel
+        title={`Close ${bulkTarget.label}?`}
+        description="They are marked cancelled and leave the To do list. Nothing is sent to a vendor, and a closed order can be reopened from its stage buttons."
+        confirmLabel="Close"
+        pending={bulk.isPending}
+        onCancel={() => setBulkTarget(null)}
+        onConfirm={() => bulk.mutate({ target: bulkTarget })}
+      />
+    ) : (
+      <div className="rounded-lg border border-danger/40 bg-red-50/80 p-4">
+        <div className="flex gap-2">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-danger" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-ink">Delete {bulkTarget.label}?</div>
+            <p className="mt-1 text-sm text-muted">
+              Removes the order and every vendor leg, item, event and tracking record from Sillage.
+              The WooCommerce order is not touched, and it will not be imported again.
+            </p>
+            <input
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              placeholder="Your dashboard password"
+              value={bulkPassword}
+              onChange={(e) => setBulkPassword(e.target.value)}
+              className="mt-3 w-full max-w-xs rounded-lg border border-line px-2.5 py-1.5 text-sm focus:border-danger focus:outline-none focus:ring-1 focus:ring-danger/30"
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-line bg-panel px-3 py-1.5 text-sm hover:bg-canvas disabled:opacity-50"
+                disabled={bulk.isPending}
+                onClick={() => {
+                  setBulkTarget(null);
+                  setBulkPassword("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-danger px-3 py-1.5 text-sm text-white disabled:opacity-50"
+                disabled={bulk.isPending || bulkPassword.length === 0}
+                onClick={() => bulk.mutate({ target: bulkTarget, password: bulkPassword })}
+              >
+                {bulk.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  ) : null;
+
   const detailData = detail.data;
   const order = detailData?.order;
   const showLiveConfirm = confirmLiveId !== null && confirmLiveId === selected;
   const currentStatus = String(order?.status ?? "");
   const stageIndex = STAGES.indexOf(currentStatus as (typeof STAGES)[number]);
 
+  // Vendor tabs: the open leg plus its siblings of the same WooCommerce order.
+  const detailTabs =
+    detailData && order
+      ? [
+          {
+            id: Number(order.id),
+            vendor: String(order.vendor),
+            vendor_prefix: String(order.vendor_prefix),
+            status: String(order.status),
+          },
+          ...(detailData.siblings ?? []),
+        ].sort((a, b) => a.id - b.id)
+      : [];
+  const selectedWcOrder = detailData?.order?.wc_order_id ?? null;
+
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
         <p className="text-sm text-muted">
-          Per-vendor dispatch rows · Dry-run never spends. Live always asks for confirmation.
+          One row per WooCommerce order · the vendor split lives under Vendors and in the panel ·
+          Dry-run never spends, Live always asks for confirmation.
           {data ? ` · ${data.total.toLocaleString()} total` : ""}
         </p>
       </header>
@@ -208,16 +348,108 @@ export function Orders() {
         <div className="rounded-xl border-2 border-danger bg-red-50 px-4 py-4 text-sm text-danger">
           <div className="text-base font-semibold">LIVE order mode (Settings dry-run is OFF)</div>
           <p className="mt-1">
-            Auto-dispatch and CLI can spend real money. The Live button on each row also spends money
-            when confirmed. Turn Orders dry-run back on in Settings unless you intend live spend.
+            Auto-dispatch and CLI can spend real money. The Live button on each vendor leg also spends
+            money when confirmed. Turn Orders dry-run back on in Settings unless you intend live spend.
           </p>
         </div>
-      ) : (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-ok">
-          Settings dry-run is on for auto-dispatch/CLI. Row buttons still choose explicitly:{" "}
-          <strong>Dry-run</strong> never spends; <strong>Live</strong> spends after confirm.
-        </div>
-      )}
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {ORDER_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            title={
+              f.key === "todo"
+                ? "At least one vendor not placed yet (a dry-run submit is a rehearsal, so it stays here)"
+                : f.key === "done"
+                  ? "Every vendor placed or closed"
+                  : "Every order"
+            }
+            onClick={() => {
+              setFilter(f.key);
+              setPage(1);
+              setChecked(new Set());
+            }}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm font-medium transition",
+              filter === f.key
+                ? "border-accent bg-teal-50 text-accent"
+                : "border-line bg-panel text-muted hover:text-ink",
+            )}
+          >
+            {f.label}
+            {data?.counts ? (
+              <span
+                className={cn(
+                  "ml-1.5 tabular-nums",
+                  filter === f.key ? "text-accent/70" : "text-muted/70",
+                )}
+              >
+                {data.counts[f.count]}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm">
+        <span className="text-muted">
+          {checked.size > 0 ? `${checked.size} selected` : `${todoCount} to do`}
+        </span>
+        <button
+          type="button"
+          disabled={bulk.isPending || (checked.size === 0 && todoCount === 0)}
+          onClick={() =>
+            setBulkTarget(
+              checked.size > 0
+                ? {
+                    action: "done",
+                    wc_order_ids: [...checked],
+                    label: `${checked.size} selected order${checked.size === 1 ? "" : "s"}`,
+                  }
+                : {
+                    action: "done",
+                    filter: "todo",
+                    label: `all ${todoCount} to do order${todoCount === 1 ? "" : "s"}`,
+                  },
+            )
+          }
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink hover:opacity-90 disabled:opacity-50"
+        >
+          Mark {checked.size > 0 ? checked.size : todoCount} done
+        </button>
+        <button
+          type="button"
+          disabled={bulk.isPending || checked.size === 0}
+          title={
+            checked.size === 0
+              ? "Tick the orders you want to delete first"
+              : "Deletes the ticked orders — asks for your dashboard password"
+          }
+          onClick={() =>
+            setBulkTarget({
+              action: "delete",
+              wc_order_ids: [...checked],
+              label: `${checked.size} selected order${checked.size === 1 ? "" : "s"}`,
+            })
+          }
+          className="rounded-lg border border-danger/40 px-3 py-1.5 text-xs font-medium text-danger hover:bg-red-50 disabled:opacity-40"
+        >
+          Delete
+        </button>
+        {checked.size > 0 ? (
+          <button
+            type="button"
+            className="text-xs text-muted hover:text-ink"
+            onClick={() => setChecked(new Set())}
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+
+      {bulkTarget ? bulkConfirm : null}
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
         <div className="space-y-3">
@@ -225,92 +457,107 @@ export function Orders() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-canvas/70 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <th className="px-3 py-3">ID</th>
+                  <th className="w-8 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Select every order on this page"
+                      className="h-3.5 w-3.5 accent-teal-600"
+                      checked={allOnPageChecked}
+                      onChange={(e) => {
+                        setChecked((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) pageIds.forEach((id) => next.add(id));
+                          else pageIds.forEach((id) => next.delete(id));
+                          return next;
+                        });
+                      }}
+                    />
+                  </th>
                   <th className="px-3 py-3">WC</th>
-                  <th className="px-3 py-3">Vendor</th>
+                  <th className="px-3 py-3">Vendors</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">Cost</th>
-                  <th className="px-3 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-6 text-muted">
+                    <td colSpan={5} className="px-3 py-6 text-muted">
                       Loading…
                     </td>
                   </tr>
                 ) : (data?.orders ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-6 text-muted">
-                      No vendor orders yet
+                    <td colSpan={5} className="px-3 py-6 text-muted">
+                      No orders yet
                     </td>
                   </tr>
                 ) : (
-                  (data?.orders ?? []).map((o) => {
-                    const rowBusy = pendingAction === o.id;
-                    return (
-                      <tr
-                        key={o.id}
-                        className={cn(
-                          "border-b border-line/70 last:border-0 transition-colors",
-                          selected === o.id ? "bg-teal-50/60" : "hover:bg-canvas/50",
-                        )}
-                      >
-                        <td className="px-3 py-3 font-mono">
-                          <button
-                            type="button"
-                            className="font-medium underline-offset-2 hover:text-accent hover:underline"
-                            onClick={() => {
-                              setSelected(o.id);
-                              setConfirmLiveId(null);
-                            }}
-                          >
-                            #{o.id}
-                          </button>
-                        </td>
-                        <td className="px-3 py-3 font-mono tabular-nums">{o.wc_order_id}</td>
-                        <td className="px-3 py-3">
-                          <span className="font-mono text-xs">{o.vendor}</span>
-                          {o.dry_run ? (
-                            <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-muted">
+                  (data?.orders ?? []).map((o) => (
+                    <tr
+                      key={o.wc_order_id}
+                      className={cn(
+                        "cursor-pointer border-b border-line/70 last:border-0 transition-colors",
+                        o.order_done === 0 && "border-l-2 border-l-amber-400",
+                        selectedWcOrder === o.wc_order_id ? "bg-teal-50/60" : "hover:bg-canvas/50",
+                      )}
+                      onClick={() => openOrder(o)}
+                    >
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select order ${o.wc_order_id}`}
+                          className="h-3.5 w-3.5 accent-teal-600"
+                          checked={checked.has(o.wc_order_id)}
+                          onChange={() => toggleRow(o.wc_order_id)}
+                        />
+                      </td>
+                      <td className="px-3 py-3 font-mono tabular-nums">
+                        <span className="font-medium">#{o.wc_order_id}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {o.vendors.map((v) => (
+                            <span
+                              key={v.id}
+                              title={v.vendor}
+                              className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700"
+                            >
+                              {v.vendor_prefix}
+                            </span>
+                          ))}
+                          {o.any_dry_run ? (
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-muted">
                               dry
                             </span>
                           ) : null}
-                        </td>
-                        <td className="px-3 py-3">
-                          <StatusBadge status={o.status} />
-                        </td>
-                        <td className="px-3 py-3 font-mono tabular-nums">{eur(o.items_cost)}</td>
-                        <td className="px-3 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            <ActionBtn
-                              label="Approve"
-                              disabled={rowBusy}
-                              pending={approve.isPending && approve.variables === o.id}
-                              onClick={() => approve.mutate(o.id)}
-                            />
-                            <ActionBtn
-                              label="Dry-run"
-                              disabled={rowBusy}
-                              pending={
-                                dispatch.isPending &&
-                                dispatch.variables?.id === o.id &&
-                                !dispatch.variables.live
-                              }
-                              onClick={() => dispatch.mutate({ id: o.id, live: false })}
-                            />
-                            <ActionBtn
-                              label="Live"
-                              danger
-                              disabled={rowBusy}
-                              onClick={() => startLiveConfirm(o.id)}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {o.order_done === 0 ? (
+                            <span
+                              className="whitespace-nowrap rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+                              title="Still to do — at least one vendor not placed"
+                            >
+                              to do
+                            </span>
+                          ) : null}
+                          {o.vendors.map((v) => (
+                            <span key={v.id} className="inline-flex items-center gap-1">
+                              {o.vendors.length > 1 ? (
+                                <span className="font-mono text-[10px] text-muted">
+                                  {v.vendor_prefix}
+                                </span>
+                              ) : null}
+                              <StatusBadge status={v.status} />
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 font-mono tabular-nums">{eur(o.items_cost)}</td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
@@ -321,6 +568,10 @@ export function Orders() {
               limit={data.limit}
               total={data.total}
               onPageChange={setPage}
+              onLimitChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
             />
           ) : null}
         </div>
@@ -340,13 +591,40 @@ export function Orders() {
           ) : (
             <>
               <div className="sticky top-0 z-10 border-b border-line bg-panel/95 px-5 py-4 backdrop-blur-sm">
+                {detailTabs.length > 1 ? (
+                  <div className="mb-3 flex flex-wrap gap-1 border-b border-line pb-3">
+                    {detailTabs.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        title={t.vendor}
+                        onClick={() => {
+                          setSelected(t.id);
+                          setConfirmLiveId(null);
+                        }}
+                        className={cn(
+                          "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                          t.id === selected
+                            ? "border-accent bg-teal-50 text-accent"
+                            : "border-line bg-panel text-muted hover:text-ink",
+                        )}
+                      >
+                        {t.vendor_prefix}
+                        <span className="ml-1.5 font-normal text-muted">{t.vendor}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="font-mono text-xs text-muted">{String(order.our_reference)}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <span className="text-lg font-semibold tabular-nums">#{order.id}</span>
+                      <span className="text-lg font-semibold tabular-nums">#{order.wc_order_id}</span>
                       <StatusBadge status={String(order.status)} />
-                      <span className="text-xs text-muted">{String(order.vendor)}</span>
+                      <span className="text-xs text-muted">
+                        {String(order.vendor)} · leg #{order.id}
+                      </span>
                     </div>
                     <div className="mt-1 font-mono text-xs tabular-nums text-muted">
                       cost {eur(String(order.items_cost))} · revenue {eur(String(order.revenue))}
@@ -421,30 +699,15 @@ export function Orders() {
               <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
                 <section>
                   <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-                    Tracking stage
+                    Progress
                   </h3>
-                  {TERMINAL.has(currentStatus) ? (
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={currentStatus} />
-                      <span className="text-xs text-muted">Terminal status — pick a stage below to reopen</span>
-                    </div>
-                  ) : null}
                   <div className="mt-2 flex items-center gap-0 overflow-x-auto pb-1">
                     {STAGES.map((stage, i) => {
                       const filled = stageIndex >= 0 && i <= stageIndex;
                       const current = stage === currentStatus;
                       return (
                         <div key={stage} className="flex min-w-0 flex-1 items-center">
-                          <button
-                            type="button"
-                            title={`Set status to ${stage}`}
-                            disabled={setStatus.isPending}
-                            onClick={() => setStatus.mutate({ status: stage })}
-                            className={cn(
-                              "flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1 text-center disabled:opacity-50",
-                              current ? "bg-teal-50" : "hover:bg-canvas/60",
-                            )}
-                          >
+                          <div className="flex w-full flex-col items-center gap-1 px-1 py-1 text-center">
                             <span
                               className={cn(
                                 "h-2.5 w-2.5 rounded-full border-2",
@@ -459,7 +722,7 @@ export function Orders() {
                             >
                               {stage}
                             </span>
-                          </button>
+                          </div>
                           {i < STAGES.length - 1 ? (
                             <div
                               className={cn(
@@ -471,6 +734,39 @@ export function Orders() {
                         </div>
                       );
                     })}
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    This advances on its own: auto-dispatch sends it to{" "}
+                    <span className="font-mono">submitted</span>, then the tracking poller walks it
+                    to <span className="font-mono">delivered</span> as the vendor ships. The override
+                    below is only for correcting a stuck state.
+                  </p>
+                  {TERMINAL.has(currentStatus) ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <StatusBadge status={currentStatus} />
+                      <span className="text-xs text-muted">Terminal — use the override to reopen</span>
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex items-center gap-2">
+                    <label htmlFor="status-override" className="text-xs text-muted">
+                      Manual override
+                    </label>
+                    <select
+                      id="status-override"
+                      className="rounded-lg border border-line bg-panel px-2 py-1.5 text-xs font-mono disabled:opacity-50"
+                      disabled={setStatus.isPending}
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) setStatus.mutate({ status: e.target.value });
+                      }}
+                    >
+                      <option value="">—</option>
+                      {STAGES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </section>
 

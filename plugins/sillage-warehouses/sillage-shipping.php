@@ -3,6 +3,8 @@
  * Shipping prices for the two locations.
  *
  * Vendor costs come from sil_shipping_quotes (refreshed by sillage-core, never fetched at checkout).
+ * The same row carries the carrier's delivery_days, which is handed to the storefront as rate meta
+ * `delivery_days` (empty for the carrier that quotes none) so checkout can state the estimate.
  * The operator's rules come from sil_settings (shipping_*), set on the Sillage dashboard Shipping page:
  *
  *   shipping_markup_percent      percent added to the vendor cost (0 = none)
@@ -76,8 +78,9 @@ function sillage_ship_rules(): array {
 }
 
 /**
- * Cached vendor costs: [ vendor_slug => [ country => cost_eur ] ], status 'ok' only.
- * If the table cannot be read, this returns nothing, so every location is unavailable.
+ * Cached vendor quotes: [ vendor_slug => [ country => [ 'cost' => cost_eur, 'days' => delivery_days ] ] ],
+ * status 'ok' only. `days` is the carrier's own estimate, null when it quotes none (the standard
+ * service). If the table cannot be read, this returns nothing, so every location is unavailable.
  */
 function sillage_ship_quote_map(): array {
 	$cached = wp_cache_get( 'quotes', SILLAGE_SHIP_CACHE_GROUP );
@@ -89,7 +92,7 @@ function sillage_ship_quote_map(): array {
 	$table = sillage_ship_db() . '.sil_shipping_quotes';
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is a constant.
 	$rows = $wpdb->get_results(
-		"SELECT vendor_slug, country, cost_eur FROM {$table} WHERE status = 'ok'",
+		"SELECT vendor_slug, country, cost_eur, delivery_days FROM {$table} WHERE status = 'ok'",
 		ARRAY_A
 	);
 	// phpcs:enable
@@ -99,7 +102,11 @@ function sillage_ship_quote_map(): array {
 		return array(); // Unreadable cache: no quotes, so no rates (fail closed). Not cached.
 	}
 	foreach ( (array) $rows as $row ) {
-		$map[ (string) $row['vendor_slug'] ][ strtoupper( (string) $row['country'] ) ] = (float) $row['cost_eur'];
+		$days = isset( $row['delivery_days'] ) && null !== $row['delivery_days'] ? (int) $row['delivery_days'] : 0;
+		$map[ (string) $row['vendor_slug'] ][ strtoupper( (string) $row['country'] ) ] = array(
+			'cost' => (float) $row['cost_eur'],
+			'days' => $days > 0 ? $days : null,
+		);
 	}
 
 	wp_cache_set( 'quotes', $map, SILLAGE_SHIP_CACHE_GROUP, SILLAGE_SHIP_CACHE_TTL );
@@ -188,17 +195,28 @@ add_filter(
 			return array(); // Settings unreadable: never price with defaults (fail closed).
 		}
 
-		$country = strtoupper( (string) ( $package['destination']['country'] ?? '' ) );
-		$quotes  = sillage_ship_quote_map();
-		$base    = 0.0;
+		$country  = strtoupper( (string) ( $package['destination']['country'] ?? '' ) );
+		$quotes   = sillage_ship_quote_map();
+		$base     = 0.0;
+		$days     = 0;     // The slowest day count any location quotes.
+		$standard = false; // A location whose carrier quotes no day count (the standard service).
 		foreach ( $letters as $letter ) {
-			$slug = array_search( $letter, SILLAGE_WH_LOCATIONS, true );
-			$cost = false !== $slug && isset( $quotes[ $slug ][ $country ] ) ? $quotes[ $slug ][ $country ] : null;
-			if ( null === $cost ) {
+			$slug  = array_search( $letter, SILLAGE_WH_LOCATIONS, true );
+			$quote = false !== $slug && isset( $quotes[ $slug ][ $country ] ) ? $quotes[ $slug ][ $country ] : null;
+			if ( null === $quote ) {
 				return array(); // No usable quote from one location: that location cannot deliver here.
 			}
-			$base += $cost;
+			$base += (float) $quote['cost'];
+			if ( null === $quote['days'] ) {
+				$standard = true;
+			} else {
+				$days = max( $days, (int) $quote['days'] );
+			}
 		}
+
+		// A parcel is only as fast as its slowest location, and a location with no quoted day count
+		// is the standard service, which the storefront describes with its own range.
+		$delivery_days = $standard || $days <= 0 ? '' : (string) $days;
 
 		$final = sillage_ship_cart_is_free( $rules )
 			? 0.0
@@ -210,6 +228,10 @@ add_filter(
 			}
 			$rate->set_cost( $final );
 			$rate->set_taxes( WC_Tax::calc_shipping_tax( $final, WC_Tax::get_shipping_tax_rates() ) );
+			// The carrier's own day count, for the storefront to say how long the parcel takes.
+			// No `_` prefix: the Store API hands this one to the shop, and the shop reads it as a
+			// number, never as a price. Empty means the standard service.
+			$rate->add_meta_data( 'delivery_days', $delivery_days );
 			return array( $id => $rate ); // One rate per parcel.
 		}
 		return array();

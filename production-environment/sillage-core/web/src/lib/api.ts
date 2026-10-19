@@ -114,8 +114,10 @@ export const api = {
         dailyRemaining: number | null;
       } | null;
     }>("/api/sync/live-status"),
-  products: (q: string, page: number) =>
-    request<ProductsPage>(`/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=50`),
+  products: (q: string, page: number, limit = 10) =>
+    request<ProductsPage>(
+      `/api/products?q=${encodeURIComponent(q)}&page=${page}&limit=${limit}`,
+    ),
   setProductVisibility: (id: number, hidden: boolean) =>
     request<{ ok: boolean; operator_hidden: boolean; syncStarted?: boolean; syncQueued?: boolean }>(
       `/api/products/${id}/visibility`,
@@ -143,13 +145,30 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  orders: (page = 1, status?: string) => {
-    const params = new URLSearchParams({ page: String(page), limit: "50" });
+  orders: (page = 1, status?: string, limit = 50, filter: OrderFilter = "all") => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) params.set("status", status);
+    if (filter !== "all") params.set("filter", filter);
     return request<OrdersPage>(`/api/orders?${params}`);
   },
   order: (id: number) => request<OrderDetail>(`/api/orders/${id}`),
-  approveOrder: (id: number) =>
+  /** Close (action "done") or delete orders. Deleting needs the dashboard password. */
+  bulkOrders: (body: {
+    action: "done" | "delete";
+    wc_order_ids?: number[];
+    ids?: number[];
+    filter?: OrderFilter;
+    password?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      action: string;
+      changed: number;
+      orders: number;
+      skipped: number;
+      ignored: number;
+      remaining: number;
+    }>("/api/orders/bulk", { method: "POST", body: JSON.stringify(body) }),  approveOrder: (id: number) =>
     request<{ ok: boolean; reason?: string }>(`/api/orders/${id}/approve`, { method: "POST" }),
   dispatchOrder: (id: number, live: boolean) =>
     request<{
@@ -204,7 +223,76 @@ export const api = {
     if (level) params.set("level", level);
     return request<LogsPage>(`/api/logs?${params}`);
   },
+  messages: (kind: MessageKind, page = 1, status: MessageStatus | "all" = "all") => {
+    const params = new URLSearchParams({ kind, page: String(page), limit: "25", status });
+    return request<MessagesPage>(`/api/messages?${params}`);
+  },
+  setMessageStatus: (kind: MessageKind, id: number, status: MessageStatus) =>
+    request<{ ok: boolean; status: MessageStatus }>(`/api/messages/${id}?kind=${kind}`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+  deleteMessage: (kind: MessageKind, id: number) =>
+    request<{ ok: boolean }>(`/api/messages/${id}?kind=${kind}`, { method: "DELETE" }),
+  bulkDeleteMessages: (kind: MessageKind, ids: number[]) =>
+    request<{ ok: boolean; removed: number }>(`/api/messages/bulk-delete?kind=${kind}`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  emptyArchive: (kind: MessageKind) =>
+    request<{ ok: boolean; removed: number }>(`/api/messages/empty-archive?kind=${kind}`, {
+      method: "POST",
+    }),
 };
+
+export type MessageKind = "contact" | "withdrawal";
+export type MessageStatus = "new" | "read" | "archived";
+
+/** The columns both message tables share. `kind` says which table the row came from. */
+interface MessageCommon {
+  id: number;
+  status: MessageStatus;
+  name: string;
+  email: string;
+  order_ref: string;
+  locale: string;
+  signed_in: boolean;
+  customer_id: number | null;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+  read_at: string | null;
+  archived_at: string | null;
+}
+
+export interface ContactMessage extends MessageCommon {
+  kind: "contact";
+  phone: string;
+  subject: string;
+  body: string | null;
+}
+
+export interface WithdrawalMessage extends MessageCommon {
+  kind: "withdrawal";
+  goods: string | null;
+  ordered_on: string;
+  received_on: string;
+  address: string | null;
+  comment: string | null;
+}
+
+export type StoreMessage = ContactMessage | WithdrawalMessage;
+
+export interface MessagesPage {
+  items: StoreMessage[];
+  total: number;
+  page: number;
+  limit: number;
+  /** Unread per tab — the badge on each tab button. */
+  counts: { contact: number; withdrawal: number };
+  /** Archived per tab, so "Empty archive" can be offered only when there is something to empty. */
+  archived: { contact: number; withdrawal: number };
+}
 
 export interface Overview {
   offers: number;
@@ -227,6 +315,12 @@ export interface Overview {
   /** Exclusive hide reason: has a photo, but at/below the stock threshold. */
   hiddenStock: number;
   hiddenOperator?: number;
+  /**
+   * The finished sync run the counts above were computed from. The counts are precomputed on the
+   * engine and only recomputed when a run finishes, so the dashboard watches that run id and knows
+   * exactly when its value is due to move — rather than re-running a heavy aggregate on a timer.
+   */
+  countsRunId?: number;
   lastSync: SyncRun | null;
   ordersByStatus: Record<string, number>;
   syncsLast7Days: Array<{ day: string; n: number }>;
@@ -266,6 +360,8 @@ export interface SecretStatus {
   set: boolean;
   source: "overlay" | "env" | "unset";
   masked: string;
+  /** Optional values never gate "ready" — the shop runs without them. */
+  optional: boolean;
 }
 
 export interface SyncRunsPage {
@@ -275,11 +371,15 @@ export interface SyncRunsPage {
   limit: number;
 }
 
+export type OrderFilter = "all" | "todo" | "done";
+
 export interface OrdersPage {
-  orders: VendorOrder[];
+  orders: OrderRow[];
   total: number;
   page: number;
   limit: number;
+  /** Whole-table totals for the filter row. */
+  counts: { all: number; todo: number; done: number };
 }
 
 export interface LogsPage {
@@ -351,8 +451,12 @@ export interface VendorOrder {
   id: number;
   wc_order_id: number;
   vendor: string;
+  /** The vendor's own short code — BF for BeautyFort, BTS for BTS Wholesaler (same as the reference). */
+  vendor_prefix: string;
   our_reference: string;
   status: string;
+  /** 1 once the row is really at the vendor or closed; 0 while it is still to do. */
+  done: number;
   items_cost: string;
   shipping_cost: string | null;
   total_cost: string | null;
@@ -361,6 +465,23 @@ export interface VendorOrder {
   dry_run: number;
   vendor_order_number: string | null;
   created_at: string;
+  updated_at?: string;
+}
+
+/** One WooCommerce order in the Orders list — the vendor split lives under `vendors`. */
+export interface OrderRow {
+  wc_order_id: number;
+  /** 1 when every vendor row is placed or closed; 0 while any is still to do. */
+  order_done: number;
+  any_dry_run: number;
+  items_cost: string;
+  shipping_cost: string | null;
+  total_cost: string | null;
+  revenue: string;
+  destination_country: string;
+  created_at: string;
+  updated_at: string;
+  vendors: VendorOrder[];
 }
 
 export interface OrderAddress {
@@ -417,6 +538,8 @@ export interface OrderDetail {
   items: OrderLineItem[];
   events: OrderEvent[];
   tracking: OrderTracking[];
+  /** The other vendor rows of the same WooCommerce order — the panel's vendor tabs. */
+  siblings: Array<{ id: number; vendor: string; vendor_prefix: string; status: string; done: number }>;
 }
 
 export const emptyAddress = (): OrderAddress => ({

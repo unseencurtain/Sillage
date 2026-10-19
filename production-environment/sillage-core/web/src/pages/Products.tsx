@@ -5,12 +5,19 @@ import { useToast } from "@/components/Toast";
 import { api } from "@/lib/api";
 import { cn, eur } from "@/lib/utils";
 
+/**
+ * Ten rows per page, fixed. The list resolves a photo per row and the shop chip reads visibility, so
+ * page size is the main lever on how hard this tab works the engine. The old adjustable 50 (up to
+ * 100) burned CPU for a page nobody scrolls to the bottom of; ten keeps it light and predictable.
+ */
+const PRODUCTS_PAGE_SIZE = 10;
+
 export function Products() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const { data, isLoading } = useQuery({
     queryKey: ["products", q, page],
-    queryFn: () => api.products(q, page),
+    queryFn: () => api.products(q, page, PRODUCTS_PAGE_SIZE),
   });
 
   return (

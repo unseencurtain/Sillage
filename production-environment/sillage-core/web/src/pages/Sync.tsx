@@ -74,7 +74,7 @@ export function Sync() {
   const runs = data?.runs ?? [];
   const newest = latest.data?.runs?.[0];
   const syncRunning = isRunActive(newest);
-  const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set);
+  const secretsMissing = (secrets.data?.secrets ?? []).filter((s) => !s.set && !s.optional);
   const cooldownMin = live.data?.retryInMinutes ?? 0;
   const onCooldown = Boolean(live.data && !live.data.allow);
   const scheduleOn = live.data?.syncEnabled === true;

@@ -87,6 +87,35 @@ export const env = {
     language: opt("BTS_LANGUAGE", "en-US"),
   },
 
+  /**
+   * SMTP relay for storefront form notifications (src/lib/mail.ts).
+   *
+   * The shop has one provider, so the transport is fixed rather than a dashboard field: Purelymail,
+   * `smtp.purelymail.com:465`, implicit TLS. The mailbox and password are ordinary settings
+   * (Settings → Email sending). Host/port/secure stay readable from the environment as an escape
+   * hatch for another relay — deliberately not fields, because a hand-typed port is the easiest way
+   * to break sending.
+   */
+  mail: {
+    host: opt("MAIL_HOST") || "smtp.purelymail.com",
+    port: int("MAIL_PORT", 465),
+    /** true = implicit TLS (port 465); false = STARTTLS (port 587). */
+    secure: bool("MAIL_SECURE", true),
+    /** Fallback for the mailbox and password when the settings are empty. */
+    user: opt("MAIL_USER"),
+    password: opt("MAIL_PASSWORD"),
+  },
+
+  /**
+   * Cloudflare Turnstile, the storefront forms' bot check (src/server/routes/forms.ts). Only the
+   * secret lives here; the matching *site* key is public and sits in `sil_settings`, so the operator
+   * can change the pair from the dashboard without rebuilding the storefront. An empty secret means
+   * no challenge is asked for — Turnstile is off and the honeypot, rate limit and filters stand alone.
+   */
+  turnstile: {
+    secret: opt("TURNSTILE_SECRET"),
+  },
+
   dashboard: {
     user: dashboardUser(),
     password: opt("DASHBOARD_PASSWORD"),
@@ -99,13 +128,21 @@ export const env = {
 };
 
 /**
- * Re-read vendor API credentials from `process.env` into `env`.
+ * Re-read operator-managed values from `process.env` into `env`.
  * Called after the secrets overlay is applied (boot / set / clear / sync start).
  */
-export function refreshVendorSecretsFromProcessEnv(): void {
+export function refreshManagedSecretsFromProcessEnv(): void {
   env.beautyfort.user = opt("BEAUTYFORT_USER");
   env.beautyfort.secret = opt("BEAUTYFORT_SECRET");
   env.bts.token = opt("BTS_JWT_TOKEN");
+
+  env.mail.host = opt("MAIL_HOST") || "smtp.purelymail.com";
+  env.mail.port = int("MAIL_PORT", 465);
+  env.mail.secure = bool("MAIL_SECURE", true);
+  env.mail.user = opt("MAIL_USER");
+  env.mail.password = opt("MAIL_PASSWORD");
+
+  env.turnstile.secret = opt("TURNSTILE_SECRET");
 }
 
 /**

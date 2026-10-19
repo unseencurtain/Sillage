@@ -1,20 +1,22 @@
 <?php
 /**
  * Plugin Name: Sillage Storefront
- * Description: Storefront image service for the React frontend. Serves supplier product images resized and re-encoded as WebP, cached on disk. The shop grid downloads thumbnails, not multi-megabyte originals.
- * Version: 1.0.0
+ * Description: Storefront image service for the React frontend. Serves supplier product images resized and re-encoded as WebP, cached on disk. The shop grid downloads thumbnails, not multi-megabyte originals; the product page downloads one large variant instead of the supplier original.
+ * Version: 1.1.0
  * Requires PHP: 8.1
  *
- * Endpoint: GET /wp-json/sillage/v1/img?src=<https url>&w=<280|400|560>
+ * Endpoint: GET /wp-json/sillage/v1/img?src=<https url>&w=<280|400|560|1000|1600>
  * - Host allowlist only (no open proxy). Anything else returns 400.
  * - Caches to wp-content/uploads/sillage-img/<sha1>.webp, served with a one-year immutable cache header.
  * - If decoding or resizing fails, it redirects to the original URL, so a broken variant never blocks an image.
+ * - The small widths feed the grid and the strip thumbnails; 1000/1600 feed the
+ *   product-detail stage, which is drawn at ~650px and 2x on a retina screen.
  */
 
 defined( 'ABSPATH' ) || exit;
 
-const SILLAGE_IMG_VERSION   = '1.0.0';
-const SILLAGE_IMG_WIDTHS    = array( 280, 400, 560 );
+const SILLAGE_IMG_VERSION   = '1.1.0';
+const SILLAGE_IMG_WIDTHS    = array( 280, 400, 560, 1000, 1600 );
 const SILLAGE_IMG_MAX_BYTES = 8 * 1024 * 1024;
 const SILLAGE_IMG_QUALITY   = 80;
 
