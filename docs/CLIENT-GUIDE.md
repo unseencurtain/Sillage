@@ -235,6 +235,8 @@ checks for new messages without reloading the page.
 The shop’s own **Contact** page and its **Right of Withdrawal** page post here: the customer fills in
 the form on the shop, it lands in this inbox, and you are emailed a copy. Turnstile is only asked for
 when both the site key (Settings → **Storefront messages**) and its secret (Secrets page) are set.
+The copy needs **Settings → Email sending** (mailbox + password) to be filled in: until it is, the
+message is still stored here and the form still thanks the customer — only the email is skipped.
 
 ### Vendors
 

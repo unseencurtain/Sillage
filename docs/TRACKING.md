@@ -161,6 +161,21 @@ grouped under warehouse headings wherever a mixed order shows them (account orde
 page, email), and an email announces only the parcel its triggering note names. Customers still see
 **only** "Warehouse Blossom" / "Warehouse Fern" — never "BTS" / "BeautyFort" or the letters.
 
+**Checked live** (2026-10-19, prinscosmetic.eu, the plugins/mu/frontend that this section
+describes): order 52075 (a mixed BTS + BeautyFort order on the operator's own account) was given two
+temporary parcels and read back through all three surfaces. The authenticated route returned
+`parcels[].warehouse` = `A`/`B` and every item's letter; `POST /sillage/v1/track` returned the same;
+the account page and `/order-tracking` both grouped under "Warehouse Blossom" then "Warehouse Fern",
+at 1440 and at 390px with no sideways scroll; and a triggering note naming one code printed that
+parcel only (a note naming the other printed the other, a note naming nothing kept both). The
+temporary parcels were then deleted — the order carries no tracking again.
+
+The sending half still needs the operator: `orders_notify_customer` is `1` on this box, and the
+WooCommerce email is enabled, but the **engine's** mailbox password
+(`mail_password`, Settings → Email sending) is empty — that is what the form *notification* mail
+uses, not the tracking email. WordPress' own mail goes through `purelymail-smtp`, which is
+configured.
+
 ---
 
 ## 5. Code map

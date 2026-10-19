@@ -1,6 +1,8 @@
 # S4 — Customer tracking: account + email, labelled by warehouse
 
-**Status:** implemented (2026-10-19) · every phase is independently revertable. One deviation from the
+**Status:** implemented and **shipped + checked live** (2026-10-19, prinscosmetic.eu: `deploy:plugins`,
+`deploy:mu`, `deploy:frontend`, then a mixed order through all three surfaces — see §4 of
+[`TRACKING.md`](../TRACKING.md)). Every phase is independently revertable. One deviation from the
 plan below: **Phase 1 did not add a new route.** The authenticated order route
 (`GET /wc/store/v1/customer/orders/{id}`, `cereve-storefront-auth` MU plugin) already returns one
 order to its signed-in owner, so the parcels and each item's warehouse were added to its response
