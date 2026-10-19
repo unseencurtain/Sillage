@@ -52,6 +52,12 @@ Stage 3.
 |---|---|---|---|
 | S4-tracking-customer | [Deep spec](S4-tracking-customer.md) — tracking in the account order detail and the tracking email, labelled by warehouse (Blossom / Fern) | `plugins/sillage-tracking/`, `react_store/frontend/src/features/{account,content}/`, `src/locales/*` | A mixed order shows both warehouses' parcels in the account and in the email; the public `/track` page labels each parcel with its warehouse |
 
+## Stage 5
+
+| id | Task | Files | Done when |
+|---|---|---|---|
+| S5-email-language | [Deep spec](S5-email-language.md) — customer emails in the shopper's language (order meta + per-order locale switch + language packs) | `mu-plugins/`, `plugins/`, `react_store/frontend/src/shared/lib/woo.js`, `src/shared/i18n/`, `wp-content/languages/` | A German delivery address gets order-received, processing and completed emails in German, and the tracking email matches; an English order is unchanged. **Not started — parked pending the client's budget.** |
+
 ## Conventions
 
 - TypeScript strict. No ORM, no query builder — parameterized SQL through `mysql2/promise`.
