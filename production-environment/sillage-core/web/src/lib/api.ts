@@ -10,9 +10,9 @@ export class ApiError extends Error {
 
 const BASE_PATH = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
 
-/** A review photo is served by the engine; keep the dashboard's base path in front of it. */
+/** Review photos use the same clean public path as the storefront; Caddy maps it to the engine. */
 export function reviewPhotoUrl(name: string): string {
-  return `${BASE_PATH}/api/public/reviews/photo/${encodeURIComponent(name)}`;
+  return `/reviews/photos/${encodeURIComponent(name)}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

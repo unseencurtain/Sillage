@@ -4,7 +4,9 @@
  *
  * Mounted at `/api/public` beside the contact and withdrawal forms, so the storefront reaches it on
  * its own origin (`/sillagedash/api/public/reviews`) and Caddy strips `/sillagedash` back to
- * `/api/public`. Only `published` rows leave the server.
+ * `/api/public`. Photo bytes are published separately at `/reviews/photos/:file`; Caddy maps that
+ * clean path here, so a public image URL never carries the dashboard prefix. Only `published` rows
+ * leave the server.
  *
  * Who may write one is deliberately narrow: a signed-in WordPress customer whose order for a
  * product carrying that EAN has been delivered (see `reviews/purchases.ts`). A mixed order opens

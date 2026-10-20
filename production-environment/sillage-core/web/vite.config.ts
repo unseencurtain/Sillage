@@ -35,6 +35,12 @@ export default defineConfig({
     proxy: {
       "/api": apiTarget,
       "/health": apiTarget,
+      // The dashboard shows review photos on the same clean public path the storefront uses.
+      // Production Caddy maps it to the engine; this keeps local dev working without that alias.
+      "/reviews/photos": {
+        target: apiTarget,
+        rewrite: (path) => path.replace(/^\/reviews\/photos/, "/api/public/reviews/photo"),
+      },
     },
     // The browser talks to Caddy on 443, not to this port, so HMR has to be told where to call
     // back. Without it the client retries wss://host:5173 forever and every save needs F5.
