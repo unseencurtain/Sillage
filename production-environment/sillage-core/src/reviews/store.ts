@@ -29,6 +29,12 @@ export interface ReviewInput {
   rating: number;
   title?: string;
   body?: string;
+  /** Uploaded file names, stored under the review's photo directory. */
+  photos?: string[];
+  /** Every submitted review has passed the paid-order check. Legacy rows default to true too. */
+  verified?: boolean;
+  /** The shopper's own yes/no answer to “Would you recommend this product?”. */
+  recommends?: boolean | null;
   locale?: string;
   customerId?: number | null;
   ip?: string;
@@ -46,6 +52,10 @@ export interface AdminReview {
   rating: number;
   title: string;
   body: string;
+  photos: string[];
+  verified: boolean;
+  recommends: boolean | null;
+  helpfulCount: number;
   locale: string;
   customerId: number | null;
   createdAt: string;
@@ -60,6 +70,10 @@ export interface Review {
   rating: number;
   title: string;
   body: string;
+  photos: string[];
+  verified: boolean;
+  recommends: boolean | null;
+  helpfulCount: number;
   createdAt: string;
 }
 
@@ -91,6 +105,12 @@ export interface ReviewsStore {
   countRecentFromIp(ipHash: string, minutes: number): number;
   /** Whether this customer already reviewed this product (any status, so a refused row still blocks a second). */
   hasReviewFrom(ean: string, customerId: number, email: string): boolean;
+  /** This customer's own rows, any moderation state — the account's review list. */
+  mine(customerId: number, email: string): AdminReview[];
+  /** Record one helpful vote from this hashed client address; returns the new count, or null if unknown. */
+  markHelpful(id: number, ipHash: string): number | null;
+  /** Replace a row's photos after the files have been written. */
+  setPhotos(id: number, photos: string[]): boolean;
   dashboard(query?: DashboardQuery): DashboardPage;
   setStatus(id: number, status: ReviewStatus): boolean;
   delete(id: number): boolean;
@@ -135,6 +155,10 @@ function migrate(db: Database): void {
       rating        INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
       title         TEXT    NOT NULL DEFAULT '',
       body          TEXT    NOT NULL DEFAULT '',
+      photos        TEXT    NOT NULL DEFAULT '[]',
+      verified      INTEGER NOT NULL DEFAULT 1,
+      recommends    INTEGER,
+      helpful_count INTEGER NOT NULL DEFAULT 0,
       locale        TEXT    NOT NULL DEFAULT '',
       customer_id   INTEGER,
       ip_hash       TEXT    NOT NULL DEFAULT '',
@@ -143,6 +167,12 @@ function migrate(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_reviews_ean ON reviews (ean, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_reviews_ip  ON reviews (ip_hash, created_at);
+    CREATE TABLE IF NOT EXISTS review_helpful (
+      review_id  INTEGER NOT NULL,
+      ip_hash    TEXT    NOT NULL,
+      created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+      PRIMARY KEY (review_id, ip_hash)
+    );
   `);
 
   // Columns added after the first deployment. SQLite has no `ADD COLUMN IF NOT EXISTS`, so ask.
@@ -152,6 +182,10 @@ function migrate(db: Database): void {
   for (const [name, definition] of [
     ["product_name", "TEXT NOT NULL DEFAULT ''"],
     ["email", "TEXT NOT NULL DEFAULT ''"],
+    ["photos", "TEXT NOT NULL DEFAULT '[]'"],
+    ["verified", "INTEGER NOT NULL DEFAULT 1"],
+    ["recommends", "INTEGER"],
+    ["helpful_count", "INTEGER NOT NULL DEFAULT 0"],
   ] as const) {
     if (!columns.has(name)) db.exec(`ALTER TABLE reviews ADD COLUMN ${name} ${definition}`);
   }
@@ -169,11 +203,31 @@ type Row = {
   rating: number;
   title: string;
   body: string;
+  photos: string;
+  verified: number;
+  recommends: number | null;
+  helpful_count: number;
   locale: string;
   customer_id: number | null;
   created_at: string;
   status: string;
 };
+
+/** A malformed or older value is an empty list, never a parse error on a read path. */
+function photoNames(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((name): name is string => typeof name === "string" && name !== "").slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
+function recommendsValue(value: number | null): boolean | null {
+  return value === null ? null : Number(value) === 1;
+}
 
 function toAdmin(row: Row): AdminReview {
   return {
@@ -186,6 +240,10 @@ function toAdmin(row: Row): AdminReview {
     rating: Number(row.rating),
     title: String(row.title),
     body: String(row.body),
+    photos: photoNames(row.photos),
+    verified: Number(row.verified) !== 0,
+    recommends: recommendsValue(row.recommends),
+    helpfulCount: Number(row.helpful_count) || 0,
     locale: String(row.locale ?? ""),
     customerId: row.customer_id === null ? null : Number(row.customer_id),
     createdAt: String(row.created_at),
@@ -201,6 +259,10 @@ function toPublic(row: Row): Review {
     rating: Number(row.rating),
     title: String(row.title),
     body: String(row.body),
+    photos: photoNames(row.photos),
+    verified: Number(row.verified) !== 0,
+    recommends: recommendsValue(row.recommends),
+    helpfulCount: Number(row.helpful_count) || 0,
     createdAt: String(row.created_at),
   };
 }
@@ -212,8 +274,9 @@ export function openReviews(path: string): ReviewsStore {
 
   const insertStmt = db.query(`
     INSERT INTO reviews
-      (ean, product_slug, product_name, name, email, rating, title, body, locale, customer_id, ip_hash, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (ean, product_slug, product_name, name, email, rating, title, body, photos, verified,
+       recommends, locale, customer_id, ip_hash, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const byIdStmt = db.query(`SELECT * FROM reviews WHERE id = ?`);
   const listStmt = db.query(`
@@ -237,8 +300,19 @@ export function openReviews(path: string): ReviewsStore {
     WHERE ean = ? AND (customer_id = ? OR (email <> '' AND LOWER(email) = LOWER(?)))
     LIMIT 1
   `);
+  const mineRowsStmt = db.query(`
+    SELECT * FROM reviews
+    WHERE (customer_id = ? AND ? > 0) OR (email <> '' AND LOWER(email) = LOWER(?))
+    ORDER BY created_at DESC, id DESC
+  `);
   const countByStatusStmt = db.query(`SELECT status, COUNT(*) AS count FROM reviews GROUP BY status`);
   const setStatusStmt = db.query(`UPDATE reviews SET status = ? WHERE id = ?`);
+  const setPhotosStmt = db.query(`UPDATE reviews SET photos = ? WHERE id = ?`);
+  const helpfulStmt = db.query(`SELECT helpful_count FROM reviews WHERE id = ?`);
+  const voteStmt = db.query(`INSERT OR IGNORE INTO review_helpful (review_id, ip_hash) VALUES (?, ?)`);
+  const bumpHelpfulStmt = db.query(
+    `UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?`,
+  );
   const deleteStmt = db.query(`DELETE FROM reviews WHERE id = ?`);
 
   return {
@@ -252,6 +326,9 @@ export function openReviews(path: string): ReviewsStore {
         input.rating,
         input.title ?? "",
         input.body ?? "",
+        JSON.stringify((input.photos ?? []).slice(0, 5)),
+        input.verified === false ? 0 : 1,
+        input.recommends === undefined || input.recommends === null ? null : input.recommends ? 1 : 0,
         input.locale ?? "",
         input.customerId ?? null,
         input.ip ? hashIp(input.ip) : "",
@@ -292,6 +369,26 @@ export function openReviews(path: string): ReviewsStore {
     hasReviewFrom(ean, customerId, email) {
       const row = mineStmt.get(ean, customerId, email) as { found: number } | null;
       return Boolean(row?.found);
+    },
+
+    mine(customerId, email) {
+      const rows = mineRowsStmt.all(customerId, customerId, email) as Row[];
+      return rows.map(toAdmin);
+    },
+
+    markHelpful(id, ipHash) {
+      const row = helpfulStmt.get(id) as { helpful_count: number } | null;
+      if (!row) return null;
+      if (ipHash) {
+        const voted = voteStmt.run(id, ipHash);
+        if (voted.changes > 0) bumpHelpfulStmt.run(id);
+      }
+      const next = helpfulStmt.get(id) as { helpful_count: number } | null;
+      return Number(next?.helpful_count) || 0;
+    },
+
+    setPhotos(id, photos) {
+      return setPhotosStmt.run(JSON.stringify(photos.slice(0, 5)), id).changes > 0;
     },
 
     dashboard({ status = "all", page = 1, limit = 25 } = {}) {

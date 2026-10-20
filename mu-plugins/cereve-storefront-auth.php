@@ -746,6 +746,33 @@ function cereve_auth_logout() {
 }
 
 /**
+ * The product's primary EAN, for turning an order line into a review target.
+ *
+ * The storefront-ean plugin owns the rule (WooCommerce's GTIN first, then Sillage's own field); a
+ * variation may carry its own barcode, so fall back to the parent product. An empty string means
+ * the line has no barcode and simply has no review action.
+ *
+ * @param WC_Product|null $product Order line product or variation.
+ * @return string
+ */
+function cereve_auth_product_ean( $product ) {
+	if ( ! $product instanceof WC_Product ) {
+		return '';
+	}
+	if ( function_exists( 'cereve_storefront_ean_for_product' ) ) {
+		$ean = cereve_storefront_ean_for_product( $product->get_id() );
+		if ( '' !== $ean ) {
+			return $ean;
+		}
+	}
+	$parent = $product->get_parent_id();
+	if ( $parent && function_exists( 'cereve_storefront_ean_for_product' ) ) {
+		return cereve_storefront_ean_for_product( $parent );
+	}
+	return '';
+}
+
+/**
  * Order history for the signed-in customer.
  *
  * The Store API has no customer-orders route and wc/v3 needs consumer secrets,
@@ -784,10 +811,13 @@ function cereve_auth_orders( WP_REST_Request $request ) {
 			$image   = $product ? $product->get_image_id() : 0;
 
 			$lines[] = array(
-				'name'     => $item->get_name(),
-				'quantity' => (int) $item->get_quantity(),
-				'total'    => (string) $item->get_total(),
-				'image'    => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
+				'name'         => $item->get_name(),
+				'quantity'     => (int) $item->get_quantity(),
+				'total'        => (string) $item->get_total(),
+				'image'        => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
+				'product_id'   => $product ? $product->get_id() : 0,
+				'variation_id' => $item instanceof WC_Order_Item_Product ? (int) $item->get_variation_id() : 0,
+				'ean'          => cereve_auth_product_ean( $product ),
 			);
 		}
 
@@ -952,13 +982,16 @@ function cereve_auth_order( WP_REST_Request $request ) {
 		}
 
 		$items[] = array(
-			'name'      => $item->get_name(),
-			'quantity'  => (int) $item->get_quantity(),
-			'subtotal'  => (string) $item->get_subtotal(),
-			'total'     => (string) $item->get_total(),
-			'sku'       => $product ? $product->get_sku() : null,
-			'image'     => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
-			'warehouse' => $location,
+			'name'         => $item->get_name(),
+			'quantity'     => (int) $item->get_quantity(),
+			'subtotal'     => (string) $item->get_subtotal(),
+			'total'        => (string) $item->get_total(),
+			'sku'          => $product ? $product->get_sku() : null,
+			'image'        => $image ? wp_get_attachment_image_url( $image, 'woocommerce_thumbnail' ) : null,
+			'warehouse'    => $location,
+			'product_id'   => $product ? $product->get_id() : 0,
+			'variation_id' => $item instanceof WC_Order_Item_Product ? (int) $item->get_variation_id() : 0,
+			'ean'          => cereve_auth_product_ean( $product ),
 		);
 	}
 

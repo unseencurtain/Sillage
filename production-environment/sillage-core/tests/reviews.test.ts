@@ -52,6 +52,45 @@ describe("reviews store", () => {
     store.close();
   });
 
+  test("keeps uploaded photo names, buyer badges and one helpful vote per client", () => {
+    const store = openReviews(":memory:");
+    const photo = `${"a".repeat(32)}.jpg`;
+    const row = store.insert({
+      ean: EAN,
+      name: "Ada",
+      email: "ada@example.com",
+      rating: 5,
+      photos: [photo],
+      verified: true,
+      recommends: true,
+      customerId: 7,
+      status: "published",
+    });
+
+    expect(row.photos).toEqual([photo]);
+    expect(row.recommends).toBe(true);
+    const published = store.list(EAN)[0]!;
+    expect(published.photos).toEqual([photo]);
+    expect(published.verified).toBe(true);
+    expect(published.recommends).toBe(true);
+    expect(published.helpfulCount).toBe(0);
+
+    expect(store.mine(7, "other@example.com")).toHaveLength(1);
+    expect(store.mine(8, "ada@example.com")).toHaveLength(1);
+    expect(store.mine(8, "other@example.com")).toHaveLength(0);
+
+    const ipHash = hashIp("203.0.113.9");
+    expect(store.markHelpful(row.id, ipHash)).toBe(1);
+    // The same browser is not counted twice.
+    expect(store.markHelpful(row.id, ipHash)).toBe(1);
+    expect(store.list(EAN)[0]!.helpfulCount).toBe(1);
+
+    const replacement = `${"b".repeat(32)}.png`;
+    expect(store.setPhotos(row.id, [replacement])).toBe(true);
+    expect(store.list(EAN)[0]!.photos).toEqual([replacement]);
+    store.close();
+  });
+
   test("counts a client's recent rows for the rate limit", () => {
     const store = openReviews(":memory:");
     store.insert({ ean: EAN, name: "Ada", rating: 5, ip: "203.0.113.9" });

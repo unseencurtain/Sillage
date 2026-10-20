@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 function str(key: string, fallback?: string): string {
   const v = process.env[key];
@@ -40,6 +40,10 @@ function bool(key: string, fallback: boolean): boolean {
 }
 
 const rootDir = resolve(import.meta.dir, "../..");
+
+/** Reviews live in one bind-mounted directory: the SQLite file and its photo files. */
+const reviewsDb = resolve(rootDir, opt("REVIEWS_DB", "data/reviews/reviews.sqlite"));
+const reviewsPhotoDir = resolve(dirname(reviewsDb), opt("REVIEWS_PHOTO_DIR", "photos"));
 
 const lockPrefix = opt("SILLAGE_LOCK_PREFIX") || "sillage";
 
@@ -130,7 +134,9 @@ export const env = {
    * mount, so the file survives an engine image swap and the product-page generator on the host can
    * read it. Inside the container it is always /app/data/reviews.
    */
-  reviewsDb: resolve(rootDir, opt("REVIEWS_DB", "data/reviews/reviews.sqlite")),
+  reviewsDb,
+  /** Uploaded review photos, served by `/api/public/reviews/photo/:file`. */
+  reviewsPhotoDir,
 };
 
 /**

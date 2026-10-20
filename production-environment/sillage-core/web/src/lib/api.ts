@@ -10,6 +10,11 @@ export class ApiError extends Error {
 
 const BASE_PATH = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
 
+/** A review photo is served by the engine; keep the dashboard's base path in front of it. */
+export function reviewPhotoUrl(name: string): string {
+  return `${BASE_PATH}/api/public/reviews/photo/${encodeURIComponent(name)}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_PATH}${path}`, {
     credentials: "include",
@@ -272,6 +277,10 @@ export interface StoreReview {
   rating: number;
   title: string;
   body: string;
+  photos: string[];
+  verified: boolean;
+  recommends: boolean | null;
+  helpfulCount: number;
   locale: string;
   customerId: number | null;
   createdAt: string;

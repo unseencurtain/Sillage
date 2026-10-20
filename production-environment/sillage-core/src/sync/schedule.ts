@@ -18,6 +18,7 @@ import { todayAtHourUtc, toMysqlUtc } from "../lib/timezone.ts";
 import { recoverStuckSubmits, dispatchDueOrders } from "../orders/dispatch.ts";
 import { sweepDispatchableOrders } from "../orders/ingest.ts";
 import { pollDueOrders } from "../orders/tracking.ts";
+import { sendReviewReminders } from "../reviews/reminders.ts";
 import { getStorefrontLiveCooldown } from "../vendors/liveGate.ts";
 import type { SyncSummary } from "./run.ts";
 
@@ -162,6 +163,8 @@ export async function runScheduledSync(override?: "full" | "fast"): Promise<Sync
     await dispatchDueOrders(10);
     const polled = await pollDueOrders(50);
     if (polled > 0) log.info(`polled ${polled} vendor order(s) for tracking`);
+    const reminded = await sendReviewReminders(20);
+    if (reminded > 0) log.info(`sent ${reminded} review reminder(s)`);
   } catch (err) {
     log.error("order housekeeping failed", String(err));
     await recordEvent("error", "schedule", `order housekeeping failed: ${String(err)}`);

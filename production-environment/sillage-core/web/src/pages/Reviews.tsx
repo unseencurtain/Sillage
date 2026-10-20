@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Eye, EyeOff, ExternalLink, Star, Trash2 } from "lucide-react";
-import { api, type ReviewStatus, type StoreReview } from "@/lib/api";
+import { api, reviewPhotoUrl, type ReviewStatus, type StoreReview } from "@/lib/api";
 import { ConfirmPanel } from "@/components/ConfirmPanel";
 import { Pagination } from "@/components/Pagination";
 import { useToast } from "@/components/Toast";
@@ -208,6 +208,36 @@ export function Reviews() {
               {review.title ? <div className="mt-3 text-sm font-medium">{review.title}</div> : null}
               {review.body ? (
                 <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted">{review.body}</p>
+              ) : null}
+
+              {review.verified || review.recommends !== null ? (
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted">
+                  {review.verified ? <span>Verified buyer</span> : null}
+                  {review.recommends === true ? <span>Recommends this product</span> : null}
+                  {review.recommends === false ? <span>Does not recommend this product</span> : null}
+                  {review.helpfulCount > 0 ? <span>{review.helpfulCount} found this helpful</span> : null}
+                </div>
+              ) : null}
+
+              {review.photos?.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {review.photos.map((photo) => (
+                    <a
+                      key={photo}
+                      href={reviewPhotoUrl(photo)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block h-20 w-20 overflow-hidden rounded-lg border border-line"
+                    >
+                      <img
+                        src={reviewPhotoUrl(photo)}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    </a>
+                  ))}
+                </div>
               ) : null}
 
               {deleting?.id === review.id ? (
