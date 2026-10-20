@@ -119,6 +119,9 @@ export async function listPurchases(
 
   const byEan = new Map<string, PurchasedProduct>();
   for (const row of rows) {
+    // A cancelled line is not a purchase waiting to arrive, and it can never open a review.
+    if (row.vendor_status === "cancelled") continue;
+
     const ean = String(row.ean ?? "");
     if (!/^\d{8,14}$/.test(ean)) continue;
 

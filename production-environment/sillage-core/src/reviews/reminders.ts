@@ -69,7 +69,7 @@ async function itemsFor(wcOrderId: number): Promise<ItemRow[]> {
     `SELECT i.ean, i.name, i.quantity
        FROM ${sil("sil_vendor_order_items")} i
        JOIN ${sil("sil_vendor_orders")} v ON v.id = i.vendor_order_id
-      WHERE v.wc_order_id = ? AND v.dry_run = 0
+      WHERE v.wc_order_id = ? AND v.dry_run = 0 AND v.status = 'delivered'
       ORDER BY i.id ASC`,
     [wcOrderId],
   );
@@ -156,7 +156,7 @@ export async function sendReviewReminders(limit = 20): Promise<number> {
     const text = [
       firstName ? `Hi ${firstName},` : "Hello,",
       "",
-      `Your order #${orderNumber} arrived a few days ago. We hope you are enjoying it.`,
+      `Your order #${orderNumber} has arrived. We hope you are enjoying it.`,
       "",
       items.length
         ? "Tell us what you think — it takes a minute, and a review helps the next shopper choose:"
