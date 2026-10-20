@@ -1870,4 +1870,3 @@ api.delete("/reviews/:id", async (c) => {
   await recordEvent("info", "reviews", `review #${id} deleted by the operator`);
   return c.json({ ok: true });
 });
-
