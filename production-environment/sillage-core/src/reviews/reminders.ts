@@ -3,8 +3,9 @@
  *
  * The shop's own order status is the clock: a mixed cart produces one vendor order per warehouse,
  * and WooCommerce marks the order completed only when every one of them is delivered or cancelled.
- * The reminder is therefore sent three days after the *last* shipment arrives, never after the
- * first one — a customer waiting on a second parcel is not asked to review half an order.
+ * The reminder is therefore sent a configurable number of days (default 3, Settings → Review
+ * reminders) after the *last* shipment arrives, never after the first one — a customer waiting on a
+ * second parcel is not asked to review half an order.
  *
  * `sil_review_reminders` is the send log, not a queue. A failed attempt is recorded so the next
  * cron tick does not hammer a dead relay, and `sent_at` is written only after SMTP accepted the
@@ -21,8 +22,8 @@ import { readWooOrder } from "../orders/ingest.ts";
 
 const log = logger("review-reminders");
 
-/** Days between the last delivery and the reminder. */
-export const REMINDER_DAYS = 3;
+/** Fallback when the setting has never been saved. */
+export const DEFAULT_REMINDER_DAYS = 3;
 /** A failed relay is retried at most once an hour, not on every scheduler tick. */
 const RETRY_MINUTES = 60;
 
@@ -38,7 +39,7 @@ interface ItemRow extends RowDataPacket {
   quantity: number;
 }
 
-async function candidates(limit: number): Promise<CandidateRow[]> {
+async function candidates(limit: number, days: number): Promise<CandidateRow[]> {
   return query<CandidateRow>(
     `SELECT v.wc_order_id,
             MAX(v.wc_order_number) AS wc_order_number,
@@ -54,7 +55,7 @@ async function candidates(limit: number): Promise<CandidateRow[]> {
       GROUP BY v.wc_order_id
      HAVING SUM(v.status NOT IN ('delivered','cancelled')) = 0
         AND SUM(v.status = 'delivered') > 0
-        AND MAX(v.delivered_at) <= NOW() - INTERVAL ${REMINDER_DAYS} DAY
+        AND MAX(v.delivered_at) <= NOW() - INTERVAL ${days} DAY
         AND sent_at IS NULL
         AND (last_attempt_at IS NULL OR last_attempt_at <= NOW() - INTERVAL ${RETRY_MINUTES} MINUTE)
       ORDER BY MAX(v.delivered_at) ASC
@@ -119,7 +120,11 @@ export async function sendReviewReminders(limit = 20): Promise<number> {
   // the operator to finish Settings → Email sending; the orders stay eligible.
   if (!mailConfigured(auth)) return 0;
 
-  const due = await candidates(Math.max(1, Math.min(100, limit)));
+  const days = Math.max(
+    1,
+    Math.min(60, Math.trunc(settings.reviewReminderDays) || DEFAULT_REMINDER_DAYS),
+  );
+  const due = await candidates(Math.max(1, Math.min(100, limit)), days);
   if (due.length === 0) return 0;
 
   const shop = (settings.wpBaseUrl || "").replace(/\/$/, "");

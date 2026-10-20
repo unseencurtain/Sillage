@@ -78,7 +78,7 @@ export function Reviews() {
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Reviews</h1>
         <p className="mt-1 text-sm text-muted">
-          Only signed-in customers with a paid order can submit a review. Nothing is public until
+          Only signed-in customers with a delivered order can submit a review. Nothing is public until
           you approve it.
         </p>
       </header>

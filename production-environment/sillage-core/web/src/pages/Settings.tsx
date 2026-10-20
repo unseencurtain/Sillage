@@ -780,6 +780,29 @@ export function Settings() {
         </div>
       </Section>
 
+      <Section
+        title="Review reminders"
+        help="The engine emails a customer after their order has arrived, pointing them at the review form in their account. A mixed order waits until every parcel has been delivered or cancelled, so nobody is asked to review half an order. Sending uses the mailbox above; without its credentials the reminders wait."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Days after delivery"
+            help="How long after the last parcel arrives the reminder is sent. 1–60 days; the default is 3. Each order is reminded once."
+          >
+            <input
+              type="number"
+              step="1"
+              min={1}
+              max={60}
+              className={inputClass}
+              value={form.review_reminder_days ?? "3"}
+              disabled={busy}
+              onChange={(e) => set("review_reminder_days", e.target.value)}
+            />
+          </Field>
+        </div>
+      </Section>
+
       <details className="rounded-xl border border-line bg-panel p-5 shadow-sm open:shadow-sm">
         <summary className="cursor-pointer text-lg font-semibold tracking-tight">
           Advanced

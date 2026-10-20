@@ -1453,6 +1453,7 @@ api.get("/settings", async (c) => {
     orders_daily_cap_eur: String(s.ordersDailyCapEur),
     orders_poll_minutes: String(s.ordersPollMinutes),
     orders_notify_customer: s.ordersNotifyCustomer ? "1" : "0",
+    review_reminder_days: String(s.reviewReminderDays),
     contact_recipients: s.contactRecipients,
     contact_turnstile_site_key: s.contactTurnstileSiteKey,
     mail_username: s.mailUsername,
@@ -1535,6 +1536,7 @@ api.put("/settings", async (c) => {
     "orders_daily_cap_eur",
     "orders_poll_minutes",
     "orders_notify_customer",
+    "review_reminder_days",
     "contact_recipients",
     "contact_turnstile_site_key",
     "mail_username",
@@ -1592,6 +1594,11 @@ api.put("/settings", async (c) => {
     } else if (key === "full_sync_hour") {
       const h = Math.min(23, Math.max(0, Math.trunc(Number(value)) || 0));
       persist = String(h);
+    } else if (key === "review_reminder_days") {
+      // A day is the floor: the order has to have arrived before it can be reviewed. Two months is
+      // the ceiling, past which the reminder is no longer about how the product was.
+      const d = Math.trunc(Number(value));
+      persist = String(Number.isFinite(d) ? Math.min(60, Math.max(1, d)) : 3);
     } else if (key === "storefront_pages_delay_minutes") {
       // 0 means "the moment the rebuild finishes". A day is the ceiling: any longer and the pages
       // trail the catalogue past the max-age floor below, which would make this value meaningless.

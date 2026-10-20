@@ -129,6 +129,8 @@ export interface GlobalSettings {
   ordersDailyCapEur: number;
   ordersPollMinutes: number;
   ordersNotifyCustomer: boolean;
+  /** Days after the last delivery before the review reminder email is sent. */
+  reviewReminderDays: number;
   /** Comma-separated addresses that receive a Contact / Withdrawal notification. Empty = fall back
    * to the shop identity's support address, then its admin address. */
   contactRecipients: string;
@@ -257,6 +259,7 @@ export async function loadSettings(): Promise<GlobalSettings> {
     ordersDailyCapEur: num("orders_daily_cap_eur", 2000),
     ordersPollMinutes: num("orders_poll_minutes", 15),
     ordersNotifyCustomer: flag("orders_notify_customer", true),
+    reviewReminderDays: num("review_reminder_days", 3),
     contactRecipients: (map.get("contact_recipients") ?? "").trim(),
     contactTurnstileSiteKey: (map.get("contact_turnstile_site_key") ?? "").trim(),
     mailUsername: (map.get("mail_username") ?? "").trim(),

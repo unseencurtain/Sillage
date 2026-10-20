@@ -6,9 +6,10 @@
  * its own origin (`/sillagedash/api/public/reviews`) and Caddy strips `/sillagedash` back to
  * `/api/public`. Only `published` rows leave the server.
  *
- * Who may write one is deliberately narrow: a signed-in WordPress customer who has a paid order for
- * a product carrying that EAN (see `reviews/purchases.ts`). A new row is `pending` — an operator
- * approves it in the dashboard before it is public or counts toward the rating.
+ * Who may write one is deliberately narrow: a signed-in WordPress customer whose order for a
+ * product carrying that EAN has been delivered (see `reviews/purchases.ts`). A mixed order opens
+ * only after its last parcel arrives. A new row is `pending` — an operator approves it in the
+ * dashboard before it is public or counts toward the rating.
  *
  * The protections are the ones the forms use — a honeypot, a per-IP rate limit counted in the
  * reviews table itself, a spam-word/link filter and the form's own elapsed time — plus the account
@@ -219,7 +220,7 @@ reviews.get("/reviews/mine", async (c) => {
 });
 
 /**
- * The products this customer may review, taken from the shop's paid orders. The account uses this
+ * The products this customer may review, taken from the shop's delivered orders. The account uses this
  * to offer a review per purchased item; the engine never trusts a product list from the browser.
  */
 reviews.get("/reviews/purchases", async (c) => {
