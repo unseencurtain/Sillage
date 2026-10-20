@@ -171,9 +171,9 @@ async function storePhotos(files: File[]): Promise<{ names: string[]; paths: str
 
 const PHOTO_NAME = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
 
-/** The public path a client should use for a stored photo. */
+/** The clean public path a client should use; Caddy maps it onto this app's photo route. */
 export function reviewPhotoPath(name: string): string {
-  return `/api/public/reviews/photo/${name}`;
+  return `/reviews/photos/${name}`;
 }
 
 /** A customer-uploaded photo. Immutable because its name is random and never reused. */

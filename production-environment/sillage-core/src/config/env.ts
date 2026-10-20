@@ -135,7 +135,7 @@ export const env = {
    * read it. Inside the container it is always /app/data/reviews.
    */
   reviewsDb,
-  /** Uploaded review photos, served by `/api/public/reviews/photo/:file`. */
+  /** Uploaded review photos, stored here and served publicly at `/reviews/photos/:file`. */
   reviewsPhotoDir,
 };
 
