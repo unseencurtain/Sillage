@@ -2,11 +2,11 @@
  * Public product reviews: read an EAN's rating and rows, ask whether the signed-in customer may
  * review the product, and accept their review.
  *
- * Mounted at `/api/public` beside the contact and withdrawal forms, so the storefront reaches it on
- * its own origin (`/sillagedash/api/public/reviews`) and Caddy strips `/sillagedash` back to
- * `/api/public`. Photo bytes are published separately at `/reviews/photos/:file`; Caddy maps that
- * clean path here, so a public image URL never carries the dashboard prefix. Only `published` rows
- * leave the server.
+ * Mounted at `/api/public` beside the contact and withdrawal forms. Caddy publishes that mount
+ * directly at `/api/public/*`, so the storefront reaches it first-party without the dashboard
+ * prefix; the old `/sillagedash/api/public/*` names redirect here with `308`. Photo bytes are
+ * published separately at `/reviews/photos/:file`; Caddy maps that clean path here, so a public
+ * image URL never carries the dashboard prefix. Only `published` rows leave the server.
  *
  * Who may write one is deliberately narrow: a signed-in WordPress customer whose order for a
  * product carrying that EAN has been delivered (see `reviews/purchases.ts`). A mixed order opens
@@ -14,8 +14,8 @@
  * dashboard before it is public or counts toward the rating.
  *
  * The protections are the ones the forms use — a honeypot, a per-IP rate limit counted in the
- * reviews table itself, a spam-word/link filter and the form's own elapsed time — plus the account
- * and purchase check, which no field in the request can influence.
+ * reviews table itself, a spam-word/link filter and the form's own elapsed time — plus a same-origin
+ * guard, and the account and purchase check, which no field in the request can influence.
  */
 import { randomBytes } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
@@ -28,6 +28,7 @@ import { logger } from "../../lib/log.ts";
 import {
   hashIp,
   isEan,
+  REVIEW_PHOTO_NAME,
   reviewsStore,
   type ReviewStatus,
 } from "../../reviews/store.ts";
@@ -68,8 +69,45 @@ function text(value: unknown, max: number): string {
 
 function clientIp(c: Context): string {
   const forwarded = c.req.header("x-forwarded-for");
+  // Caddy ignores a client-supplied X-Forwarded-For and writes the real peer address, so the first
+  // hop is the browser — not a value a bot can choose to escape the review rate limit.
   if (forwarded) return forwarded.split(",")[0]!.trim().slice(0, 45);
   return (c.req.header("x-real-ip") ?? "").slice(0, 45);
+}
+
+/** The hostname in a URL or a bare Host header, lowercased, or "" when it cannot be read. */
+function hostnameOf(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return new URL(value.includes("://") ? value : `http://${value}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Refuse a state-changing request whose browser origin is another site.
+ *
+ * The WordPress session cookie is `SameSite=Lax` in modern browsers, so a cross-site form POST
+ * should not carry it — but that is a browser default, not a guarantee. Checking Origin (or
+ * Referer, and the browser's own Sec-Fetch-Site as a last resort) makes the review write and the
+ * helpful vote same-origin even if a cookie policy or an old browser lets the cookie through.
+ * Requests from a script have to send one of these headers, which is the point.
+ */
+function sameOrigin(c: Context): boolean {
+  // Caddy writes X-Forwarded-Host from the client's Host and overwrites anything the client sent;
+  // fall back to Host for a direct dev request.
+  const forwardedHost = c.req.header("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = hostnameOf(forwardedHost || c.req.header("host") || new URL(c.req.url).host);
+  if (!host) return false;
+
+  const origin = c.req.header("origin");
+  if (origin) return hostnameOf(origin) === host;
+
+  const referer = c.req.header("referer");
+  if (referer) return hostnameOf(referer) === host;
+
+  return c.req.header("sec-fetch-site") === "same-origin";
 }
 
 async function readBody(c: Context): Promise<Body | null> {
@@ -171,8 +209,6 @@ async function storePhotos(files: File[]): Promise<{ names: string[]; paths: str
   }
 }
 
-const PHOTO_NAME = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
-
 /** The clean public path a client should use; Caddy maps it onto this app's photo route. */
 export function reviewPhotoPath(name: string): string {
   return `/reviews/photos/${name}`;
@@ -181,7 +217,7 @@ export function reviewPhotoPath(name: string): string {
 /** A customer-uploaded photo. Immutable because its name is random and never reused. */
 reviews.get("/reviews/photo/:file", async (c) => {
   const name = c.req.param("file");
-  if (!PHOTO_NAME.test(name)) return c.json({ ok: false, error: "not found" }, 404);
+  if (!REVIEW_PHOTO_NAME.test(name)) return c.json({ ok: false, error: "not found" }, 404);
 
   const file = Bun.file(join(env.reviewsPhotoDir, name));
   if (!(await file.exists())) return c.json({ ok: false, error: "not found" }, 404);
@@ -248,6 +284,8 @@ reviews.get("/reviews/purchases", async (c) => {
 
 /** One helpful vote per client address, counted in the review row. */
 reviews.post("/reviews/:id/helpful", (c) => {
+  if (!sameOrigin(c)) return c.json({ ok: false, error: "forbidden" }, 403);
+
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) return c.json({ ok: false, error: "invalid" }, 400);
 
@@ -323,11 +361,10 @@ reviews.get("/reviews/eligibility", async (c) => {
 });
 
 reviews.post("/reviews", async (c) => {
-  const request = await readReviewRequest(c);
-  if (!request) return c.json({ ok: false, error: "invalid" }, 400);
-  const { body, photos } = request;
-  // A filled honeypot answers "accepted" and stores nothing, exactly like the forms.
-  if (text(body[HONEYPOT], 100) !== "") return c.json({ ok: true, pending: true });
+  // The cheap, authoritative checks run before the body is parsed: an anonymous request must not
+  // be able to make the engine read and hold a 32 MB multipart upload, and the origin/session
+  // answer does not depend on any field the caller can send.
+  if (!sameOrigin(c)) return c.json({ ok: false, error: "forbidden" }, 403);
 
   const session = await sessionFor(c);
   if (!session.signedIn) return c.json({ ok: false, error: "sign_in_required" }, 401);
@@ -338,6 +375,12 @@ reviews.post("/reviews", async (c) => {
   if (ipHash && store.countRecentFromIp(ipHash, RATE_WINDOW_MINUTES) >= RATE_LIMIT) {
     return c.json({ ok: false, error: "rate_limited" }, 429);
   }
+
+  const request = await readReviewRequest(c);
+  if (!request) return c.json({ ok: false, error: "invalid" }, 400);
+  const { body, photos } = request;
+  // A filled honeypot answers "accepted" and stores nothing, exactly like the forms.
+  if (text(body[HONEYPOT], 100) !== "") return c.json({ ok: true, pending: true });
 
   const ean = text(body.ean, 14);
   const name = text(body.name, 80) || session.name;

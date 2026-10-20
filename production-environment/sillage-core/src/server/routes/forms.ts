@@ -9,9 +9,10 @@
  * accepted or refused, never whether an address is known.
  *
  * Mounted at `/api/public` *before* the session-guarded `/api`, so `requireSession` never sees it.
- * The storefront reaches it on its own origin (`/sillagedash/api/public/...`), which Caddy strips
- * back to `/api/public/...`; the WordPress session cookie rides along and is what tells us whether
- * the sender was signed in. That answer comes from WordPress, never from the browser's word.
+ * Caddy publishes that mount at `/api/public/...` on the shop's own origin; the old
+ * `/sillagedash/api/public/...` names redirect there with `308`. The WordPress session cookie
+ * rides along and is what tells us whether the sender was signed in. That answer comes from
+ * WordPress, never from the browser's word.
  */
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";

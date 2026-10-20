@@ -91,6 +91,39 @@ describe("reviews store", () => {
     store.close();
   });
 
+  test("drops malformed photo names and returns the photos of a deleted review", () => {
+    const store = openReviews(":memory:");
+    const photo = `${"a".repeat(32)}.jpg`;
+    const row = store.insert({
+      ean: EAN,
+      name: "Ada",
+      rating: 5,
+      photos: ["../../etc/passwd", photo, `${"b".repeat(32)}.svg`],
+      status: "published",
+    });
+
+    expect(row.photos).toEqual([photo]);
+    expect(store.list(EAN)[0]!.photos).toEqual([photo]);
+
+    const removed = store.delete(row.id);
+    expect(removed?.id).toBe(row.id);
+    expect(removed?.photos).toEqual([photo]);
+    expect(store.delete(row.id)).toBeNull();
+    expect(store.list(EAN)).toHaveLength(0);
+    store.close();
+  });
+
+  test("refuses helpful votes for a review that is not published", () => {
+    const store = openReviews(":memory:");
+    const pending = store.insert({ ean: EAN, name: "Ada", rating: 5, status: "pending" });
+    const published = store.insert({ ean: EAN, name: "Bo", rating: 4, status: "published" });
+    const ipHash = hashIp("203.0.113.11");
+
+    expect(store.markHelpful(pending.id, ipHash)).toBeNull();
+    expect(store.markHelpful(published.id, ipHash)).toBe(1);
+    store.close();
+  });
+
   test("counts a client's recent rows for the rate limit", () => {
     const store = openReviews(":memory:");
     store.insert({ ean: EAN, name: "Ada", rating: 5, ip: "203.0.113.9" });

@@ -113,7 +113,8 @@ export interface ReviewsStore {
   setPhotos(id: number, photos: string[]): boolean;
   dashboard(query?: DashboardQuery): DashboardPage;
   setStatus(id: number, status: ReviewStatus): boolean;
-  delete(id: number): boolean;
+  /** Remove a row and return it, so its photo files can be removed from disk too. */
+  delete(id: number): AdminReview | null;
   close(): void;
 }
 
@@ -121,6 +122,13 @@ export interface ReviewsStore {
 export function isEan(value: unknown): value is string {
   return typeof value === "string" && /^\d{8,14}$/.test(value);
 }
+
+/**
+ * The only shape a stored photo name may have: 16 random bytes and an extension the upload gate
+ * accepts. Keeping the check here means a malformed or hand-edited row can never become a path or
+ * a public URL; the upload route and the photo route both use this same rule.
+ */
+export const REVIEW_PHOTO_NAME = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
 
 /**
  * Store the client address only as a salted hash: it exists to rate-limit a single browser, and a
@@ -219,7 +227,9 @@ function photoNames(raw: unknown): string[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((name): name is string => typeof name === "string" && name !== "").slice(0, 5);
+    return parsed
+      .filter((name): name is string => typeof name === "string" && REVIEW_PHOTO_NAME.test(name))
+      .slice(0, 5);
   } catch {
     return [];
   }
@@ -308,7 +318,10 @@ export function openReviews(path: string): ReviewsStore {
   const countByStatusStmt = db.query(`SELECT status, COUNT(*) AS count FROM reviews GROUP BY status`);
   const setStatusStmt = db.query(`UPDATE reviews SET status = ? WHERE id = ?`);
   const setPhotosStmt = db.query(`UPDATE reviews SET photos = ? WHERE id = ?`);
-  const helpfulStmt = db.query(`SELECT helpful_count FROM reviews WHERE id = ?`);
+  // A pending or hidden row is not public, so it must not collect public votes either.
+  const helpfulStmt = db.query(
+    `SELECT helpful_count FROM reviews WHERE id = ? AND status = 'published'`,
+  );
   const voteStmt = db.query(`INSERT OR IGNORE INTO review_helpful (review_id, ip_hash) VALUES (?, ?)`);
   const bumpHelpfulStmt = db.query(
     `UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?`,
@@ -421,7 +434,9 @@ export function openReviews(path: string): ReviewsStore {
     },
 
     delete(id) {
-      return deleteStmt.run(id).changes > 0;
+      const row = byIdStmt.get(id) as Row | null;
+      if (!row) return null;
+      return deleteStmt.run(id).changes > 0 ? toAdmin(row) : null;
     },
 
     close() {

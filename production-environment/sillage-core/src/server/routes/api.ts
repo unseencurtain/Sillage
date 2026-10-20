@@ -1,6 +1,8 @@
 /**
  * Authenticated dashboard API. The single source of truth for configuration and ops actions.
  */
+import { unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { env, sil, wp } from "../../config/env.ts";
 import { applyRuntimeUrls } from "../../config/env.ts";
@@ -18,6 +20,7 @@ import {
 } from "../../messages/store.ts";
 import {
   isReviewStatus,
+  REVIEW_PHOTO_NAME,
   reviewsStore,
   type ReviewStatus,
 } from "../../reviews/store.ts";
@@ -1874,6 +1877,18 @@ api.delete("/reviews/:id", async (c) => {
 
   const removed = reviewsStore().delete(id);
   if (!removed) return c.json({ ok: false, error: "not found" }, 404);
+
+  // A deleted review must not leave its photos readable at a URL someone kept. Missing files are
+  // already gone; a failed unlink is logged rather than turning the operator's delete into a 500.
+  await Promise.all(
+    removed.photos.map(async (name) => {
+      if (!REVIEW_PHOTO_NAME.test(name)) return;
+      await unlink(join(env.reviewsPhotoDir, name)).catch((err) => {
+        log.warn(`review #${id}: could not remove photo ${name}: ${String(err)}`);
+      });
+    }),
+  );
+
   await recordEvent("info", "reviews", `review #${id} deleted by the operator`);
   return c.json({ ok: true });
 });

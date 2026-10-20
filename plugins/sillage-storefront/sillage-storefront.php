@@ -7,6 +7,8 @@
  *
  * Endpoint: GET /wp-json/sillage/v1/img?src=<https url>&w=<280|400|560|1000|1600>
  * - Host allowlist only (no open proxy). Anything else returns 400.
+ * - Only HTTPS on the default port, without userinfo. The server never follows a supplier
+ *   redirect: a failed or redirected fetch sends the browser to the original URL instead.
  * - Caches to wp-content/uploads/sillage-img/<sha1>.webp, served with a one-year immutable cache header.
  * - If decoding or resizing fails, it redirects to the original URL, so a broken variant never blocks an image.
  * - The small widths feed the grid and the strip thumbnails; 1000/1600 feed the
@@ -19,6 +21,11 @@ const SILLAGE_IMG_VERSION   = '1.1.0';
 const SILLAGE_IMG_WIDTHS    = array( 280, 400, 560, 1000, 1600 );
 const SILLAGE_IMG_MAX_BYTES = 8 * 1024 * 1024;
 const SILLAGE_IMG_QUALITY   = 80;
+/** Reject a decompression bomb before allocating its pixels. */
+const SILLAGE_IMG_MAX_DIMENSION = 10000;
+const SILLAGE_IMG_MAX_PIXELS    = 40000000;
+/** Stop adding cache files rather than filling the shop's disk. */
+const SILLAGE_IMG_MIN_FREE_BYTES = 512 * 1024 * 1024;
 
 /** Supplier hosts the storefront may proxy. Keep in sync with the product sync sources. */
 function sillage_img_allowed_hosts(): array {
@@ -67,6 +74,11 @@ function sillage_img_validate_src( string $src ): ?string {
 	if ( ! in_array( strtolower( $parts['host'] ), sillage_img_allowed_hosts(), true ) ) {
 		return null;
 	}
+	// A port or userinfo in the URL is either a mistake or an attempt to reach a different
+	// service on an allowlisted host. Supplier images are plain HTTPS on 443.
+	if ( isset( $parts['user'] ) || isset( $parts['pass'] ) || isset( $parts['port'] ) ) {
+		return null;
+	}
 	return $src;
 }
 
@@ -96,6 +108,16 @@ function sillage_img_endpoint( WP_REST_Request $request ) {
 	$file = $dir . '/' . sha1( $src . '|' . $width ) . '.webp';
 
 	if ( ! is_file( $file ) ) {
+		// An attacker can request endlessly many allowlisted URLs and fill the uploads disk with
+		// variants. When free space is low, fall back to the original instead of adding a file.
+		if ( function_exists( 'disk_free_space' ) ) {
+			$free_path = is_dir( $dir ) ? $dir : dirname( $dir );
+			$free      = @disk_free_space( $free_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			if ( false !== $free && $free < SILLAGE_IMG_MIN_FREE_BYTES ) {
+				wp_redirect( $src, 302 ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
+				exit;
+			}
+		}
 		$encoded = sillage_img_render( $src, $width );
 		if ( null === $encoded ) {
 			// Could not process: send the browser to the original rather than failing the image.
@@ -125,12 +147,16 @@ function sillage_img_render( string $src, int $width ): ?string {
 		return null;
 	}
 
-	$response = wp_remote_get(
+	// `wp_safe_remote_get` rejects a hostname that resolves to a private or reserved address, so a
+	// rebinding allowlisted supplier host cannot become a proxy into the shop's network. Redirects
+	// are not followed by the server at all; the browser is sent to the original URL instead.
+	$response = wp_safe_remote_get(
 		$src,
 		array(
 			'timeout'             => 12,
 			'limit_response_size' => SILLAGE_IMG_MAX_BYTES,
-			'redirection'         => 2,
+			'redirection'         => 0,
+			'reject_unsafe_urls'  => true,
 			'user-agent'          => 'SillageStorefront/' . SILLAGE_IMG_VERSION,
 		)
 	);
@@ -139,6 +165,27 @@ function sillage_img_render( string $src, int $width ): ?string {
 	}
 	$body = wp_remote_retrieve_body( $response );
 	if ( '' === $body ) {
+		return null;
+	}
+
+	// Read the header before decoding: a tiny file can describe an enormous bitmap, and
+	// imagecreatefromstring would allocate it first. Only formats the storefront actually serves.
+	$info = @getimagesizefromstring( $body ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+	if ( ! is_array( $info ) ) {
+		return null;
+	}
+	$orig_w = (int) ( $info[0] ?? 0 );
+	$orig_h = (int) ( $info[1] ?? 0 );
+	$type   = (int) ( $info[2] ?? 0 );
+	$formats = array( IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP );
+	if (
+		! in_array( $type, $formats, true ) ||
+		$orig_w < 1 ||
+		$orig_h < 1 ||
+		$orig_w > SILLAGE_IMG_MAX_DIMENSION ||
+		$orig_h > SILLAGE_IMG_MAX_DIMENSION ||
+		( $orig_w * $orig_h ) > SILLAGE_IMG_MAX_PIXELS
+	) {
 		return null;
 	}
 
