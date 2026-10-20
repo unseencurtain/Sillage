@@ -125,6 +125,12 @@ export const env = {
   fixturesDir: resolve(rootDir, opt("FIXTURES_DIR", "../../.feedscratch")),
   /** Bind-mounted overlay written by the dashboard Secrets UI (gitignored). */
   secretsFile: resolve(rootDir, opt("SILLAGE_SECRETS_FILE", "data/secrets.overlay.env")),
+  /**
+   * Product reviews live in SQLite, not MariaDB (src/reviews/store.ts). The directory is a bind
+   * mount, so the file survives an engine image swap and the product-page generator on the host can
+   * read it. Inside the container it is always /app/data/reviews.
+   */
+  reviewsDb: resolve(rootDir, opt("REVIEWS_DB", "data/reviews/reviews.sqlite")),
 };
 
 /**

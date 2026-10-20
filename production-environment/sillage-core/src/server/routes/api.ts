@@ -16,6 +16,11 @@ import {
   type MessageKind,
   type MessageStatus,
 } from "../../messages/store.ts";
+import {
+  isReviewStatus,
+  reviewsStore,
+  type ReviewStatus,
+} from "../../reviews/store.ts";
 import { listCachedQuotes, loadShippingRules, SHIPPING_SETTING_KEYS, refreshAllQuotes } from "../../shipping/quotes.ts";
 import { logger } from "../../lib/log.ts";
 import { resolveTimeZone } from "../../lib/timezone.ts";
@@ -1820,3 +1825,49 @@ api.post("/messages/empty-archive", async (c) => {
   await recordEvent("info", "messages", `${kind} archive emptied by the operator (${removed} message(s))`);
   return c.json({ ok: true, removed });
 });
+
+/* ------------------------------------------------------------------ *
+ * Product reviews (SQLite)
+ * ------------------------------------------------------------------ */
+
+/** Pending first in the dashboard, but the operator may ask for any tab. */
+api.get("/reviews", (c) => {
+  const rawStatus = c.req.query("status") ?? "pending";
+  if (rawStatus !== "all" && !isReviewStatus(rawStatus)) {
+    return c.json({ ok: false, error: "unknown status" }, 400);
+  }
+
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 25)));
+  const result = reviewsStore().dashboard({
+    status: rawStatus as ReviewStatus | "all",
+    page,
+    limit,
+  });
+  return c.json({ ok: true, page, limit, ...result });
+});
+
+/** Approve, hide, or send a review back to the queue. */
+api.put("/reviews/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ ok: false, error: "bad id" }, 400);
+
+  const body = await c.req.json<{ status?: unknown }>().catch(() => ({}) as { status?: unknown });
+  if (!isReviewStatus(body.status)) return c.json({ ok: false, error: "unknown status" }, 400);
+
+  const changed = reviewsStore().setStatus(id, body.status);
+  if (!changed) return c.json({ ok: false, error: "not found" }, 404);
+  await recordEvent("info", "reviews", `review #${id} marked ${body.status} by the operator`);
+  return c.json({ ok: true, status: body.status });
+});
+
+api.delete("/reviews/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ ok: false, error: "bad id" }, 400);
+
+  const removed = reviewsStore().delete(id);
+  if (!removed) return c.json({ ok: false, error: "not found" }, 404);
+  await recordEvent("info", "reviews", `review #${id} deleted by the operator`);
+  return c.json({ ok: true });
+});
+

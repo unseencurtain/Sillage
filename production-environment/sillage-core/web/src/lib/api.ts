@@ -243,10 +243,49 @@ export const api = {
     request<{ ok: boolean; removed: number }>(`/api/messages/empty-archive?kind=${kind}`, {
       method: "POST",
     }),
+  reviews: (status: ReviewStatus | "all" = "pending", page = 1) => {
+    const params = new URLSearchParams({ status, page: String(page), limit: "25" });
+    return request<ReviewsPage>(`/api/reviews?${params}`);
+  },
+  setReviewStatus: (id: number, status: ReviewStatus) =>
+    request<{ ok: boolean; status: ReviewStatus }>(`/api/reviews/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+  deleteReview: (id: number) =>
+    request<{ ok: boolean }>(`/api/reviews/${id}`, { method: "DELETE" }),
 };
 
 export type MessageKind = "contact" | "withdrawal";
 export type MessageStatus = "new" | "read" | "archived";
+
+export type ReviewStatus = "pending" | "published" | "hidden";
+
+/** A product review as the dashboard sees it — including the customer and moderation state. */
+export interface StoreReview {
+  id: number;
+  ean: string;
+  productSlug: string;
+  productName: string;
+  name: string;
+  email: string;
+  rating: number;
+  title: string;
+  body: string;
+  locale: string;
+  customerId: number | null;
+  createdAt: string;
+  status: ReviewStatus;
+}
+
+export interface ReviewsPage {
+  ok: boolean;
+  page: number;
+  limit: number;
+  total: number;
+  counts: Record<ReviewStatus, number>;
+  items: StoreReview[];
+}
 
 /** The columns both message tables share. `kind` says which table the row came from. */
 interface MessageCommon {

@@ -17,7 +17,9 @@ import { logger, setLogLevel } from "../lib/log.ts";
 import { api } from "./routes/api.ts";
 import { auth } from "./routes/auth.ts";
 import { forms } from "./routes/forms.ts";
+import { reviews } from "./routes/reviews.ts";
 import { webhooks } from "./routes/webhooks.ts";
+import { reviewsStore } from "../reviews/store.ts";
 
 setLogLevel(env.logLevel);
 const log = logger("server");
@@ -25,6 +27,17 @@ const log = logger("server");
 const secretsBoot = loadSecretsOverlay();
 if (secretsBoot.applied > 0) {
   log.info(`applied ${secretsBoot.applied} secret(s) from ${secretsBoot.path}`);
+}
+
+// Open the review file at boot: it creates the database (and its bind-mounted directory) before
+// the first customer asks for it, so a missing mount or a read-only volume fails in the log at
+// deploy time rather than as an empty rating on a product page. Reviews are not the shop's
+// checkout path; a failure here must not stop the engine serving the catalogue or orders.
+try {
+  reviewsStore();
+  log.info(`reviews: SQLite ready at ${env.reviewsDb}`);
+} catch (err) {
+  log.error(`reviews: SQLite unavailable at ${env.reviewsDb}: ${String(err)}`);
 }
 
 export const app = new Hono();
@@ -48,6 +61,8 @@ app.route("/api/auth", auth);
 // Public storefront forms. Mounted before the session-guarded `/api` so `requireSession` never
 // reaches them; see src/server/routes/forms.ts.
 app.route("/api/public", forms);
+// Product reviews: SQLite-backed, read by the storefront and by the product-page generator.
+app.route("/api/public", reviews);
 app.route("/api", api);
 
 const distDir = join(env.rootDir, "web/dist");

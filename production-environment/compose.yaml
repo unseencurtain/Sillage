@@ -53,6 +53,9 @@ x-sillage-common: &sillage-common
     - ${SITEMAP_HOST_DIR:-./ecom_sites/data/sitemaps}:/app/data/sitemaps
     # Dashboard assets are built on the deployment laptop and synced to this bind mount.
     - ${SILLAGE_WEB_DIST_DIR:-./sillage-core/web/dist}:/app/web/dist:ro
+    # Product reviews (SQLite). Kept on the host so the file survives an image swap and the
+    # product-page generator can read it for aggregateRating. Docker creates the directory.
+    - ${REVIEWS_DIR:-./sillage-core/data/reviews}:/app/data/reviews
 
 
 services:
