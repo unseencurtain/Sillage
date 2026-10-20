@@ -42,7 +42,9 @@ async function candidates(limit: number): Promise<CandidateRow[]> {
   return query<CandidateRow>(
     `SELECT v.wc_order_id,
             MAX(v.wc_order_number) AS wc_order_number,
-            MAX(v.delivered_at) AS delivered_at
+            MAX(v.delivered_at) AS delivered_at,
+            MAX(r.sent_at) AS sent_at,
+            MAX(r.last_attempt_at) AS last_attempt_at
        FROM ${sil("sil_vendor_orders")} v
        JOIN ${wp("wc_orders")} o
          ON o.id = v.wc_order_id AND o.type = 'shop_order'
@@ -53,8 +55,8 @@ async function candidates(limit: number): Promise<CandidateRow[]> {
      HAVING SUM(v.status NOT IN ('delivered','cancelled')) = 0
         AND SUM(v.status = 'delivered') > 0
         AND MAX(v.delivered_at) <= NOW() - INTERVAL ${REMINDER_DAYS} DAY
-        AND r.sent_at IS NULL
-        AND (r.last_attempt_at IS NULL OR r.last_attempt_at <= NOW() - INTERVAL ${RETRY_MINUTES} MINUTE)
+        AND sent_at IS NULL
+        AND (last_attempt_at IS NULL OR last_attempt_at <= NOW() - INTERVAL ${RETRY_MINUTES} MINUTE)
       ORDER BY MAX(v.delivered_at) ASC
       LIMIT ?`,
     [limit],
