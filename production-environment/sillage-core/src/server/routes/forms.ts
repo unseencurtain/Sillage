@@ -33,14 +33,13 @@ const log = logger("forms");
 
 export const forms = new Hono();
 
-// A form post is a few kilobytes at most; anything larger is not a shopper.
-forms.use(
-  "*",
-  bodyLimit({
-    maxSize: 64 * 1024,
-    onError: (c) => c.json({ ok: false, error: "invalid" }, 413),
-  }),
-);
+// A form post is a few kilobytes at most; anything larger is not a shopper. This limit belongs to
+// the two form posts only, never to `*`: this app is mounted at `/api/public` and a wildcard would
+// also cap the review endpoint's photo uploads at 64 KB.
+const formBodyLimit = bodyLimit({
+  maxSize: 64 * 1024,
+  onError: (c) => c.json({ ok: false, error: "invalid" }, 413),
+});
 
 /** Submissions allowed from one client inside the window. */
 const RATE_LIMIT = 5;
@@ -315,7 +314,7 @@ forms.get("/forms", async (c) => {
   return c.json({ turnstileSiteKey: siteKeyCache.value });
 });
 
-forms.post("/contact", async (c) => {
+forms.post("/contact", formBodyLimit, async (c) => {
   const body = await readBody(c);
   if (!body) return c.json({ ok: false, error: "invalid" }, 400);
   if (honeypotTripped(body)) return c.json({ ok: true });
@@ -355,7 +354,7 @@ forms.post("/contact", async (c) => {
   return c.json({ ok: true });
 });
 
-forms.post("/withdrawal", async (c) => {
+forms.post("/withdrawal", formBodyLimit, async (c) => {
   const body = await readBody(c);
   if (!body) return c.json({ ok: false, error: "invalid" }, 400);
   if (honeypotTripped(body)) return c.json({ ok: true });
