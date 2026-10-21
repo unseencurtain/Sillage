@@ -84,11 +84,31 @@ export class BeautyfortConnector extends VendorConnector {
       endpoint: env.beautyfort.endpoint,
       testMode: env.beautyfort.testMode,
     });
-    const rows = await client.getStockFile();
-    log.info(`downloaded ${rows.length} products`);
-    await writeFeedCache("beautyfort", rows);
+
+    // BeautyFort streams the entire ~9k-record catalogue. Its upstream intermittently times out at
+    // ~30s and answers with the literal body `stream timeout` (no SOAP envelope, no file), which the
+    // client surfaces as "no <ns1:File> element … (upstream 'stream timeout')". A retry usually lands
+    // on a warm instance where the file is already generated and returns in seconds. Auth faults
+    // ("Invalid credentials") are permanent and are not retried.
+    let rows: unknown[] | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        rows = await client.getStockFile();
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const retryable = /stream timeout|no <ns1:File> element/i.test(message);
+        if (!retryable || attempt === 3) throw err;
+        const waitMs = 10_000 * attempt;
+        log.warn(`stock file attempt ${attempt} failed (${message}); retrying in ${waitMs / 1000}s`);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+
+    log.info(`downloaded ${rows!.length} products`);
+    await writeFeedCache("beautyfort", rows!);
     await recordLiveFetch("beautyfort");
-    return rows;
+    return rows!;
   }
 
   normalize(raw: unknown): NormalizedProduct | null {

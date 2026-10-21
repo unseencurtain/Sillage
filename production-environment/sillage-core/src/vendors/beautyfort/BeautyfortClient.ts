@@ -12,6 +12,20 @@ import {
 
 export type { Address };
 
+/**
+ * BeautyFort's SOAP faults are inconsistently namespaced: the `Fault` element is usually
+ * `<SOAP-ENV:Fault>` but `faultstring` arrives unqualified (`<faultstring>…</faultstring>`).
+ * Matching only the prefixed form made every "Invalid credentials" fault look like an empty
+ * response, which surfaced as "no OrderReference" and hid the real reason from the operator.
+ */
+export function soapFaultMessage(text: string): string | null {
+  const match = text.match(
+    /<(?:[\w.-]+:)?Fault\b[\s\S]*?<(?:[\w.-]+:)?faultstring>([\s\S]*?)<\/(?:[\w.-]+:)?faultstring>/i,
+  );
+  const message = match?.[1]?.trim();
+  return message ? message : null;
+}
+
 export interface BeautyfortConfig {
   user: string;
   secret: string;
@@ -112,8 +126,8 @@ export class BeautyfortClient {
       clearTimeout(timer);
     }
 
-    const fault = text.match(/<SOAP-ENV:Fault>[\s\S]*?<SOAP-ENV:faultstring>(.*?)<\/SOAP-ENV:faultstring>/);
-    if (fault?.[1]) throw new BeautyfortError(fault[1], operation, text);
+    const fault = soapFaultMessage(text);
+    if (fault) throw new BeautyfortError(fault, operation, text);
     return text;
   }
 
@@ -132,7 +146,15 @@ export class BeautyfortClient {
 
     const match = text.match(/<ns1:File>([\s\S]*?)<\/ns1:File>/);
     if (!match?.[1]) {
-      throw new BeautyfortError("no <ns1:File> element in the response", "GetStockFile", text.slice(0, 2000));
+      // BeautyFort streams the whole ~9k-record file; its own upstream intermittently times out
+      // around 30s and answers with the literal body `stream timeout` instead of the SOAP envelope.
+      // Surface that so the operator can tell a vendor hiccup from a real fault.
+      const upstream = /stream timeout/i.test(text) ? " (upstream 'stream timeout')" : "";
+      throw new BeautyfortError(
+        `no <ns1:File> element in the response${upstream}`,
+        "GetStockFile",
+        text.slice(0, 2000),
+      );
     }
 
     // The original used atob(), which decodes byte-wise and mangles every multi-byte UTF-8

@@ -108,6 +108,32 @@ async function recordParcels(
   return fresh;
 }
 
+/**
+ * Parcels already stored but never confirmed by WordPress. A push can fail after the row is
+ * written (restart, timeout, bad signature); without this the number sits in the engine forever
+ * and the customer never sees it. The bridge skips a code it already holds, so replaying a push
+ * whose response was lost does not duplicate the note or the email.
+ */
+async function unpushedParcels(vendorOrderId: number): Promise<TrackingParcel[]> {
+  const rows = await query<RowDataPacket & {
+    courier: string | null;
+    tracking_code: string;
+    tracking_url: string | null;
+  }>(
+    `SELECT courier, tracking_code, tracking_url
+       FROM ${sil("sil_vendor_order_tracking")}
+      WHERE vendor_order_id = ? AND pushed_to_wc = 0
+      ORDER BY id ASC`,
+    [vendorOrderId],
+  );
+  return rows.map((r) => ({
+    courier: r.courier ?? "",
+    code: r.tracking_code,
+    url: r.tracking_url ?? "",
+    dispatchedAt: null,
+  }));
+}
+
 async function markPushed(vendorOrderId: number, code: string): Promise<void> {
   await execute(
     `UPDATE ${sil("sil_vendor_order_tracking")}
@@ -176,9 +202,11 @@ export async function pollVendorOrder(id: number): Promise<{
   }
 
   const fresh = await recordParcels(id, polled.parcels);
+  // Retry anything a previous push left behind (`pushed_to_wc = 0`), fresh parcels included.
+  const pending = await unpushedParcels(id);
   let pushed = 0;
 
-  for (const parcel of fresh) {
+  for (const parcel of pending) {
     const ok = await pushToWooCommerce({
       order_id: row.wc_order_id,
       vendor: row.vendor_slug,

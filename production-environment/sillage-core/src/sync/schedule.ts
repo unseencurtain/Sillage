@@ -11,6 +11,7 @@
  * about its own rows.
  */
 import { applyRuntimeUrls, sil } from "../config/env.ts";
+import { loadSecretsOverlay } from "../config/secrets.ts";
 import { query, type RowDataPacket } from "../db/pool.ts";
 import { loadSettings, recordEvent, type GlobalSettings } from "../db/settings.ts";
 import { logger } from "../lib/log.ts";
@@ -151,6 +152,12 @@ export async function decideSchedule(settings: GlobalSettings): Promise<Schedule
 
 /** One cron tick. Returns the summary when a sync ran, or null when nothing was due. */
 export async function runScheduledSync(override?: "full" | "fast"): Promise<SyncSummary | null> {
+  // The order housekeeping below submits to vendors and polls tracking on every tick, including
+  // ticks where no catalogue sync runs. loadSecretsOverlay() is called inside runSync(), which is
+  // skipped on those ticks, so without this line the tick dispatches with the empty values in .env
+  // (vendor credentials live in the dashboard-managed overlay) and fails every leg it touches.
+  loadSecretsOverlay();
+
   const settings = await loadSettings();
   applyRuntimeUrls({ wpBaseUrl: settings.wpBaseUrl, imageCdnBaseUrl: settings.imageCdnBaseUrl });
   const decision = override ? { action: override, reason: "forced from the command line" } : await decideSchedule(settings);
