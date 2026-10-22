@@ -45,6 +45,14 @@ add_action('plugins_loaded', function () {
         $route = $request->get_route();
         $is_admin_api = (bool) preg_match('#^/wc/v\d+(/|$)#', $route);
         if ($is_admin_api && !empty($_SERVER['HTTP_ORIGIN'])) {
+            // The wp-admin React screens (e.g. the WooCommerce Stripe Gateway settings page)
+            // legitimately save through /wc/v3/ from the browser with a logged-in admin's
+            // session. Let them through: the route's own nonce permission_callback still
+            // guards against CSRF. The block stays in force for everyone else — the
+            // storefront and any other browser script must never reach the admin API.
+            if (current_user_can('manage_woocommerce')) {
+                return $result;
+            }
             return new WP_Error(
                 'headless_forbidden',
                 'The WooCommerce admin API cannot be called from a browser.',
