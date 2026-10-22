@@ -37,6 +37,7 @@ const SILLAGE_HOSTED_GATEWAY_ID      = 'sillage_checkout';
 const SILLAGE_HOSTED_SETTINGS_OPTION = 'woocommerce_sillage_checkout_settings';
 const SILLAGE_HOSTED_SESSION_META    = '_sillage_checkout_session_id';
 const SILLAGE_HOSTED_INTENT_META     = '_sillage_checkout_payment_intent';
+const SILLAGE_HOSTED_MODE_META       = '_sillage_checkout_mode';
 const SILLAGE_HOSTED_REST_NS         = 'sillage/v1';
 const SILLAGE_HOSTED_ATTEMPT_KEY     = 'sillage_hosted_attempts_';
 const SILLAGE_HOSTED_MAX_ATTEMPTS    = 60;
@@ -60,6 +61,61 @@ function sillage_hosted_mode() {
 	return ( ! empty( $settings['testmode'] ) && 'yes' === $settings['testmode'] ) ? 'test' : 'live';
 }
 
+/** The mode encoded in a Checkout Session id, or an empty string. */
+function sillage_hosted_session_id_mode( $session_id ) {
+	$session_id = (string) $session_id;
+	if ( 0 === strpos( $session_id, 'cs_test_' ) ) {
+		return 'test';
+	}
+	if ( 0 === strpos( $session_id, 'cs_live_' ) ) {
+		return 'live';
+	}
+	return '';
+}
+
+/** The mode Stripe says a session belongs to, or an empty string. */
+function sillage_hosted_session_mode( $session ) {
+	if ( ! is_array( $session ) ) {
+		return '';
+	}
+	if ( array_key_exists( 'livemode', $session ) ) {
+		return ! empty( $session['livemode'] ) ? 'live' : 'test';
+	}
+	return sillage_hosted_session_id_mode( (string) ( $session['id'] ?? '' ) );
+}
+
+/**
+ * The mode an order was created in.
+ *
+ * A test payment must never settle a live order, and a live session must never be read
+ * with the test key. New orders record the mode when the session is created; older orders
+ * are read from the Stripe session id, which is prefixed with cs_test_ or cs_live_.
+ */
+function sillage_hosted_order_mode( $order ) {
+	if ( $order instanceof WC_Order ) {
+		$mode = (string) $order->get_meta( SILLAGE_HOSTED_MODE_META );
+		if ( 'test' === $mode || 'live' === $mode ) {
+			return $mode;
+		}
+
+		$from_session = sillage_hosted_session_id_mode( (string) $order->get_meta( SILLAGE_HOSTED_SESSION_META ) );
+		if ( '' !== $from_session ) {
+			return $from_session;
+		}
+	}
+
+	return sillage_hosted_mode();
+}
+
+/** The mode carried by a webhook payload, read before the signature is checked. */
+function sillage_hosted_payload_mode( $payload ) {
+	$event = json_decode( (string) $payload, true );
+	if ( ! is_array( $event ) || ! array_key_exists( 'livemode', $event ) || ! is_bool( $event['livemode'] ) ) {
+		return '';
+	}
+	return $event['livemode'] ? 'live' : 'test';
+}
+
 /** The secret key for the configured mode. Never leaves the server. */
 function sillage_hosted_secret_key( $mode = null ) {
 	$settings = sillage_hosted_stripe_settings();
@@ -75,13 +131,14 @@ function sillage_hosted_secret_key( $mode = null ) {
  * written by this app, and these two belong to the account. An empty answer lets Stripe
  * fall back to the dashboard's dynamic methods, which is a safe answer, not a broken one.
  */
-function sillage_hosted_payment_method_configuration() {
+function sillage_hosted_payment_method_configuration( $mode = null ) {
+	$mode     = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_mode();
 	$settings = sillage_hosted_stripe_settings();
-	$key      = 'test' === sillage_hosted_mode() ? 'test_pmc_id' : 'pmc_id';
+	$key      = 'test' === $mode ? 'test_pmc_id' : 'pmc_id';
 	if ( ! empty( $settings[ $key ] ) ) {
 		return (string) $settings[ $key ];
 	}
-	return 'test' === sillage_hosted_mode() ? 'pmc_1UT29jGRoCUt5YKCvkWc49eS' : 'pmc_1UT2DZGRoCUt5YKCWHeOtWUH';
+	return 'test' === $mode ? 'pmc_1UT29jGRoCUt5YKCvkWc49eS' : 'pmc_1UT2DZGRoCUt5YKCWHeOtWUH';
 }
 
 /**
@@ -90,7 +147,7 @@ function sillage_hosted_payment_method_configuration() {
  * Kept independent of the Stripe plugin's classes: this gateway has to keep working when
  * that plugin is updated, deactivated or replaced.
  */
-function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = array(), $mode = null ) {
+function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = array(), $mode = null, $idempotency = '' ) {
 	$key = sillage_hosted_secret_key( $mode );
 	if ( '' === $key ) {
 		return new WP_Error( 'sillage_hosted_no_key', 'Stripe is not configured.', array( 'status' => 503 ) );
@@ -102,12 +159,18 @@ function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = 
 	}
 
 	$args = array(
-		'method'  => $method,
-		'timeout' => 25,
-		'headers' => array(
+		'method'      => $method,
+		'timeout'     => 25,
+		'redirection' => 0,
+		'sslverify'   => true,
+		'headers'     => array(
 			'Authorization' => 'Bearer ' . $key,
 		),
 	);
+
+	if ( '' !== $idempotency ) {
+		$args['headers']['Idempotency-Key'] = (string) $idempotency;
+	}
 
 	if ( 'POST' === $method ) {
 		$args['headers']['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -123,12 +186,12 @@ function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = 
 	$body   = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 
 	if ( ! is_array( $body ) ) {
-		return new WP_Error( 'sillage_hosted_stripe_bad_response', 'Stripe returned an unreadable response.', array( 'status' => 502 ) );
+		return new WP_Error( 'sillage_hosted_stripe_bad_response', 'Stripe returned an unreadable response.', array( 'status' => 502, 'stripe_status' => $status ) );
 	}
 
 	if ( $status >= 400 || isset( $body['error'] ) ) {
 		$message = isset( $body['error']['message'] ) ? (string) $body['error']['message'] : 'Stripe refused the request.';
-		return new WP_Error( 'sillage_hosted_stripe_error', $message, array( 'status' => 502 ) );
+		return new WP_Error( 'sillage_hosted_stripe_error', $message, array( 'status' => 502, 'stripe_status' => $status ) );
 	}
 
 	return $body;
@@ -269,7 +332,8 @@ function sillage_hosted_line_items( $order ) {
 }
 
 /** Create a Checkout Session for one order, priced from that order. */
-function sillage_hosted_create_session( $order ) {
+function sillage_hosted_create_session( $order, $mode = null ) {
+	$mode  = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_order_mode( $order );
 	$items = sillage_hosted_line_items( $order );
 	if ( is_wp_error( $items ) ) {
 		return $items;
@@ -296,18 +360,18 @@ function sillage_hosted_create_session( $order ) {
 		),
 	);
 
-	$configuration = sillage_hosted_payment_method_configuration();
+	$configuration = sillage_hosted_payment_method_configuration( $mode );
 	if ( '' !== $configuration ) {
 		$data['payment_method_configuration'] = $configuration;
 	}
 
-	$session = sillage_hosted_api( 'checkout/sessions', 'POST', $data );
+	$session = sillage_hosted_api( 'checkout/sessions', 'POST', $data, array(), $mode );
 
 	// An account that cannot use the pinned configuration still has the dashboard's own
 	// methods; losing the pin is better than losing the sale.
 	if ( is_wp_error( $session ) && false !== stripos( $session->get_error_message(), 'payment_method_configuration' ) ) {
 		unset( $data['payment_method_configuration'] );
-		$session = sillage_hosted_api( 'checkout/sessions', 'POST', $data );
+		$session = sillage_hosted_api( 'checkout/sessions', 'POST', $data, array(), $mode );
 	}
 
 	if ( is_wp_error( $session ) ) {
@@ -320,32 +384,176 @@ function sillage_hosted_create_session( $order ) {
 	return $session;
 }
 
+/** The storefront receipt address for an order, optionally naming the session. */
+function sillage_hosted_receipt_url( $order, $session_id = '' ) {
+	$url = sillage_hosted_storefront_url( 'order-received/' . $order->get_id() )
+		. '?key=' . rawurlencode( (string) $order->get_order_key() );
+
+	if ( '' !== $session_id ) {
+		$url .= '&session_id=' . rawurlencode( (string) $session_id );
+	}
+
+	return $url;
+}
+
 /**
  * The Checkout address for an order, reusing the open session when there is one.
  *
  * A shopper who reloads or presses Pay twice must land on the same Stripe page, not
- * create a second session for one order.
+ * create a second session for one order. A session is reused only when its amount and
+ * currency still match the order; a stale page is expired before another is created.
  */
 function sillage_hosted_session_url( $order ) {
+	$order_id = $order->get_id();
+
+	// A paid order never needs another Stripe page. Returning the receipt also stops a
+	// double submit from opening a second session for the same order.
+	if ( $order->get_date_paid() || ! $order->needs_payment() ) {
+		return sillage_hosted_receipt_url( $order );
+	}
+
+	$mode     = sillage_hosted_order_mode( $order );
+	$current  = sillage_hosted_mode();
 	$existing = (string) $order->get_meta( SILLAGE_HOSTED_SESSION_META );
 
 	if ( '' !== $existing ) {
-		$session = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $existing ), 'GET' );
-		if ( ! is_wp_error( $session ) && 'open' === ( $session['status'] ?? '' ) && ! empty( $session['url'] ) ) {
-			return (string) $session['url'];
+		$session = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $existing ), 'GET', array(), array(), $mode );
+
+		// Never create a second session when the first one cannot be read: the first may
+		// still be open and payable.
+		if ( is_wp_error( $session ) ) {
+			return new WP_Error( 'sillage_hosted_session_unreachable', 'We could not check the existing payment. Please try again.', array( 'status' => 502 ) );
+		}
+
+		$status = (string) ( $session['status'] ?? '' );
+
+		if ( 'complete' === $status ) {
+			// Paid, or waiting for a delayed method. The receipt settles or reports it; a
+			// new session must not be opened beside it.
+			return sillage_hosted_receipt_url( $order, $existing );
+		}
+
+		if ( 'open' === $status && ! empty( $session['url'] ) ) {
+			$expected = sillage_hosted_minor( $order->get_total(), $order );
+			$actual   = (int) ( $session['amount_total'] ?? 0 );
+			$currency = strtoupper( (string) ( $session['currency'] ?? '' ) );
+
+			if ( $actual === $expected && ( '' === $currency || $currency === strtoupper( (string) $order->get_currency() ) ) ) {
+				return (string) $session['url'];
+			}
+
+			// The bag changed after this page was created. Expire it so it cannot be paid
+			// for an amount the order no longer has.
+			$expired = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $existing ) . '/expire', 'POST', array(), array(), $mode );
+			if ( is_wp_error( $expired ) ) {
+				return new WP_Error( 'sillage_hosted_stale_session', 'The payment page is out of date. Please refresh and try again.', array( 'status' => 409 ) );
+			}
+
+			$order->add_order_note( 'The Stripe Checkout session was replaced because the order total changed.' );
+			$order->delete_meta_data( SILLAGE_HOSTED_SESSION_META );
+			$order->save();
 		}
 	}
 
-	$session = sillage_hosted_create_session( $order );
-	if ( is_wp_error( $session ) ) {
-		return $session;
+	// An order stays in the mode it was created in. Never start a new payment in the other
+	// mode because the shop was switched while this order was pending.
+	if ( $mode !== $current ) {
+		return new WP_Error( 'sillage_hosted_mode_changed', 'This order was started in a different payment mode. Please contact us.', array( 'status' => 409 ) );
 	}
 
-	$order->update_meta_data( SILLAGE_HOSTED_SESSION_META, (string) $session['id'] );
-	$order->add_order_note( 'Awaiting payment on Stripe Checkout.' );
-	$order->save();
+	$lock   = 'sillage_hosted_session_lock_' . $order_id;
+	$locked = add_option( $lock, time(), '', 'no' );
 
-	return (string) $session['url'];
+	if ( ! $locked ) {
+		$since = (int) get_option( $lock, 0 );
+		if ( ! $since || ( time() - $since ) > 2 * MINUTE_IN_SECONDS ) {
+			delete_option( $lock );
+			$locked = add_option( $lock, time(), '', 'no' );
+		}
+	}
+
+	if ( ! $locked ) {
+		// Another request is already creating the session. Wait briefly for it to store the
+		// id, then read that one session once. Never create a second one from here.
+		$stored = '';
+		for ( $i = 0; $i < 10; $i++ ) {
+			usleep( 200000 );
+			$fresh  = wc_get_order( $order_id );
+			$stored = $fresh ? (string) $fresh->get_meta( SILLAGE_HOSTED_SESSION_META ) : '';
+			if ( '' !== $stored ) {
+				break;
+			}
+		}
+
+		if ( '' !== $stored ) {
+			$session = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $stored ), 'GET', array(), array(), $mode );
+			if ( ! is_wp_error( $session ) && 'open' === ( $session['status'] ?? '' ) && ! empty( $session['url'] ) ) {
+				return (string) $session['url'];
+			}
+			if ( ! is_wp_error( $session ) && 'complete' === ( $session['status'] ?? '' ) ) {
+				return sillage_hosted_receipt_url( $order, $stored );
+			}
+		}
+
+		return new WP_Error( 'sillage_hosted_busy', 'The payment is already being prepared. Please try again.', array( 'status' => 409 ) );
+	}
+
+	try {
+		// Another request may have stored a session between the check above and the lock.
+		$order    = wc_get_order( $order_id );
+		$existing = $order ? (string) $order->get_meta( SILLAGE_HOSTED_SESSION_META ) : '';
+
+		if ( ! $order ) {
+			return new WP_Error( 'sillage_hosted_no_order', 'Order not found.', array( 'status' => 404 ) );
+		}
+
+		if ( '' !== $existing ) {
+			$session = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $existing ), 'GET', array(), array(), $mode );
+			if ( is_wp_error( $session ) ) {
+				return new WP_Error( 'sillage_hosted_session_unreachable', 'We could not check the existing payment. Please try again.', array( 'status' => 502 ) );
+			}
+
+			$status = (string) ( $session['status'] ?? '' );
+			if ( 'complete' === $status ) {
+				return sillage_hosted_receipt_url( $order, $existing );
+			}
+
+			if ( 'open' === $status && ! empty( $session['url'] ) ) {
+				$expected = sillage_hosted_minor( $order->get_total(), $order );
+				$actual   = (int) ( $session['amount_total'] ?? 0 );
+				$currency = strtoupper( (string) ( $session['currency'] ?? '' ) );
+				if ( $actual === $expected && ( '' === $currency || $currency === strtoupper( (string) $order->get_currency() ) ) ) {
+					return (string) $session['url'];
+				}
+
+				$expired = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $existing ) . '/expire', 'POST', array(), array(), $mode );
+				if ( is_wp_error( $expired ) ) {
+					return new WP_Error( 'sillage_hosted_stale_session', 'The payment page is out of date. Please refresh and try again.', array( 'status' => 409 ) );
+				}
+
+				$order->delete_meta_data( SILLAGE_HOSTED_SESSION_META );
+				$order->save();
+			}
+		}
+
+		if ( '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) ) {
+			$order->update_meta_data( SILLAGE_HOSTED_MODE_META, $mode );
+			$order->save();
+		}
+
+		$session = sillage_hosted_create_session( $order, $mode );
+		if ( is_wp_error( $session ) ) {
+			return $session;
+		}
+
+		$order->update_meta_data( SILLAGE_HOSTED_SESSION_META, (string) $session['id'] );
+		$order->add_order_note( 'Awaiting payment on Stripe Checkout.' );
+		$order->save();
+
+		return (string) $session['url'];
+	} finally {
+		delete_option( $lock );
+	}
 }
 
 /** How the shopper actually paid, from the charge Stripe recorded. */
@@ -402,61 +610,136 @@ function sillage_hosted_mark_paid( $order, $session ) {
 		return new WP_Error( 'sillage_hosted_no_order', 'Order not found.', array( 'status' => 404 ) );
 	}
 
+	$session  = is_array( $session ) ? $session : array();
+	$order_id = $order->get_id();
+
 	if ( $order->get_date_paid() ) {
 		return true;
 	}
 
-	$expected = sillage_hosted_minor( $order->get_total(), $order );
-	$actual   = (int) ( $session['amount_total'] ?? 0 );
+	// The webhook and the return leg can arrive together. One atomic lock per order means
+	// only one of them runs payment_complete(), so stock is reduced once and the completion
+	// actions fire once. A lock left behind by a dead request is reclaimed.
+	$lock   = 'sillage_hosted_paid_lock_' . $order_id;
+	$locked = add_option( $lock, time(), '', 'no' );
 
-	if ( $actual !== $expected ) {
-		$order->add_order_note(
-			sprintf( 'Stripe reported %1$d but the order total is %2$d. The order was not completed automatically.', $actual, $expected )
-		);
-		return new WP_Error( 'sillage_hosted_amount_mismatch', 'The paid amount does not match the order.', array( 'status' => 409 ) );
-	}
-
-	$currency = strtoupper( (string) ( $session['currency'] ?? '' ) );
-	if ( '' !== $currency && $currency !== strtoupper( (string) $order->get_currency() ) ) {
-		$order->add_order_note(
-			sprintf( 'Stripe reported %1$s but the order is in %2$s. The order was not completed automatically.', $currency, $order->get_currency() )
-		);
-		return new WP_Error( 'sillage_hosted_currency_mismatch', 'The paid currency does not match the order.', array( 'status' => 409 ) );
-	}
-
-	$intent = $session['payment_intent'] ?? '';
-	if ( is_array( $intent ) ) {
-		$intent = (string) ( $intent['id'] ?? '' );
-	}
-	$intent = (string) $intent;
-
-	$label = sillage_hosted_label( $session );
-	if ( '' === $label && ! empty( $session['id'] ) ) {
-		$full = sillage_hosted_api(
-			'checkout/sessions/' . rawurlencode( (string) $session['id'] ),
-			'GET',
-			array(),
-			array( 'expand' => array( 'payment_intent.latest_charge' ) )
-		);
-		if ( ! is_wp_error( $full ) ) {
-			$label = sillage_hosted_label( $full );
+	if ( ! $locked ) {
+		$since = (int) get_option( $lock, 0 );
+		if ( ! $since || ( time() - $since ) > 2 * MINUTE_IN_SECONDS ) {
+			delete_option( $lock );
+			$locked = add_option( $lock, time(), '', 'no' );
 		}
 	}
 
-	$order->update_meta_data( SILLAGE_HOSTED_SESSION_META, (string) ( $session['id'] ?? '' ) );
-	if ( '' !== $intent ) {
-		$order->update_meta_data( SILLAGE_HOSTED_INTENT_META, $intent );
-	}
-	if ( '' !== $label ) {
-		$order->set_payment_method_title( $label );
-	}
-	$order->save();
+	if ( ! $locked ) {
+		// The other request is completing the same order. If it finishes, report paid;
+		// otherwise let the caller retry (the webhook answers 500 so Stripe retries).
+		for ( $i = 0; $i < 5; $i++ ) {
+			usleep( 200000 );
+			$fresh = wc_get_order( $order_id );
+			if ( $fresh && $fresh->get_date_paid() ) {
+				return true;
+			}
+		}
 
-	// `payment_complete` marks it paid, records the transaction and reduces stock, exactly
-	// as it would for a gateway that charged on the site.
-	$order->payment_complete( $intent );
+		return new WP_Error( 'sillage_hosted_paid_busy', 'The payment is already being completed. Please try again.', array( 'status' => 409 ) );
+	}
 
-	return true;
+	try {
+		// Re-read the order under the lock: the total or status may have moved since the
+		// caller looked at it.
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return new WP_Error( 'sillage_hosted_no_order', 'Order not found.', array( 'status' => 404 ) );
+		}
+
+		if ( $order->get_date_paid() ) {
+			return true;
+		}
+
+		$session_mode = sillage_hosted_session_mode( $session );
+		$order_mode   = sillage_hosted_order_mode( $order );
+
+		// A legacy order with no mode and no stored session adopts the mode of the verified
+		// session. A mismatch is a test payment trying to settle a live order, or the reverse.
+		if ( '' !== $session_mode && '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) && '' === (string) $order->get_meta( SILLAGE_HOSTED_SESSION_META ) ) {
+			$order->update_meta_data( SILLAGE_HOSTED_MODE_META, $session_mode );
+			$order->save();
+			$order_mode = $session_mode;
+		}
+
+		if ( '' !== $session_mode && $session_mode !== $order_mode ) {
+			$order->add_order_note(
+				sprintf( 'A Stripe %1$s-mode payment was ignored for this %2$s-mode order.', $session_mode, $order_mode )
+			);
+			return new WP_Error( 'sillage_hosted_mode_mismatch', 'The payment mode does not match the order.', array( 'status' => 409 ) );
+		}
+
+		$expected = sillage_hosted_minor( $order->get_total(), $order );
+		$actual   = (int) ( $session['amount_total'] ?? 0 );
+
+		if ( $actual !== $expected ) {
+			$order->add_order_note(
+				sprintf( 'Stripe reported %1$d but the order total is %2$d. The order was not completed automatically. Session %3$s. Review the payment in Stripe before fulfilling.', $actual, $expected, (string) ( $session['id'] ?? 'unknown' ) )
+			);
+			return new WP_Error( 'sillage_hosted_amount_mismatch', 'The paid amount does not match the order.', array( 'status' => 409 ) );
+		}
+
+		$currency = strtoupper( (string) ( $session['currency'] ?? '' ) );
+		if ( '' !== $currency && $currency !== strtoupper( (string) $order->get_currency() ) ) {
+			$order->add_order_note(
+				sprintf( 'Stripe reported %1$s but the order is in %2$s. The order was not completed automatically. Session %3$s. Review the payment in Stripe before fulfilling.', $currency, $order->get_currency(), (string) ( $session['id'] ?? 'unknown' ) )
+			);
+			return new WP_Error( 'sillage_hosted_currency_mismatch', 'The paid currency does not match the order.', array( 'status' => 409 ) );
+		}
+
+		$intent = $session['payment_intent'] ?? '';
+		if ( is_array( $intent ) ) {
+			$intent = (string) ( $intent['id'] ?? '' );
+		}
+		$intent = (string) $intent;
+
+		$label = sillage_hosted_label( $session );
+		if ( '' === $label && ! empty( $session['id'] ) ) {
+			$full = sillage_hosted_api(
+				'checkout/sessions/' . rawurlencode( (string) $session['id'] ),
+				'GET',
+				array(),
+				array( 'expand' => array( 'payment_intent.latest_charge' ) ),
+				$order_mode
+			);
+			if ( ! is_wp_error( $full ) ) {
+				$label = sillage_hosted_label( $full );
+			}
+		}
+
+		$order->update_meta_data( SILLAGE_HOSTED_SESSION_META, (string) ( $session['id'] ?? '' ) );
+		if ( '' !== $session_mode && '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) ) {
+			$order->update_meta_data( SILLAGE_HOSTED_MODE_META, $session_mode );
+		}
+		if ( '' !== $intent ) {
+			$order->update_meta_data( SILLAGE_HOSTED_INTENT_META, $intent );
+		}
+		if ( '' !== $label ) {
+			$order->set_payment_method_title( $label );
+		}
+		$order->save();
+
+		// `payment_complete` marks it paid, records the transaction and reduces stock, exactly
+		// as it would for a gateway that charged on the site.
+		$order->payment_complete( $intent );
+
+		// A status WooCommerce will not complete (on-hold, cancelled) leaves real money
+		// captured. Do not claim success; leave a note the operator cannot miss.
+		$order = wc_get_order( $order_id );
+		if ( $order && ! $order->get_date_paid() ) {
+			$order->add_order_note( 'Stripe captured the payment, but WooCommerce did not mark the order paid. Review the order and refund the payment if it cannot be fulfilled.' );
+		}
+
+		return true;
+	} finally {
+		delete_option( $lock );
+	}
 }
 
 /** The payload the confirmation screen reads, in the shape it already knows. */
@@ -505,6 +788,9 @@ function sillage_hosted_throttle( $order_id, $bump = false ) {
  * ------------------------------------------------------------------ */
 
 function sillage_hosted_complete_route( WP_REST_Request $request ) {
+	nocache_headers();
+	header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+
 	$order_id  = absint( $request->get_param( 'order_id' ) );
 	$order_key = sanitize_text_field( (string) $request->get_param( 'order_key' ) );
 	$order     = $order_id ? wc_get_order( $order_id ) : false;
@@ -517,12 +803,13 @@ function sillage_hosted_complete_route( WP_REST_Request $request ) {
 		return new WP_Error( 'sillage_hosted_wrong_gateway', 'Order was not placed with Stripe Checkout.', array( 'status' => 400 ) );
 	}
 
-	if ( sillage_hosted_throttle( $order_id ) ) {
-		return new WP_Error( 'sillage_hosted_throttled', 'Too many attempts for this order. Please try again shortly.', array( 'status' => 429 ) );
-	}
-
+	// A paid order's receipt is never throttled: the money is already there.
 	if ( $order->get_date_paid() ) {
 		return sillage_hosted_order_payload( $order );
+	}
+
+	if ( sillage_hosted_throttle( $order_id ) ) {
+		return new WP_Error( 'sillage_hosted_throttled', 'Too many attempts for this order. Please try again shortly.', array( 'status' => 429 ) );
 	}
 
 	$session_id = sanitize_text_field( (string) $request->get_param( 'session_id' ) );
@@ -533,6 +820,11 @@ function sillage_hosted_complete_route( WP_REST_Request $request ) {
 	}
 
 	if ( '' === $session_id ) {
+		// A cancelled or on-hold order has no payment to settle; let the receipt show its
+		// status instead of reporting a missing payment.
+		if ( ! $order->needs_payment() ) {
+			return sillage_hosted_order_payload( $order );
+		}
 		return new WP_Error( 'sillage_hosted_no_session', 'No payment is attached to this order.', array( 'status' => 400 ) );
 	}
 
@@ -542,12 +834,32 @@ function sillage_hosted_complete_route( WP_REST_Request $request ) {
 		return new WP_Error( 'sillage_hosted_session_mismatch', 'That payment does not belong to this order.', array( 'status' => 403 ) );
 	}
 
+	$mode    = sillage_hosted_order_mode( $order );
 	$session = sillage_hosted_api(
 		'checkout/sessions/' . rawurlencode( $session_id ),
 		'GET',
 		array(),
-		array( 'expand' => array( 'payment_intent.latest_charge' ) )
+		array( 'expand' => array( 'payment_intent.latest_charge' ) ),
+		$mode
 	);
+
+	// A legacy order has neither a recorded mode nor a stored session. Try the other
+	// mode once, so a payment that started before the shop was switched still settles.
+	if ( is_wp_error( $session ) && '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) && '' === $stored ) {
+		$other     = 'test' === $mode ? 'live' : 'test';
+		$alternate = sillage_hosted_api(
+			'checkout/sessions/' . rawurlencode( $session_id ),
+			'GET',
+			array(),
+			array( 'expand' => array( 'payment_intent.latest_charge' ) ),
+			$other
+		);
+		if ( ! is_wp_error( $alternate ) ) {
+			$session = $alternate;
+			$mode    = $other;
+		}
+	}
+
 	if ( is_wp_error( $session ) ) {
 		return $session;
 	}
@@ -556,6 +868,19 @@ function sillage_hosted_complete_route( WP_REST_Request $request ) {
 	if ( $bound !== $order_id ) {
 		sillage_hosted_throttle( $order_id, true );
 		return new WP_Error( 'sillage_hosted_session_mismatch', 'That payment does not belong to this order.', array( 'status' => 403 ) );
+	}
+
+	$session_mode = sillage_hosted_session_mode( $session );
+	$id_mode      = sillage_hosted_session_id_mode( (string) ( $session['id'] ?? $session_id ) );
+	if ( ( '' !== $session_mode && $session_mode !== $mode ) || ( '' !== $id_mode && $id_mode !== $mode ) ) {
+		sillage_hosted_throttle( $order_id, true );
+		return new WP_Error( 'sillage_hosted_mode_mismatch', 'That payment belongs to another mode.', array( 'status' => 403 ) );
+	}
+
+	// The session is proven to belong to this order, so the mode can be recorded.
+	if ( '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) ) {
+		$order->update_meta_data( SILLAGE_HOSTED_MODE_META, $mode );
+		$order->save();
 	}
 
 	$status        = (string) ( $session['status'] ?? '' );
@@ -567,6 +892,9 @@ function sillage_hosted_complete_route( WP_REST_Request $request ) {
 			return $paid;
 		}
 		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return new WP_Error( 'sillage_hosted_no_order', 'Order not found.', array( 'status' => 404 ) );
+		}
 	} else {
 		// Store the session id even while unpaid, so a later webhook can find the order
 		// and a reload of this page does not need the browser's query string.
@@ -792,6 +1120,7 @@ function sillage_hosted_sync_webhook( $force = false, $mode = null ) {
 	if ( is_wp_error( $created ) || empty( $created['id'] ) || empty( $created['secret'] ) ) {
 		$message = is_wp_error( $created ) ? $created->get_error_message() : 'Stripe did not return a webhook secret.';
 		set_transient( 'sillage_hosted_webhook_error_' . $mode, $message, DAY_IN_SECONDS );
+		delete_transient( $lock );
 		return new WP_Error( 'sillage_hosted_webhook_failed', $message, array( 'status' => 502 ) );
 	}
 
@@ -823,42 +1152,53 @@ function sillage_hosted_sync_webhook( $force = false, $mode = null ) {
 	return $entry;
 }
 
-/** Every secret a delivery may be signed with: both managed endpoints, then any override. */
-function sillage_hosted_webhook_secrets() {
+/**
+ * Every secret a delivery in one mode may be signed with.
+ *
+ * A test secret must never verify a live delivery, or a test payment could settle a live
+ * order after the shop is switched. The constant has no mode in its name, so it is only
+ * accepted in the mode the shop is configured for today; the settings overrides are
+ * explicitly per mode, and the managed endpoint is per mode by construction.
+ */
+function sillage_hosted_webhook_secrets( $mode = null ) {
+	$mode    = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_mode();
 	$secrets = array();
 
-	if ( defined( 'SILLAGE_HOSTED_WEBHOOK_SECRET' ) ) {
+	if ( defined( 'SILLAGE_HOSTED_WEBHOOK_SECRET' ) && $mode === sillage_hosted_mode() ) {
 		$secrets[] = (string) SILLAGE_HOSTED_WEBHOOK_SECRET;
 	}
 
 	$settings = get_option( SILLAGE_HOSTED_SETTINGS_OPTION, array() );
 	$settings = is_array( $settings ) ? $settings : array();
 
-	foreach ( array( 'webhook_secret', 'webhook_secret_live' ) as $key ) {
-		if ( ! empty( $settings[ $key ] ) ) {
-			$secrets[] = trim( (string) $settings[ $key ] );
-		}
+	$key = 'test' === $mode ? 'webhook_secret' : 'webhook_secret_live';
+	if ( ! empty( $settings[ $key ] ) ) {
+		$secrets[] = trim( (string) $settings[ $key ] );
 	}
 
-	// Both modes: a payment that started before test mode was switched still settles.
-	foreach ( sillage_hosted_webhook_state() as $entry_mode => $entry ) {
-		if ( ! in_array( $entry_mode, array( 'test', 'live' ), true ) || ! is_array( $entry ) || empty( $entry['secret'] ) ) {
-			continue;
-		}
-		if ( (string) ( $entry['fingerprint'] ?? '' ) !== sillage_hosted_key_fingerprint( $entry_mode ) ) {
-			continue;
-		}
+	$entry = sillage_hosted_stored_webhook( $mode );
+	if ( $entry && ! empty( $entry['secret'] ) ) {
 		$secrets[] = (string) $entry['secret'];
 	}
 
 	return array_values( array_unique( array_filter( $secrets ) ) );
 }
 
-/** Verify a delivery against every known secret for the current mode. */
-function sillage_hosted_verify_any_signature( $payload, $header ) {
-	foreach ( sillage_hosted_webhook_secrets() as $secret ) {
+/**
+ * Verify a delivery against the secrets for its own mode and return that mode.
+ *
+ * `livemode` is read from the unsigned payload only to choose which secret to try; the
+ * HMAC over the raw body still has to match that mode's secret.
+ */
+function sillage_hosted_verify_event_signature( $payload, $header ) {
+	$mode = sillage_hosted_payload_mode( $payload );
+	if ( '' === $mode ) {
+		return false;
+	}
+
+	foreach ( sillage_hosted_webhook_secrets( $mode ) as $secret ) {
 		if ( sillage_hosted_verify_signature( $payload, $header, $secret ) ) {
-			return true;
+			return $mode;
 		}
 	}
 
@@ -1021,8 +1361,9 @@ function sillage_hosted_boot() {
 			}
 
 			// Make sure Stripe has somewhere to report this payment before the shopper
-			// leaves. A failure here is not fatal: the return trip still settles the order.
-			sillage_hosted_sync_webhook();
+			// leaves, in the mode this order belongs to. A failure here is not fatal: the
+			// return trip still settles the order.
+			sillage_hosted_sync_webhook( false, sillage_hosted_order_mode( $order ) );
 
 			$url = sillage_hosted_session_url( $order );
 			if ( is_wp_error( $url ) ) {
@@ -1053,14 +1394,17 @@ function sillage_hosted_boot() {
 			$payload = (string) file_get_contents( 'php://input' );
 			$header  = isset( $_SERVER['HTTP_STRIPE_SIGNATURE'] ) ? (string) $_SERVER['HTTP_STRIPE_SIGNATURE'] : '';
 
-			$verified = sillage_hosted_verify_any_signature( $payload, $header );
+			$verified        = sillage_hosted_verify_event_signature( $payload, $header );
+			$event_mode_hint = sillage_hosted_payload_mode( $payload );
 
 			if ( ! $verified ) {
 				// A first delivery in a new mode, or one after the keys were replaced, can
-				// arrive before the endpoint is known here. Ask Stripe once and check again.
-				// The sync's lock keeps forged requests from turning this into an amplifier.
-				if ( ! is_wp_error( sillage_hosted_sync_webhook() ) ) {
-					$verified = sillage_hosted_verify_any_signature( $payload, $header );
+				// arrive before the endpoint is known here. Ask Stripe once, in the event's
+				// own mode, and check again. The sync's lock keeps forged requests from
+				// turning this into an amplifier.
+				$sync_mode = '' !== $event_mode_hint ? $event_mode_hint : sillage_hosted_mode();
+				if ( ! is_wp_error( sillage_hosted_sync_webhook( false, $sync_mode ) ) ) {
+					$verified = sillage_hosted_verify_event_signature( $payload, $header );
 				}
 			}
 
@@ -1069,6 +1413,8 @@ function sillage_hosted_boot() {
 				echo 'invalid signature';
 				exit;
 			}
+
+			$event_mode = (string) $verified;
 
 			$event = json_decode( $payload, true );
 			if ( ! is_array( $event ) || empty( $event['type'] ) || empty( $event['data']['object'] ) ) {
@@ -1094,12 +1440,55 @@ function sillage_hosted_boot() {
 				$event_session   = (string) ( $session['id'] ?? '' );
 				$is_current      = '' === $current_session || '' === $event_session || $event_session === $current_session;
 
+				$order_mode   = sillage_hosted_order_mode( $order );
+				$session_mode = sillage_hosted_session_mode( $session );
+				$id_mode      = sillage_hosted_session_id_mode( $event_session );
+
+				// A test delivery must never settle a live order, and the session object and
+				// the session id must agree with the event's own livemode.
+				if ( $event_mode !== $order_mode || ( '' !== $session_mode && $session_mode !== $event_mode ) || ( '' !== $id_mode && $id_mode !== $event_mode ) ) {
+					$order->add_order_note(
+						sprintf( 'A Stripe %1$s-mode webhook was ignored for this %2$s-mode order.', $event_mode, $order_mode )
+					);
+					status_header( 200 );
+					echo 'ok';
+					exit;
+				}
+
+				// Backfill the mode for an order that only carries a session id.
+				if ( '' === (string) $order->get_meta( SILLAGE_HOSTED_MODE_META ) ) {
+					$order->update_meta_data( SILLAGE_HOSTED_MODE_META, $order_mode );
+					$order->save();
+				}
+
 				switch ( $type ) {
 					case 'checkout.session.completed':
 					case 'checkout.session.async_payment_succeeded':
 						$state = (string) ( $session['payment_status'] ?? '' );
 						if ( 'paid' === $state || 'no_payment_required' === $state ) {
-							sillage_hosted_mark_paid( $order, $session );
+							$paid = sillage_hosted_mark_paid( $order, $session );
+
+							// Another request (the return leg) is completing this order. Ask
+							// Stripe to deliver the event again rather than acknowledging an
+							// unsettled payment.
+							if ( is_wp_error( $paid ) && 'sillage_hosted_paid_busy' === $paid->get_error_code() ) {
+								status_header( 500 );
+								echo 'busy';
+								exit;
+							}
+
+							// If an older session was paid while a newer one is still open,
+							// expire the newer one so one order cannot take two payments. Do
+							// this only after the order is settled, so a slow expire call
+							// cannot hold up the settlement.
+							if ( ! is_wp_error( $paid ) && '' !== $current_session && '' !== $event_session && $event_session !== $current_session ) {
+								$expired = sillage_hosted_api( 'checkout/sessions/' . rawurlencode( $current_session ) . '/expire', 'POST', array(), array(), $order_mode );
+								$order->add_order_note(
+									is_wp_error( $expired )
+										? 'An earlier Stripe Checkout session was paid, but the later session could not be expired. Check Stripe for a second payment.'
+										: 'An earlier Stripe Checkout session was paid; the later session was expired so it cannot also be paid.'
+								);
+							}
 						}
 						break;
 
@@ -1134,17 +1523,68 @@ function sillage_hosted_boot() {
 				return new WP_Error( 'sillage_hosted_no_intent', 'No Stripe payment is attached to this order.' );
 			}
 
+			$minor = null !== $amount ? sillage_hosted_minor( $amount, $order ) : sillage_hosted_minor( $order->get_total(), $order );
+
 			$data = array( 'payment_intent' => $intent );
 			if ( null !== $amount ) {
-				$data['amount'] = sillage_hosted_minor( $amount, $order );
+				$data['amount'] = $minor;
 			}
 
-			$refund = sillage_hosted_api( 'refunds', 'POST', $data );
-			if ( is_wp_error( $refund ) ) {
-				return $refund;
+			// A timeout can hide a refund Stripe already created. Keep one idempotency key
+			// for the same order, intent and amount for 24 hours (Stripe's own retention),
+			// so a retry returns the original refund instead of taking the money twice. The
+			// lock makes the key creation atomic when the refund button is pressed twice.
+			$seed       = 'sillage_refund_' . $order_id . '_' . substr( hash( 'sha256', $intent . '|' . $minor ), 0, 32 );
+			$key_option = 'sillage_refund_key_' . $seed;
+			// One refund at a time per order, so two partial refunds cannot both pass the
+			// remaining-total check and over-refund the order.
+			$lock   = 'sillage_refund_lock_' . $order_id;
+			$locked = add_option( $lock, time(), '', 'no' );
+
+			if ( ! $locked ) {
+				$since = (int) get_option( $lock, 0 );
+				if ( ! $since || ( time() - $since ) > 2 * MINUTE_IN_SECONDS ) {
+					delete_option( $lock );
+					$locked = add_option( $lock, time(), '', 'no' );
+				}
 			}
 
-			return true;
+			if ( ! $locked ) {
+				return new WP_Error( 'sillage_refund_busy', 'A refund for this order is already being processed.', array( 'status' => 409 ) );
+			}
+
+			try {
+				$stored    = get_option( $key_option, '' );
+				$stored    = is_string( $stored ) ? $stored : '';
+				$parts     = explode( '|', $stored, 2 );
+				$key_since = (int) ( $parts[0] ?? 0 );
+				$key       = (string) ( $parts[1] ?? '' );
+
+				if ( '' === $key || ! $key_since || ( time() - $key_since ) > DAY_IN_SECONDS ) {
+					$key = $seed . '_' . wp_generate_uuid4();
+					update_option( $key_option, time() . '|' . $key, 'no' );
+				}
+
+				$refund = sillage_hosted_api( 'refunds', 'POST', $data, array(), sillage_hosted_order_mode( $order ), $key );
+				if ( is_wp_error( $refund ) ) {
+					$error_data = $refund->get_error_data();
+					$upstream   = is_array( $error_data ) ? (int) ( $error_data['stripe_status'] ?? 0 ) : 0;
+
+					// A 4xx is Stripe refusing the request: no refund exists, so a later
+					// attempt may use a fresh key. A 5xx or a network error may have created
+					// the refund, so keep the key and retry with it.
+					if ( ( $upstream >= 400 && $upstream < 500 ) || 'sillage_hosted_no_key' === $refund->get_error_code() ) {
+						delete_option( $key_option );
+					}
+					return $refund;
+				}
+
+				delete_option( $key_option );
+
+				return true;
+			} finally {
+				delete_option( $lock );
+			}
 		}
 	}
 
