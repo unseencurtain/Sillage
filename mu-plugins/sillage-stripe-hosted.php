@@ -41,6 +41,8 @@ const SILLAGE_HOSTED_REST_NS         = 'sillage/v1';
 const SILLAGE_HOSTED_ATTEMPT_KEY     = 'sillage_hosted_attempts_';
 const SILLAGE_HOSTED_MAX_ATTEMPTS    = 60;
 const SILLAGE_HOSTED_ATTEMPT_WINDOW  = 600;
+const SILLAGE_HOSTED_WEBHOOK_OPTION  = 'sillage_hosted_webhook_endpoints';
+const SILLAGE_HOSTED_WEBHOOK_API_VERSION = '2026-03-25.dahlia';
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -59,9 +61,10 @@ function sillage_hosted_mode() {
 }
 
 /** The secret key for the configured mode. Never leaves the server. */
-function sillage_hosted_secret_key() {
+function sillage_hosted_secret_key( $mode = null ) {
 	$settings = sillage_hosted_stripe_settings();
-	$key      = 'test' === sillage_hosted_mode() ? 'test_secret_key' : 'secret_key';
+	$mode     = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_mode();
+	$key      = 'test' === $mode ? 'test_secret_key' : 'secret_key';
 	return isset( $settings[ $key ] ) ? trim( (string) $settings[ $key ] ) : '';
 }
 
@@ -87,8 +90,8 @@ function sillage_hosted_payment_method_configuration() {
  * Kept independent of the Stripe plugin's classes: this gateway has to keep working when
  * that plugin is updated, deactivated or replaced.
  */
-function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = array() ) {
-	$key = sillage_hosted_secret_key();
+function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = array(), $mode = null ) {
+	$key = sillage_hosted_secret_key( $mode );
 	if ( '' === $key ) {
 		return new WP_Error( 'sillage_hosted_no_key', 'Stripe is not configured.', array( 'status' => 503 ) );
 	}
@@ -106,7 +109,7 @@ function sillage_hosted_api( $path, $method = 'POST', $data = array(), $query = 
 		),
 	);
 
-	if ( 'GET' !== $method ) {
+	if ( 'POST' === $method ) {
 		$args['headers']['Content-Type'] = 'application/x-www-form-urlencoded';
 		$args['body']                    = http_build_query( $data );
 	}
@@ -630,14 +633,262 @@ function sillage_hosted_verify_signature( $payload, $header, $secret ) {
 	return false;
 }
 
-/** The endpoint secret, from the gateway settings or a constant. */
-function sillage_hosted_webhook_secret() {
-	if ( defined( 'SILLAGE_HOSTED_WEBHOOK_SECRET' ) ) {
-		return (string) SILLAGE_HOSTED_WEBHOOK_SECRET;
+/* ------------------------------------------------------------------ *
+ * The Stripe webhook endpoint
+ *
+ * Stripe signs every delivery with a secret that belongs to one endpoint in one mode.
+ * Turning test mode on or off, or replacing the API keys, therefore needs a different
+ * endpoint and a different secret. Doing that by hand every time is the kind of setup a
+ * shop should not inherit, so the gateway creates the endpoint itself with whichever key
+ * is configured, stores the secret per mode, and redoes it when the mode or the key
+ * changes. The two settings fields below are only an override for a restricted key.
+ * ------------------------------------------------------------------ */
+
+/** Where Stripe should report what it charged. */
+function sillage_hosted_webhook_url() {
+	return home_url( '/?wc-api=' . SILLAGE_HOSTED_GATEWAY_ID );
+}
+
+/** The events the gateway acts on: a completed payment, a delayed one, and its failure. */
+function sillage_hosted_webhook_events() {
+	return array(
+		'checkout.session.completed',
+		'checkout.session.async_payment_succeeded',
+		'checkout.session.async_payment_failed',
+		'checkout.session.expired',
+	);
+}
+
+/** A short fingerprint of the API key, so a replaced key is never mistaken for the old one. */
+function sillage_hosted_key_fingerprint( $mode = null ) {
+	$key = sillage_hosted_secret_key( $mode );
+	return '' === $key ? '' : substr( hash( 'sha256', $key ), 0, 16 );
+}
+
+/** The endpoints this shop created, one per mode. */
+function sillage_hosted_webhook_state() {
+	$state = get_option( SILLAGE_HOSTED_WEBHOOK_OPTION, array() );
+	return is_array( $state ) ? $state : array();
+}
+
+function sillage_hosted_webhook_save_state( $state ) {
+	if ( false === get_option( SILLAGE_HOSTED_WEBHOOK_OPTION, false ) ) {
+		add_option( SILLAGE_HOSTED_WEBHOOK_OPTION, $state, '', 'no' );
+		return;
 	}
+	// Never autoload a signing secret.
+	update_option( SILLAGE_HOSTED_WEBHOOK_OPTION, $state, 'no' );
+}
+
+/** The endpoint this shop created for a mode, when it still belongs to the configured key. */
+function sillage_hosted_stored_webhook( $mode = null ) {
+	$mode  = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_mode();
+	$state = sillage_hosted_webhook_state();
+	$entry = isset( $state[ $mode ] ) ? $state[ $mode ] : null;
+
+	if ( ! is_array( $entry ) || empty( $entry['id'] ) || empty( $entry['secret'] ) ) {
+		return null;
+	}
+
+	if ( (string) ( $entry['fingerprint'] ?? '' ) !== sillage_hosted_key_fingerprint( $mode ) ) {
+		return null;
+	}
+
+	return $entry;
+}
+
+/**
+ * Create or repair the endpoint for one mode and remember its secret.
+ *
+ * Reused until the mode or the API key changes. A stored endpoint that still exists only
+ * needs re-enabling, which keeps its secret. An endpoint the shop did not create cannot
+ * surrender its secret through the API, so it is replaced by one whose secret we hold.
+ */
+function sillage_hosted_sync_webhook( $force = false, $mode = null ) {
+	$mode   = 'test' === $mode || 'live' === $mode ? $mode : sillage_hosted_mode();
+	$stored = sillage_hosted_stored_webhook( $mode );
+
+	if ( $stored && ! $force && ( time() - (int) ( $stored['checked'] ?? 0 ) ) < 15 * MINUTE_IN_SECONDS ) {
+		return $stored;
+	}
+
+	if ( '' === sillage_hosted_secret_key( $mode ) ) {
+		return new WP_Error( 'sillage_hosted_no_key', 'No Stripe key is configured for ' . $mode . ' mode.', array( 'status' => 503 ) );
+	}
+
+	$lock = 'sillage_hosted_webhook_lock_' . $mode;
+	if ( ! $force && get_transient( $lock ) ) {
+		return new WP_Error( 'sillage_hosted_webhook_busy', 'The Stripe webhook is already being checked.', array( 'status' => 503 ) );
+	}
+	set_transient( $lock, 1, 5 * MINUTE_IN_SECONDS );
+
+	$url    = sillage_hosted_webhook_url();
+	$state  = sillage_hosted_webhook_state();
+	$retire = array();
+
+	if ( $stored ) {
+		$existing = sillage_hosted_api( 'webhook_endpoints/' . rawurlencode( (string) $stored['id'] ), 'GET', array(), array(), $mode );
+
+		if ( ! is_wp_error( $existing ) && (string) ( $existing['url'] ?? '' ) === $url ) {
+			$enabled = 'enabled' === (string) ( $existing['status'] ?? '' );
+
+			if ( ! $enabled ) {
+				$enabled = ! is_wp_error(
+					sillage_hosted_api(
+						'webhook_endpoints/' . rawurlencode( (string) $stored['id'] ),
+						'POST',
+						array(
+							'disabled'       => 'false',
+							'enabled_events' => array_values( sillage_hosted_webhook_events() ),
+						),
+						array(),
+						$mode
+					)
+				);
+			}
+
+			if ( $enabled ) {
+				$stored['checked'] = time();
+				$stored['error']   = '';
+				$state[ $mode ]    = $stored;
+				sillage_hosted_webhook_save_state( $state );
+				delete_transient( $lock );
+				delete_transient( 'sillage_hosted_webhook_error_' . $mode );
+				return $stored;
+			}
+		}
+
+		$retire[] = (string) $stored['id'];
+	}
+
+	// Same address, no secret we can read: replace it rather than leave a gap.
+	$list = sillage_hosted_api( 'webhook_endpoints', 'GET', array(), array( 'limit' => 100 ), $mode );
+	if ( ! is_wp_error( $list ) ) {
+		foreach ( (array) ( $list['data'] ?? array() ) as $endpoint ) {
+			$id = (string) ( $endpoint['id'] ?? '' );
+			if ( '' === $id || (string) ( $endpoint['url'] ?? '' ) !== $url ) {
+				continue;
+			}
+			$retire[] = $id;
+		}
+	}
+
+	$data = array(
+		'url'            => $url,
+		'enabled_events' => array_values( sillage_hosted_webhook_events() ),
+		'description'    => 'Sillage storefront (created automatically by the shop)',
+		'metadata'       => array( 'managed_by' => 'sillage_stripe_hosted' ),
+		'api_version'    => SILLAGE_HOSTED_WEBHOOK_API_VERSION,
+	);
+
+	$created = sillage_hosted_api( 'webhook_endpoints', 'POST', $data, array(), $mode );
+
+	// An account that pins a different API version still gets its endpoint.
+	if ( is_wp_error( $created ) && false !== stripos( $created->get_error_message(), 'api_version' ) ) {
+		unset( $data['api_version'] );
+		$created = sillage_hosted_api( 'webhook_endpoints', 'POST', $data, array(), $mode );
+	}
+
+	if ( is_wp_error( $created ) || empty( $created['id'] ) || empty( $created['secret'] ) ) {
+		$message = is_wp_error( $created ) ? $created->get_error_message() : 'Stripe did not return a webhook secret.';
+		set_transient( 'sillage_hosted_webhook_error_' . $mode, $message, DAY_IN_SECONDS );
+		return new WP_Error( 'sillage_hosted_webhook_failed', $message, array( 'status' => 502 ) );
+	}
+
+	$entry = array(
+		'id'          => (string) $created['id'],
+		'secret'      => (string) $created['secret'],
+		'url'         => $url,
+		'mode'        => $mode,
+		'fingerprint' => sillage_hosted_key_fingerprint( $mode ),
+		'checked'     => time(),
+		'error'       => '',
+	);
+
+	$state[ $mode ] = $entry;
+	sillage_hosted_webhook_save_state( $state );
+
+	foreach ( array_unique( array_filter( $retire ) ) as $id ) {
+		if ( $id === $entry['id'] ) {
+			continue;
+		}
+		// Best effort: the new endpoint already receives the events. A failed delete only
+		// leaves a duplicate, and Stripe disables an endpoint whose deliveries keep failing.
+		sillage_hosted_api( 'webhook_endpoints/' . rawurlencode( $id ), 'DELETE', array(), array(), $mode );
+	}
+
+	delete_transient( $lock );
+	delete_transient( 'sillage_hosted_webhook_error_' . $mode );
+
+	return $entry;
+}
+
+/** Every secret a delivery may be signed with: both managed endpoints, then any override. */
+function sillage_hosted_webhook_secrets() {
+	$secrets = array();
+
+	if ( defined( 'SILLAGE_HOSTED_WEBHOOK_SECRET' ) ) {
+		$secrets[] = (string) SILLAGE_HOSTED_WEBHOOK_SECRET;
+	}
+
 	$settings = get_option( SILLAGE_HOSTED_SETTINGS_OPTION, array() );
 	$settings = is_array( $settings ) ? $settings : array();
-	return isset( $settings['webhook_secret'] ) ? trim( (string) $settings['webhook_secret'] ) : '';
+
+	foreach ( array( 'webhook_secret', 'webhook_secret_live' ) as $key ) {
+		if ( ! empty( $settings[ $key ] ) ) {
+			$secrets[] = trim( (string) $settings[ $key ] );
+		}
+	}
+
+	// Both modes: a payment that started before test mode was switched still settles.
+	foreach ( sillage_hosted_webhook_state() as $entry_mode => $entry ) {
+		if ( ! in_array( $entry_mode, array( 'test', 'live' ), true ) || ! is_array( $entry ) || empty( $entry['secret'] ) ) {
+			continue;
+		}
+		if ( (string) ( $entry['fingerprint'] ?? '' ) !== sillage_hosted_key_fingerprint( $entry_mode ) ) {
+			continue;
+		}
+		$secrets[] = (string) $entry['secret'];
+	}
+
+	return array_values( array_unique( array_filter( $secrets ) ) );
+}
+
+/** Verify a delivery against every known secret for the current mode. */
+function sillage_hosted_verify_any_signature( $payload, $header ) {
+	foreach ( sillage_hosted_webhook_secrets() as $secret ) {
+		if ( sillage_hosted_verify_signature( $payload, $header, $secret ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/** What the gateway's settings screen says about the endpoint. Never makes an API call. */
+function sillage_hosted_webhook_status_text() {
+	$mode  = sillage_hosted_mode();
+	$label = 'test' === $mode ? 'test mode' : 'live mode';
+	$entry = sillage_hosted_stored_webhook( $mode );
+
+	if ( $entry ) {
+		return sprintf(
+			'Connected in %1$s: %2$s (endpoint %3$s). Checked again whenever this page is saved.',
+			$label,
+			sillage_hosted_webhook_url(),
+			(string) $entry['id']
+		);
+	}
+
+	$error = get_transient( 'sillage_hosted_webhook_error_' . $mode );
+	if ( $error ) {
+		return sprintf( 'Not connected in %1$s. Stripe said: %2$s', $label, (string) $error );
+	}
+
+	return sprintf(
+		'Not created yet in %1$s. It is created automatically with the configured key on the next checkout, or when this page is saved.',
+		$label
+	);
 }
 
 /* ------------------------------------------------------------------ *
@@ -718,13 +969,39 @@ function sillage_hosted_boot() {
 					'type'    => 'textarea',
 					'default' => '',
 				),
+				'webhook_status' => array(
+					'title'       => 'Stripe webhook',
+					'type'        => 'title',
+					'description' => is_admin() ? sillage_hosted_webhook_status_text() : '',
+				),
 				'webhook_secret' => array(
-					'title'       => 'Webhook secret',
+					'title'       => 'Webhook secret override',
 					'type'        => 'password',
-					'description' => 'Signing secret of the Stripe webhook endpoint that points at /?wc-api=sillage_checkout.',
+					'description' => 'Only needed when the Stripe key cannot create webhooks. The endpoint at /?wc-api=sillage_checkout is created and kept automatically for the configured mode, so this can stay empty.',
+					'default'     => '',
+				),
+				'webhook_secret_live' => array(
+					'title'       => 'Live webhook secret override',
+					'type'        => 'password',
+					'description' => 'Only needed when the live Stripe key cannot create webhooks. Otherwise the live endpoint is created and kept automatically when test mode is off.',
 					'default'     => '',
 				),
 			);
+		}
+
+		/** Save, then make sure Stripe is pointing at this shop for the configured mode. */
+		public function process_admin_options() {
+			$saved = parent::process_admin_options();
+
+			if ( $saved ) {
+				$synced = sillage_hosted_sync_webhook( true );
+
+				if ( is_wp_error( $synced ) && class_exists( 'WC_Admin_Settings' ) ) {
+					WC_Admin_Settings::add_error( 'Stripe webhook: ' . $synced->get_error_message() );
+				}
+			}
+
+			return $saved;
 		}
 
 		public function is_available() {
@@ -742,6 +1019,10 @@ function sillage_hosted_boot() {
 					'message' => 'Order not found.',
 				);
 			}
+
+			// Make sure Stripe has somewhere to report this payment before the shopper
+			// leaves. A failure here is not fatal: the return trip still settles the order.
+			sillage_hosted_sync_webhook();
 
 			$url = sillage_hosted_session_url( $order );
 			if ( is_wp_error( $url ) ) {
@@ -771,9 +1052,19 @@ function sillage_hosted_boot() {
 		public function webhook() {
 			$payload = (string) file_get_contents( 'php://input' );
 			$header  = isset( $_SERVER['HTTP_STRIPE_SIGNATURE'] ) ? (string) $_SERVER['HTTP_STRIPE_SIGNATURE'] : '';
-			$secret  = sillage_hosted_webhook_secret();
 
-			if ( ! sillage_hosted_verify_signature( $payload, $header, $secret ) ) {
+			$verified = sillage_hosted_verify_any_signature( $payload, $header );
+
+			if ( ! $verified ) {
+				// A first delivery in a new mode, or one after the keys were replaced, can
+				// arrive before the endpoint is known here. Ask Stripe once and check again.
+				// The sync's lock keeps forged requests from turning this into an amplifier.
+				if ( ! is_wp_error( sillage_hosted_sync_webhook() ) ) {
+					$verified = sillage_hosted_verify_any_signature( $payload, $header );
+				}
+			}
+
+			if ( ! $verified ) {
 				status_header( 400 );
 				echo 'invalid signature';
 				exit;
