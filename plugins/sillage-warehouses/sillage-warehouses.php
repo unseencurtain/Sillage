@@ -480,6 +480,294 @@ function sillage_wh_catalog_counts_endpoint( WP_REST_Request $request ) {
 }
 
 /* ------------------------------------------------------------------
+ * Store API: sellable stock (physical stock minus pending-order holds)
+ * ----------------------------------------------------------------*/
+/**
+ * Units a shopper can buy right now.
+ *
+ * WooCommerce keeps a pending order's stock in `wp_wc_reserved_stock`, but the Store API's
+ * `is_in_stock` and `stock_availability` only read the physical quantity. A product with one unit
+ * and one pending order therefore answers "1 in stock" and then refuses the add with "0 remaining".
+ * The storefront asks for this figure instead, and applies it to product cards, the product page,
+ * cart and checkout through one rule.
+ *
+ * Returns null when there is no finite cap (stock is not managed, or backorders are allowed), which
+ * the storefront treats as available. The current shopper's draft order is excluded, exactly as
+ * WooCommerce's own QuantityLimits excludes it, so a line already in their bag never makes the
+ * product look sold out to them.
+ */
+function sillage_wh_available_stock( WC_Product $product, int $exclude_order_id = 0 ): ?int {
+	if ( ! $product->managing_stock() || $product->backorders_allowed() ) {
+		return null;
+	}
+
+	// The engine's stock threshold marks a product out of stock even when physical units remain,
+	// so it must report nothing sellable. Otherwise the bag would still accept a product the
+	// catalogue has already hidden.
+	if ( ! $product->is_in_stock() ) {
+		return 0;
+	}
+
+	$managed_id = (int) $product->get_stock_managed_by_id();
+	$source     = $managed_id && $managed_id !== $product->get_id() ? wc_get_product( $managed_id ) : $product;
+	if ( ! $source instanceof WC_Product ) {
+		return null;
+	}
+
+	$stock = $source->get_stock_quantity();
+	if ( null === $stock ) {
+		return null;
+	}
+
+	$held = 0;
+	if ( function_exists( 'wc_get_held_stock_quantity' ) ) {
+		static $held_cache = array();
+		$cache_key = $managed_id . ':' . $exclude_order_id;
+		if ( ! array_key_exists( $cache_key, $held_cache ) ) {
+			$held_cache[ $cache_key ] = (int) wc_get_held_stock_quantity( $product, $exclude_order_id );
+		}
+		$held = $held_cache[ $cache_key ];
+	}
+
+	return max( 0, (int) $stock - $held );
+}
+
+/** Sellable units for a simple product or variation, or the sum of a variable product's children. */
+function sillage_wh_product_available_stock( WC_Product $product, int $exclude_order_id = 0 ): ?int {
+	if ( $product->is_type( 'variable' ) ) {
+		$children = $product->get_children();
+		if ( ! $children ) {
+			return 0;
+		}
+
+		$total = 0;
+		foreach ( $children as $child_id ) {
+			$child = wc_get_product( $child_id );
+			if ( ! $child instanceof WC_Product || ! $child->is_purchasable() || ! $child->is_in_stock() ) {
+				continue;
+			}
+			$available = sillage_wh_available_stock( $child, $exclude_order_id );
+			if ( null === $available ) {
+				return null;
+			}
+			$total += $available;
+		}
+		return $total;
+	}
+
+	if ( ! $product->is_in_stock() ) {
+		return 0;
+	}
+
+	return sillage_wh_available_stock( $product, $exclude_order_id );
+}
+
+/** The Store API draft order for this shopper, whose own hold must not hide a product from them. */
+function sillage_wh_draft_order_id(): int {
+	if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+		return 0;
+	}
+	return (int) WC()->session->get( 'store_api_draft_order', 0 );
+}
+
+/** Register the sellable figure beside WooCommerce's physical stock fields. */
+add_action(
+	'woocommerce_loaded',
+	static function (): void {
+		if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
+			return;
+		}
+
+		$availability_schema = static function (): array {
+			return array(
+				'available_stock' => array(
+					'description' => 'Units a shopper can buy now, after pending-order reservations. Null means no finite cap.',
+					'type'        => array( 'integer', 'null' ),
+					'context'     => array( 'view', 'edit' ),
+					'readonly'    => true,
+				),
+			);
+		};
+
+		woocommerce_store_api_register_endpoint_data(
+			array(
+				'endpoint'        => 'product',
+				'namespace'       => 'sillage',
+				'data_callback'   => static function ( $product ): array {
+					if ( ! $product instanceof WC_Product ) {
+						return array();
+					}
+					return array(
+						'available_stock' => sillage_wh_product_available_stock( $product, sillage_wh_draft_order_id() ),
+					);
+				},
+				'schema_callback' => $availability_schema,
+			)
+		);
+
+		// The bag line needs the same figure: WooCommerce's own quantity limit is physical
+		// stock, so it still allows a line that another pending order has already reserved.
+		woocommerce_store_api_register_endpoint_data(
+			array(
+				'endpoint'        => 'cart-item',
+				'namespace'       => 'sillage',
+				'data_callback'   => static function ( $cart_item ): array {
+					$product = $cart_item['data'] ?? null;
+					if ( ! $product instanceof WC_Product ) {
+						return array();
+					}
+					return array(
+						'available_stock' => sillage_wh_product_available_stock( $product, sillage_wh_draft_order_id() ),
+					);
+				},
+				'schema_callback' => $availability_schema,
+			)
+		);
+	}
+);
+
+/**
+ * Product IDs whose sellable stock is zero, so in-stock catalogue reads can leave them out.
+ *
+ * The reservation table is small (only orders awaiting payment), so checking the reserved IDs
+ * instead of every product keeps a cold catalogue query cheap. A variation is judged through its
+ * parent: the parent stays visible while at least one combination can still be bought.
+ */
+function sillage_wh_unavailable_product_ids(): array {
+	global $wpdb;
+
+	$table = $wpdb->prefix . 'wc_reserved_stock';
+	if ( $table !== $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) ) {
+		return array();
+	}
+
+	$exclude = sillage_wh_draft_order_id();
+	$sql     = "SELECT DISTINCT product_id FROM {$table} WHERE expires > NOW()";
+	if ( $exclude ) {
+		$sql .= $wpdb->prepare( ' AND order_id != %d', $exclude );
+	}
+
+	$reserved = array_map( 'intval', (array) $wpdb->get_col( $sql ) );
+	if ( ! $reserved ) {
+		return array();
+	}
+
+	$unavailable = array();
+	$checked     = array();
+	foreach ( $reserved as $id ) {
+		$product = wc_get_product( $id );
+		if ( ! $product instanceof WC_Product ) {
+			continue;
+		}
+
+		$parent_id = (int) $product->get_parent_id();
+		if ( $parent_id ) {
+			if ( isset( $checked[ $parent_id ] ) ) {
+				continue;
+			}
+			$checked[ $parent_id ] = true;
+			$parent                = wc_get_product( $parent_id );
+			if ( $parent instanceof WC_Product && 0 === sillage_wh_product_available_stock( $parent, $exclude ) ) {
+				$unavailable[] = $parent_id;
+			}
+			continue;
+		}
+
+		if ( 0 === sillage_wh_product_available_stock( $product, $exclude ) ) {
+			$unavailable[] = $product->get_id();
+		}
+	}
+
+	return array_values( array_unique( $unavailable ) );
+}
+
+/**
+ * A reservation is created and released outside a product save, so the catalogue response cache
+ * must be bumped on those events too. Otherwise a reserved product would stay in the grid for up
+ * to the cache's one-hour life.
+ */
+add_action(
+	'woocommerce_checkout_order_created',
+	static function (): void {
+		sillage_wh_bump_cache_version();
+	},
+	20
+);
+add_action(
+	'woocommerce_checkout_order_exception',
+	static function (): void {
+		sillage_wh_bump_cache_version();
+	},
+	20
+);
+add_action(
+	'woocommerce_payment_complete',
+	static function (): void {
+		sillage_wh_bump_cache_version();
+	},
+	20
+);
+add_action(
+	'woocommerce_order_status_changed',
+	static function (): void {
+		sillage_wh_bump_cache_version();
+	},
+	20
+);
+
+/**
+ * Remove products with no sellable units from an explicit in-stock catalogue read.
+ *
+ * `stock_status=` (empty) is how the app resolves a slug or a cart line, and must keep finding a
+ * product that is no longer sellable so its page can say so. An absent parameter is the Store
+ * API's default catalogue read and is filtered like `stock_status=instock`.
+ */
+add_action(
+	'pre_get_posts',
+	static function ( WP_Query $query ): void {
+		$request = $GLOBALS['sillage_wh_collection_request'] ?? null;
+		if ( ! ( $request instanceof WP_REST_Request ) || ! in_array( 'product', (array) $query->get( 'post_type' ), true ) ) {
+			return;
+		}
+		// Direct lookups must keep finding a product that is no longer sellable, so their page can
+		// say so and the bag can still link to it. `include` has a default of [], so test its value,
+		// not whether the parameter exists: set_default_params() gives it to every request.
+		$slug = $request->get_param( 'slug' );
+		if ( is_string( $slug ) && '' !== trim( $slug ) ) {
+			return;
+		}
+		$include = $request->get_param( 'include' );
+		if ( is_array( $include ) ? (bool) array_filter( array_map( 'absint', $include ) ) : '' !== trim( (string) $include ) ) {
+			return;
+		}
+		$statuses = array_values( array_unique( array_map( 'strval', (array) $request->get_param( 'stock_status' ) ) ) );
+		if ( $statuses && array( 'instock' ) !== $statuses ) {
+			return;
+		}
+
+		$unavailable = sillage_wh_unavailable_product_ids();
+		if ( ! $unavailable ) {
+			return;
+		}
+
+		// WordPress ignores post__not_in when post__in is present (core uses an elseif), so a query
+		// pinned to a related-product set must have the sold-out ids removed from that set instead.
+		$post_in = array_values( array_map( 'intval', (array) $query->get( 'post__in' ) ) );
+		if ( $post_in ) {
+			$remaining = array_values( array_diff( $post_in, $unavailable ) );
+			$query->set( 'post__in', $remaining ? $remaining : array( 0 ) );
+			return;
+		}
+
+		$query->set(
+			'post__not_in',
+			array_values( array_unique( array_merge( (array) $query->get( 'post__not_in' ), $unavailable ) ) )
+		);
+	},
+	10000
+);
+
+/* ------------------------------------------------------------------
  * Store API: country scope on product collections
  * ----------------------------------------------------------------*/
 add_filter(
