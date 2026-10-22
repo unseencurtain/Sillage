@@ -25,7 +25,8 @@ A **multi-vendor dropshipping sync system** for a WooCommerce beauty/perfume ret
   a React dashboard.
 - **WordPress** is a *thin bridge* only. The live plugin is **`sillage-bridge`** (source in
   `production-environment/ecom_sites/data/wp/wp-content/plugins/sillage-bridge/`), plus the
-  standalone **`sillage-warehouses`** plugin. **PHP must never grow product-write paths.**
+  standalone **`sillage-warehouses`** plugin and the storefront MU plugins under `mu-plugins/`.
+  **PHP must never grow product-write paths.**
 - **Storefront** is a **separate repo** (`unseencurtain/storefront`, checked out here at
   `../react_store/frontend`). It is NOT part of this repo.
 - **Data model:** one MariaDB (12.3.2) with two DBs — `earth` (WP/Woo, prefix `wp_`) and `sillage`
@@ -46,6 +47,7 @@ Safety defaults on a fresh box: `orders_dry_run=1`, `orders_auto_dispatch=0`, `s
 | `docs/` | Engineer + client docs (see §7). |
 | `ops/test/` | Empty-VPS Docker test harness (`Dockerfile`, `seed/seed.php`, `setup.sh`, `up.sh`). |
 | `plugins/` | Standalone WP plugin sources (see §3). |
+| `mu-plugins/` | Storefront MU plugins installed by the storefront deploy tool: `cereve-storefront-auth.php` and `sillage-stripe-hosted.php`. See `mu-plugins/README.md`. |
 | `product/` | Raw vendor sample dumps (`beautyfort_products.json`, `bts_*.json`). Fixtures/reference. |
 | `product-dropshipping/` | Original standalone vendor clients. **Reference only — do not edit.** |
 | `production-environment/` | The actual stack (compose, scripts, python pipelines, WP/nginx config, `sillage-core`). |
@@ -85,7 +87,8 @@ Safety defaults on a fresh box: `orders_dry_run=1`, `orders_auto_dispatch=0`, `s
 
 - `compose.yaml` + `.env.example` — the single canonical stack config. Real `.env` is gitignored.
 - `ecom_sites/` — host data mounts + WP/nginx/Caddy config. WP runtime data under `data/` is
-  gitignored **except** the `sillage-bridge` plugin and one mu-plugin (see §8).
+  gitignored **except** the `sillage-bridge` plugin and the two storefront MU plugins tracked
+  under `mu-plugins/` (see §8).
 - `sillage-core/` — the Bun engine (§5).
 - `wordpress-image/` — Docker image for WordPress.
 - `python-analysis/` — three data pipelines (§6).
@@ -186,8 +189,8 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 - `.deploy/**` (dashboard passwords, VPS creds, private keys, snapshots).
 - `*.pem`, `*.log`, `/data/`, `.recovery/`, `.feedscratch/`.
 - Raw WP/MariaDB runtime data under `ecom_sites/data/**` — **except** the deliberate re-include:
-  the `sillage-bridge` plugin. The storefront auth MU plugin is tracked under `mu-plugins/`, not
-  under the runtime tree.
+  the `sillage-bridge` plugin. The storefront MU plugins (`cereve-storefront-auth.php`,
+  `sillage-stripe-hosted.php`) are tracked under `mu-plugins/`, not under the runtime tree.
 - Runtime image bytes (`/photo-pack/`, `tmp-image-inventory/`, `tools/images/brasty/{output,watermarked,*.jpg,...}`).
 
 ### ⚠️ Grey — decide, do not assume
