@@ -1155,4 +1155,40 @@ function sillage_hosted_boot() {
 			return $gateways;
 		}
 	);
+
+	/**
+	 * The official Stripe plugin is the key store, not a second checkout.
+	 *
+	 * Its gateway is left registered and enabled in its own settings screen, so the
+	 * keys and the method list stay editable, but a shopper is never offered two Stripe
+	 * choices that lead to the same place.
+	 */
+	add_filter(
+		'woocommerce_available_payment_gateways',
+		static function ( $gateways ) {
+			foreach ( array_keys( $gateways ) as $gateway_id ) {
+				if ( SILLAGE_HOSTED_GATEWAY_ID !== $gateway_id && 0 === strpos( (string) $gateway_id, 'stripe' ) ) {
+					unset( $gateways[ $gateway_id ] );
+				}
+			}
+			return $gateways;
+		},
+		99
+	);
+
+	/**
+	 * Keep the official plugin pointed at a configuration this shop owns.
+	 *
+	 * Its default is the account's default configuration, which on this account is a
+	 * child of another Stripe application and cannot be written with a secret key. The
+	 * two ids below belong to this shop and are the same pair the hosted gateway uses.
+	 */
+	add_filter(
+		'wc_stripe_preselect_payment_method_configuration',
+		static function ( $configuration_id, $is_test_mode = false ) {
+			return $is_test_mode ? 'pmc_1UT29jGRoCUt5YKCvkWc49eS' : 'pmc_1UT2DZGRoCUt5YKCWHeOtWUH';
+		},
+		10,
+		2
+	);
 }
