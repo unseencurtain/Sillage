@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Replay this checkout onto GitHub `unseencurtain/Sillage` main.
 #
-# Cursor origin and GitHub have **parallel SHAs**. Do not `git merge` or add GitHub
-# as a remote on the Cursor clone. Copy files onto a fresh GitHub `main` checkout.
+# The working checkout and GitHub have **parallel SHAs**. Do not `git merge` or
+# add GitHub as a remote on it. Copy files onto a fresh GitHub `main` checkout.
 #
 #   GITHUB_TOKEN=ghp_... ./production-environment/scripts/replay-to-github.sh
 #   # or SSH: ssh -T git@github.com  then run without a token
@@ -74,12 +74,12 @@ replay_sillage() {
   fi
 
   git -C "$WORKDIR" \
-    -c user.name="${GIT_AUTHOR_NAME:-Cursor Agent}" \
-    -c user.email="${GIT_AUTHOR_EMAIL:-cursoragent@cursor.com}" \
+    -c user.name="${GIT_AUTHOR_NAME:-unseencurtain}" \
+    -c user.email="${GIT_AUTHOR_EMAIL:-290377140+unseencurtain@users.noreply.github.com}" \
     commit -m "$(cat <<EOF
 Replay this checkout onto GitHub unseencurtain/Sillage main
 
-Cursor origin SHA ${src_sha} (${src_subject}). GitHub was still on ${github_sha}.
+Prior origin SHA ${src_sha} (${src_subject}). GitHub was still on ${github_sha}.
 Histories are parallel — files copied, remotes not merged.
 
 Retail only (BeautyFort + BTS). Wholesale is unseencurtain/sillage-b2b.
