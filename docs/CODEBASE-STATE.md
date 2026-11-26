@@ -205,7 +205,7 @@ from env, PUTs the 3 allow-listed keys, prints only `source=overlay`. **No hardc
 
 ## 10. Working-tree state at time of writing (2026-10-14)
 
-`git status` on branch `main` (tracking `origin/main`, HEAD `c64f2f7`):
+`git status` on branch `main` (tracking `origin/main`, HEAD `170dd2c`):
 **~61 modified tracked files, 3 deleted, 17 untracked. Nothing staged.** This is a large, coherent
 uncommitted change set (catalogue/dashboard identity work + docs reorganisation + new ops scripts).
 

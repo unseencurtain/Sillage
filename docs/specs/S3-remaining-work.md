@@ -25,7 +25,7 @@ vendor row, connector, or SKU prefix for an image source. The full table is in `
 "Vendors versus image sources"; read it before touching vendor code.
 
 "Ocean" means oceanfragrances, the image CSV, and nothing else. An earlier agent named the
-wholesaler `ocean`; that was wrong and was corrected in `568eb38`. Surviving `ocean` strings in the
+wholesaler `ocean`; that was wrong and was corrected in `1032931`. Surviving `ocean` strings in the
 tree are deliberate image-source references — leave them.
 
 **VPS names and aliases are not project constants.** Supply the SSH alias, shop hostname, image
@@ -42,20 +42,20 @@ advance — use `git log origin/cursor/client-features-stage3 --oneline`):
 
 | Commit | What landed |
 |---|---|
-| `45a59bb` | Cost-band markup tiers, LPS01/LPS02 storefront labels, hide-products-without-image |
-| `90dc296` | `tools/images/brasty/` scraper scaffold behind an investigation gate |
-| `3372207` | Small-order cart fee in the PHP bridge |
-| `bcfc783` | wholesale-perfumes.eu as a third supplier, seeded inactive |
-| `725667f` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
-| `ca23d88` | This handoff spec (`docs/specs/S3-remaining-work.md`) |
-| `465c980` | Headless Brasty login (`BRASTY_EMAIL` / `BRASTY_PASSWORD` → `storageState.json`) |
-| `568eb38` | Renamed the wholesaler `ocean` → `wholesale-perfumes`, SKU prefix `OC` → `WPF` |
+| `2fae598` | Cost-band markup tiers, LPS01/LPS02 storefront labels, hide-products-without-image |
+| `9d2bd5c` | `tools/images/brasty/` scraper scaffold behind an investigation gate |
+| `a170194` | Small-order cart fee in the PHP bridge |
+| `3dfbbd5` | wholesale-perfumes.eu as a third supplier, seeded inactive |
+| `fecff71` | Per-vendor dashboard editor, fee label setting, live caps moved onto the vendor row |
+| `0c0d290` | This handoff spec (`docs/specs/S3-remaining-work.md`) |
+| `94bf3f5` | Headless Brasty login (`BRASTY_EMAIL` / `BRASTY_PASSWORD` → `storageState.json`) |
+| `1032931` | Renamed the wholesaler `ocean` → `wholesale-perfumes`, SKU prefix `OC` → `WPF` |
 
 The branch history is **linear**: it sits on top of `cursor/ocean-image-overrides`, which sits on top
 of `cursor/bf-image-pipeline-theme`, which sits on `main`. Merging `cursor/client-features-stage3`
 into `main` therefore brings all three branches at once. Do not merge the older two separately.
 
-Green as of `465c980`: `bun test` 65 passing, `bun run typecheck` clean, `php -l` clean.
+Green as of `94bf3f5`: `bun test` 65 passing, `bun run typecheck` clean, `php -l` clean.
 
 ### Deliberately inert
 

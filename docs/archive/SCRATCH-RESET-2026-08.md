@@ -10,7 +10,7 @@ Baseline taken before wiping the ovhe shop catalogue and splitting B2B into its 
 | Item | Value |
 |---|---|
 | Annotated tag | `pre-scratch-20260808` |
-| Commit | `31d63de1fedab42f41a04af23438bb6165379d36` |
+| Commit | `3189297ca532522619acad6dfacce779cd900c85` |
 | Remote | `git@github.com:unseencurtain/Sillage.git` |
 
 ```bash

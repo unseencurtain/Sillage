@@ -1,6 +1,6 @@
 # Retired: custom Stripe gateway
 
-Archived 2026-10-22. Removed from the active tree by `8e9d0b3`
+Archived 2026-10-22. Removed from the active tree by `06433f3`
 ("stripe: move the shop to hosted Checkout").
 
 Contents:
